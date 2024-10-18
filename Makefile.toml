@@ -1,0 +1,88 @@
+[config]
+default_to_workspace = false
+
+[env]
+RUSTC_BOOTSTRAP = 1
+BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings=html"
+UEFI_CRATES = "-p paging"
+BUILD_CRATES = "-p paging"
+COV_FLAGS = { value = "--out html --exclude-files **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
+
+[env.development]
+RUSTC_PROFILE = "dev"
+RUSTC_TARGET = "debug"
+
+[env.release]
+RUSTC_PROFILE = "release"
+RUSTC_TARGET = "release"
+
+[tasks.build]
+description = """Builds a single rust package with the standard library.
+
+Customizations:
+    -p [development|release]: Builds in debug or release. Default: development
+
+Example:
+    `cargo make build`
+    `cargo make -p release build`
+"""
+alias = "build-std"
+
+[tasks.build-std]
+description = """Builds paging crate as std target.
+
+Customizations:
+    -p [development|release]: Builds in debug or release. Default: development
+
+Example:
+    `cargo make build-std`
+"""
+clear = true
+command = "cargo"
+args = ["build", "--profile", "${RUSTC_PROFILE}", "--features", "std", "--target", "${CARGO_MAKE_RUST_TARGET_TRIPLE}", "@@split(BUILD_CRATES, )", "@@split(UEFI_CRATES, )"]
+
+[tasks.build-x64]
+description = """Builds paging crate as UEFI target.
+
+Example:
+    `cargo make build-x64`
+    `cargo make -p release build-x64`
+"""
+clear = true
+command = "cargo"
+args = ["build", "--target", "x86_64-unknown-uefi", "@@split(BUILD_FLAGS, )", "@@split(UEFI_CRATES, )"]
+
+[tasks.build-aarch64]
+description = """Builds paging crate as UEFI target.
+
+Example:
+    `cargo make build-aarch64`
+    `cargo make -p release build-aarch64`
+"""
+clear = true
+command = "cargo"
+args = ["build", "--target", "aarch64-unknown-uefi", "@@split(BUILD_FLAGS, )", "@@split(UEFI_CRATES, )"]
+
+[tasks.check_json]
+description = "Checks rust code for errors with results in JSON. Example `cargo make check_json`"
+clear = true
+command = "cargo"
+args = ["check", "--message-format=json"]
+
+[tasks.test]
+description = "Builds all rust tests in the workspace. Example `cargo make test`"
+clear = true
+command = "cargo"
+args = ["test", "--features", "no-reg-rw"]
+
+[tasks.coverage]
+description = "Build and run all tests and calculate coverage."
+clear = true
+command = "cargo"
+args = ["tarpaulin", "@@split(COV_FLAGS, )", "--output-dir", "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target", "--features", "no-reg-rw"]
+
+[tasks.clippy]
+description = "Run cargo clippy."
+clear = true
+command = "cargo"
+args = ["clippy", "--all-targets", "--", "-D", "warnings"]
