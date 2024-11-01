@@ -32,6 +32,12 @@ pub const EFI_MEMORY_RP: u64 = 0x00000000_00002000u64;
 pub const EFI_MEMORY_XP: u64 = 0x00000000_00004000u64;
 pub const EFI_MEMORY_RO: u64 = 0x00000000_00020000u64;
 
+pub const EFI_MEMORY_SP: u64 = 0x00000000_00040000u64;
+pub const EFI_MEMORY_CPU_CRYPTO: u64 = 0x00000000_00080000u64;
+pub const EFI_CACHE_ATTRIBUTE_MASK: u64 =
+    EFI_MEMORY_UC | EFI_MEMORY_WC | EFI_MEMORY_WT | EFI_MEMORY_WB | EFI_MEMORY_UCE | EFI_MEMORY_WP;
+pub const EFI_MEMORY_ACCESS_MASK: u64 = EFI_MEMORY_RP | EFI_MEMORY_XP | EFI_MEMORY_RO;
+
 pub trait PageTable {
     /// Function to map the designated memory region to with provided
     /// attributes.

@@ -11,6 +11,4 @@ keywords = ["paging"]
 bitfield-struct = "0.8.0"
 
 [features]
-# This feature is needed for running test to exclude read/write of CR3
-# registers. cargo test --features "no-reg-rw"
-no-reg-rw = []
+std = []

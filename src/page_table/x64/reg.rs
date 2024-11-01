@@ -5,7 +5,7 @@ use super::structs::CR3_PAGE_BASE_ADDRESS_MASK;
 
 /// Write CR3 register. Also invalidates TLB.
 pub unsafe fn write_cr3(_value: u64) {
-    #[cfg(not(feature = "no-reg-rw"))]
+    #[cfg(not(test))]
     {
         unsafe {
             asm!("mov cr3, {}", in(reg) _value, options(nostack, preserves_flags));
@@ -17,7 +17,7 @@ pub unsafe fn write_cr3(_value: u64) {
 pub unsafe fn read_cr3() -> u64 {
     let mut _value = 0u64;
 
-    #[cfg(not(feature = "no-reg-rw"))]
+    #[cfg(not(test))]
     {
         unsafe {
             asm!("mov {}, cr3", out(reg) _value, options(nostack, preserves_flags));
