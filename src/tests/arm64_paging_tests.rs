@@ -10,9 +10,6 @@ use crate::{
     tests::arm64_test_page_allocator::TestPageAllocator,
 };
 
-// Invoke these test suite as cargo test --features "no-reg-rw" . This feature
-// will skip writing to CR3 register.
-
 fn find_num_entries(start_offset: u64, end_offset: u64, num_parent_level_entries: u64) -> u64 {
     let mut num_entries = 0;
     if num_parent_level_entries > 1 {

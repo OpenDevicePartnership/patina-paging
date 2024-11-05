@@ -73,13 +73,13 @@ args = ["check", "--message-format=json"]
 description = "Builds all rust tests in the workspace. Example `cargo make test`"
 clear = true
 command = "cargo"
-args = ["test", "--features", "no-reg-rw"]
+args = ["test"]
 
 [tasks.coverage]
 description = "Build and run all tests and calculate coverage."
 clear = true
 command = "cargo"
-args = ["tarpaulin", "@@split(COV_FLAGS, )", "--output-dir", "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target", "--features", "no-reg-rw"]
+args = ["tarpaulin", "@@split(COV_FLAGS, )", "--output-dir", "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target"]
 
 [tasks.clippy]
 description = "Run cargo clippy."
