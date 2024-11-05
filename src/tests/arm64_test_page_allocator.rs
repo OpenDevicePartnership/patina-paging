@@ -2,12 +2,12 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::page_allocator::PageAllocator;
-use crate::page_table::arm64::structs::{
+use crate::arm64::structs::{
     PageLevel, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, EFI_MEMORY_CACHETYPE_MASK, PAGE_SIZE,
 };
+use crate::page_allocator::PageAllocator;
 use crate::page_table_error::{PtError, PtResult};
-use crate::page_table_factory::PagingType;
+use crate::PagingType;
 
 // This struct will create a the buffer/memory needed for building the page
 // tables

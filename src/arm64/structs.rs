@@ -1,15 +1,12 @@
 use bitfield_struct::bitfield;
 use core::{
     fmt::{self, Display, Formatter},
-    ops::{Add, Index, IndexMut, Sub},
+    ops::{Add, Sub},
 };
 
 use crate::{
-    page_table::{
-        EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_UC, EFI_MEMORY_UCE, EFI_MEMORY_WB, EFI_MEMORY_WC, EFI_MEMORY_WT,
-        EFI_MEMORY_XP,
-    },
-    page_table_error::PtResult,
+    page_table_error::PtResult, EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_UC, EFI_MEMORY_UCE, EFI_MEMORY_WB,
+    EFI_MEMORY_WC, EFI_MEMORY_WT, EFI_MEMORY_XP,
 };
 
 pub const LEVEL0_START_BIT: u64 = 39;
@@ -30,31 +27,6 @@ pub const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK: u64 = 0x0030_0000_0
 
 pub const EFI_MEMORY_CACHETYPE_MASK: u64 =
     EFI_MEMORY_UC | EFI_MEMORY_WC | EFI_MEMORY_WT | EFI_MEMORY_WB | EFI_MEMORY_UCE;
-
-const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
-
-/// Below struct is used to interpret the allocated page as an array of entires
-/// of type T in `get_table_store()`. No instances of this struct will be
-/// created manually.
-#[repr(C)]
-pub struct AArch64PageTableStore<T> {
-    entries: [T; MAX_ENTRIES],
-}
-
-impl<T> Index<usize> for AArch64PageTableStore<T> {
-    type Output = T;
-    /// used to get a shared reference to the page table entry.
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.entries[index]
-    }
-}
-
-impl<T> IndexMut<usize> for AArch64PageTableStore<T> {
-    /// used to get a mutable reference to the page table entry.
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.entries[index]
-    }
-}
 
 pub fn is_4kb_aligned(addr: u64) -> bool {
     (addr & (FRAME_SIZE_4KB - 1)) == 0

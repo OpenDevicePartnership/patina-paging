@@ -1,4 +1,4 @@
-use crate::{page_table_error::PtResult, page_table_factory::PagingType};
+use crate::{page_table_error::PtResult, PagingType};
 
 use super::structs::{
     PageLevel, PhysicalAddress, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE,

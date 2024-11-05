@@ -1,13 +1,11 @@
-use alloc::boxed::Box;
-
 use crate::{
-    page_table::{
-        arm64::structs::{PageLevel, VirtualAddress, FRAME_SIZE_4KB},
-        EFI_MEMORY_RO, EFI_MEMORY_XP,
+    arm64::{
+        paging::AArch64PageTable,
+        structs::{PageLevel, VirtualAddress, FRAME_SIZE_4KB},
     },
     page_table_error::{PtError, PtResult},
-    page_table_factory::{PageTableFactory, PagingType},
     tests::arm64_test_page_allocator::TestPageAllocator,
+    PageTable, PagingType, EFI_MEMORY_RO, EFI_MEMORY_XP,
 };
 
 fn find_num_entries(start_offset: u64, end_offset: u64, num_parent_level_entries: u64) -> u64 {
@@ -74,9 +72,9 @@ fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) ->
 fn test_find_num_page_tables() {
     let max_pages: u64 = 10;
 
-    let page_allocator = Box::new(TestPageAllocator::new(max_pages, PagingType::AArch64PageTable4KB));
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::AArch64PageTable4KB);
 
-    let pt = PageTableFactory::init_with_page_type(page_allocator, PagingType::AArch64PageTable4KB);
+    let pt = AArch64PageTable::new(page_allocator, PagingType::AArch64PageTable4KB);
 
     assert!(pt.is_ok());
 
@@ -140,10 +138,9 @@ fn test_map_memory_address_simple() {
         // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let page_allocator_cloned = page_allocator.clone();
 
-        let page_allocator_boxed = Box::new(page_allocator.clone());
-
-        let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+        let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -177,10 +174,9 @@ fn test_map_memory_address_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -225,10 +221,9 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -269,10 +264,9 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -304,9 +298,9 @@ fn test_map_memory_address_unaligned() {
 
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
 
-        let pt = PageTableFactory::init_with_page_type(page_allocator, paging_type);
+        let pt = AArch64PageTable::new(page_allocator, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -333,9 +327,9 @@ fn test_map_memory_address_zero_size() {
 
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
 
-        let pt = PageTableFactory::init_with_page_type(page_allocator, paging_type);
+        let pt = AArch64PageTable::new(page_allocator, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -370,10 +364,9 @@ fn test_unmap_memory_address_simple() {
         // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let page_allocator_cloned = page_allocator.clone();
 
-        let page_allocator_boxed = Box::new(page_allocator.clone());
-
-        let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+        let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -406,10 +399,9 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -452,9 +444,7 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -494,10 +484,9 @@ fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -529,9 +518,9 @@ fn test_unmap_memory_address_unaligned() {
 
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
 
-        let pt = PageTableFactory::init_with_page_type(page_allocator, paging_type);
+        let pt = AArch64PageTable::new(page_allocator, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -556,9 +545,9 @@ fn test_unmap_memory_address_zero_size() {
         let TestConfig { size, address, paging_type } = test_config;
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
 
-        let pt = PageTableFactory::init_with_page_type(page_allocator, paging_type);
+        let pt = AArch64PageTable::new(page_allocator, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -591,10 +580,9 @@ fn test_query_memory_address_simple() {
         // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let page_allocator_cloned = page_allocator.clone();
 
-        let page_allocator_boxed = Box::new(page_allocator.clone());
-
-        let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+        let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -627,10 +615,9 @@ fn test_query_memory_address_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -671,9 +658,7 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -712,10 +697,9 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -736,9 +720,9 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
 fn test_query_memory_address_unaligned() {
     let max_pages: u64 = 10;
 
-    let page_allocator = Box::new(TestPageAllocator::new(max_pages, PagingType::AArch64PageTable4KB));
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::AArch64PageTable4KB);
 
-    let pt = PageTableFactory::init_with_page_type(page_allocator, PagingType::AArch64PageTable4KB);
+    let pt = AArch64PageTable::new(page_allocator, PagingType::AArch64PageTable4KB);
 
     assert!(pt.is_ok());
     let pt = pt.unwrap();
@@ -754,9 +738,9 @@ fn test_query_memory_address_unaligned() {
 fn test_query_memory_address_zero_size() {
     let max_pages: u64 = 10;
 
-    let page_allocator = Box::new(TestPageAllocator::new(max_pages, PagingType::AArch64PageTable4KB));
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::AArch64PageTable4KB);
 
-    let pt = PageTableFactory::init_with_page_type(page_allocator, PagingType::AArch64PageTable4KB);
+    let pt = AArch64PageTable::new(page_allocator, PagingType::AArch64PageTable4KB);
 
     assert!(pt.is_ok());
     let pt = pt.unwrap();
@@ -790,10 +774,9 @@ fn test_remap_memory_address_simple() {
         // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let page_allocator_cloned = page_allocator.clone();
 
-        let page_allocator_boxed = Box::new(page_allocator.clone());
-
-        let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+        let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -827,10 +810,9 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -874,9 +856,7 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -917,10 +897,9 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let page_allocator_cloned = page_allocator.clone();
 
-            let page_allocator_boxed = Box::new(page_allocator.clone());
-
-            let pt = PageTableFactory::init_with_page_type(page_allocator_boxed, paging_type);
+            let pt = AArch64PageTable::new(page_allocator_cloned, paging_type);
 
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
@@ -952,9 +931,9 @@ fn test_remap_memory_address_unaligned() {
         let TestConfig { size, address, paging_type } = test_config;
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
 
-        let pt = PageTableFactory::init_with_page_type(page_allocator, paging_type);
+        let pt = AArch64PageTable::new(page_allocator, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
@@ -981,9 +960,9 @@ fn test_remap_memory_address_zero_size() {
 
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
 
-        let pt = PageTableFactory::init_with_page_type(page_allocator, paging_type);
+        let pt = AArch64PageTable::new(page_allocator, paging_type);
 
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
