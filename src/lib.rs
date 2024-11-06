@@ -2,11 +2,11 @@
 
 use page_table_error::PtResult;
 extern crate alloc;
-#[cfg(any(target_arch = "aarch64", test))]
-pub mod arm64;
+#[cfg(any(feature = "doc", all(target_os = "uefi", target_arch = "aarch64"), test))]
+pub mod aarch64;
 pub mod page_allocator;
 pub mod page_table_error;
-#[cfg(any(target_arch = "x86_64", test))]
+#[cfg(any(feature = "doc", all(target_os = "uefi", target_arch = "x86_64"), test))]
 pub mod x64;
 
 // Cache attributes
@@ -22,7 +22,7 @@ pub mod x64;
 //
 // NOTE: All caching attributes for x64 are handled via MTRRs, So below
 // attributes are not expected to be used in x64 paging implementation. They are
-// left here mainly for ARM64 implementation(which does not have MTRRs).
+// left here mainly for aarch64 implementation(which does not have MTRRs).
 //
 // Cache attributes(sorted from not so cache friendly to cache friendly)
 pub const EFI_MEMORY_UC: u64 = 0x00000000_00000001u64;

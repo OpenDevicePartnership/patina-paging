@@ -6,7 +6,7 @@ This repo include the X64/AArch64 paging logic.
 
 ## Public API
 
-The main traits/structs for public consumtion are
+The main traits/structs for public consumption are
 `PageTable/PageAllocator/X64PageTable/Aarch64PageTable`.
 
 ```rust

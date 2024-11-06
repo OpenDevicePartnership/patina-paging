@@ -2,7 +2,7 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::arm64::structs::{
+use crate::aarch64::structs::{
     PageLevel, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, EFI_MEMORY_CACHETYPE_MASK, PAGE_SIZE,
 };
 use crate::page_allocator::PageAllocator;

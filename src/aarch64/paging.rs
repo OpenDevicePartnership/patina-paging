@@ -4,8 +4,8 @@ use crate::{
     PageTable, PagingType,
 };
 
-use core::arch::asm;
 use alloc::boxed::Box;
+use core::arch::asm;
 
 use super::{
     pagetablestore::AArch64PageTableStore,

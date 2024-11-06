@@ -1,10 +1,10 @@
 use crate::{
-    arm64::{
+    aarch64::{
         paging::AArch64PageTable,
         structs::{PageLevel, VirtualAddress, FRAME_SIZE_4KB},
     },
     page_table_error::{PtError, PtResult},
-    tests::arm64_test_page_allocator::TestPageAllocator,
+    tests::aarch64_test_page_allocator::TestPageAllocator,
     PageTable, PagingType, EFI_MEMORY_RO, EFI_MEMORY_XP,
 };
 
