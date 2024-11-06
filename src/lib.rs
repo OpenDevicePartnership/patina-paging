@@ -1,16 +1,12 @@
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
-extern crate alloc;
-pub mod page_allocator;
-pub mod page_table_error;
-
-#[cfg(test)]
-mod tests;
-
-use crate::page_table_error::PtResult;
 #[cfg(any(target_arch = "aarch64", test))]
 pub mod arm64;
+pub mod page_allocator;
+pub mod page_table_error;
 #[cfg(any(target_arch = "x86_64", test))]
 pub mod x64;
+
+use crate::page_table_error::PtResult;
 
 // Cache attributes
 
@@ -114,3 +110,6 @@ pub enum PagingType {
     Paging4KB4Level,
     AArch64PageTable4KB,
 }
+
+#[cfg(test)]
+mod tests;

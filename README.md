@@ -2,7 +2,7 @@
 
 ## Introduction
 
-This repo include the x64/Arm64 paging logic.
+This repo include the X64/AArch64 paging logic.
 
 ## Public API
 
@@ -106,4 +106,4 @@ pub trait PageAllocator {
 
 ## Reference
 
-More reference test cases are in `tests\x64_4kb_page_table_tests.rs`
+More reference test cases are in `src\tests\x64_paging_tests.rs`
