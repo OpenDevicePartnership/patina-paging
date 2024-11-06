@@ -8,6 +8,7 @@ use crate::{
     page_table_error::{PtError, PtResult},
     PageTable, PagingType,
 };
+use alloc::boxed::Box;
 
 use super::{
     pagetablestore::X64PageTableStore,
@@ -18,18 +19,18 @@ use super::{
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
 /// allocator.
-pub struct X64PageTable<A: PageAllocator> {
+pub struct X64PageTable {
     // Points to the base of top level page table(always in canonical form)
     base: PhysicalAddress,
-    page_allocator: A,
+    page_allocator: Box<dyn PageAllocator>,
     paging_type: PagingType,
 
     highest_page_level: PageLevel,
     lowest_page_level: PageLevel,
 }
 
-impl<A: PageAllocator> X64PageTable<A> {
-    pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
+impl X64PageTable {
+    pub fn new(mut page_allocator: Box<dyn PageAllocator>, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the top level page table(PML5)
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
         let base = PhysicalAddress::new(base);
@@ -352,7 +353,7 @@ impl<A: PageAllocator> X64PageTable<A> {
     }
 }
 
-impl<A: PageAllocator> PageTable for X64PageTable<A> {
+impl PageTable for X64PageTable {
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 

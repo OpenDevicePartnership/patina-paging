@@ -5,6 +5,7 @@ use crate::{
 };
 
 use core::arch::asm;
+use alloc::boxed::Box;
 
 use super::{
     pagetablestore::AArch64PageTableStore,
@@ -14,18 +15,18 @@ use super::{
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
 /// allocator. It uses `AArch64PageTableStore<T>` to interpret the pages
-pub struct AArch64PageTable<A: PageAllocator> {
+pub struct AArch64PageTable {
     // Points to the base of top level page table
     base: PhysicalAddress,
-    page_allocator: A,
+    page_allocator: Box<dyn PageAllocator>,
     paging_type: PagingType,
 
     highest_page_level: PageLevel,
     lowest_page_level: PageLevel,
 }
 
-impl<A: PageAllocator> AArch64PageTable<A> {
-    pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
+impl AArch64PageTable {
+    pub fn new(mut page_allocator: Box<dyn PageAllocator>, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the root page table
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
         let base: PhysicalAddress = PhysicalAddress::new(base);
@@ -328,7 +329,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     }
 }
 
-impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
+impl PageTable for AArch64PageTable {
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
