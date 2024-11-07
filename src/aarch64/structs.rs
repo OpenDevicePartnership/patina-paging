@@ -38,24 +38,24 @@ pub fn is_4kb_aligned(addr: u64) -> bool {
 #[rustfmt::skip]
 #[bitfield(u64)]
 pub struct VMSAv864TableDescriptor {
-    pub valid_desc: bool,               // 1 bit -  Valid descriptor
-    pub table_desc: bool,               // 1 bit -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
+    pub valid_desc: bool,          // 1 bit -  Valid descriptor
+    pub table_desc: bool,          // 1 bit -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
     #[bits(6)]
-    pub ignored0: u8,                   // 6 bits -  Not used.
+    pub ignored0: u8,              // 6 bits -  Not used.
     #[bits(2)]
-    pub nlta_upper: u8,                     // 2 bits -  NTLA for 4KB or 16KB granule
-    pub access_flag: bool,            // 1 bit  -  When hardware managed access flag is enabled
-    pub ignored1: bool,                // 1 bit  -  Not used.
+    pub nlta_upper: u8,            // 2 bits -  NTLA for 4KB or 16KB granule
+    pub access_flag: bool,         // 1 bit  -  When hardware managed access flag is enabled
+    pub ignored1: bool,            // 1 bit  -  Not used.
     #[bits(40)]
-    pub nlta_lower: u64,                     // 40 bits - Address to the next level table descriptor, depending on the granule.
-    pub ignored2: bool,              // 1 bit  -  Not used with PnCH being 0.
+    pub nlta_lower: u64,           // 40 bits - Address to the next level table descriptor, depending on the granule.
+    pub ignored2: bool,            // 1 bit  -  Not used with PnCH being 0.
     #[bits(6)]
-    pub ignored3: u8,                  // 6 bits -  Not used.
-    pub pxn_table: bool,              // 1 bit  -  Hierarchical permissions.
-    pub uxn_table: bool,              // 1 bit  -  Hierarchical permissions.
+    pub ignored3: u8,              // 6 bits -  Not used.
+    pub pxn_table: bool,           // 1 bit  -  Hierarchical permissions.
+    pub uxn_table: bool,           // 1 bit  -  Hierarchical permissions.
     #[bits(2)]
-    pub ap_table: u8,                 // 2 bits -  Hierarchical permissions.
-    pub ns_table: bool,               // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
+    pub ap_table: u8,              // 2 bits -  Hierarchical permissions.
+    pub ns_table: bool,            // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
 }
 
 impl VMSAv864TableDescriptor {
@@ -134,39 +134,40 @@ impl VMSAv864TableDescriptor {
 // Below is the implementation of the block descriptor for AArch64 systems.
 // The bitfields are defined following the VMSAv8-64, stage 1 translation
 // descriptor format.
+#[rustfmt::skip]
 #[bitfield(u64)]
 pub struct VMSAv864PageDescriptor {
     #[bits(2)]
-    pub descriptor_type: u8, // 2 bits -  1 = Block entry, 3 = Page entry or level 3 block entry, Others = Faulty entry
+    pub descriptor_type: u8,      // 2 bits -  1 = Block entry, 3 = Page entry or level 3 block entry, Others = Faulty entry
     #[bits(3)]
-    pub attribute_index: u8, // 3 bits -  AttrIndx 0 = Device memory, 1 = non-cacheable memory, 2 = write-through, 3 = write-back, 4 = write-back.
-    pub ns: bool, // 1 bit  -  NS
+    pub attribute_index: u8,      // 3 bits -  AttrIndx 0 = Device memory, 1 = non-cacheable memory, 2 = write-through, 3 = write-back, 4 = write-back.
+    pub ns: bool,                 // 1 bit  -  NS
     #[bits(2)]
-    pub access_permission: u8, // 2 bits -  AP
+    pub access_permission: u8,    // 2 bits -  AP
     #[bits(2)]
-    pub shareable: u8, // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
-    pub access_flag: bool, // 1 bit  -  Access flag
-    pub ng: bool, // 1 bit  -  Not global
+    pub shareable: u8,            // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
+    pub access_flag: bool,        // 1 bit  -  Access flag
+    pub ng: bool,                 // 1 bit  -  Not global
     #[bits(9)]
-    pub level3_index: u16, // 9 bits -  Level 3 index, that points to a 4KB block
+    pub level3_index: u16,        // 9 bits -  Level 3 index, that points to a 4KB block
     #[bits(9)]
-    pub level2_index: u16, // 9 bits -  Level 2 index, that points to L3 table or a 2MB block
+    pub level2_index: u16,        // 9 bits -  Level 2 index, that points to L3 table or a 2MB block
     #[bits(9)]
-    pub level1_index: u16, // 9 bits -  Level 1 index, that points to L2 table or a 1GB block
+    pub level1_index: u16,        // 9 bits -  Level 1 index, that points to L2 table or a 1GB block
     #[bits(9)]
-    pub level0_index: u16, // 9 bits -  Level 0 index, that points to L1 table or a 512GB block
+    pub level0_index: u16,        // 9 bits -  Level 0 index, that points to L1 table or a 512GB block
     #[bits(2)]
-    pub reserved0: u8, // 2 bits -  Not used
-    pub guarded_page: bool, // 1 bit  -  GP
+    pub reserved0: u8,            // 2 bits -  Not used
+    pub guarded_page: bool,       // 1 bit  -  GP
     pub dirty_bit_modifier: bool, // 1 bit  -  DBM
-    pub contig: bool, // 1 bit  -  Contiguous
-    pub pxn: bool, // 1 bit  -  PXN Execution permissions
-    pub uxn: bool, // 1 bit  -  UXN Execution permissions
+    pub contig: bool,             // 1 bit  -  Contiguous
+    pub pxn: bool,                // 1 bit  -  PXN Execution permissions
+    pub uxn: bool,                // 1 bit  -  UXN Execution permissions
     #[bits(4)]
-    pub reserved1: u8, // 3 bits -  Reserved for software use
+    pub reserved1: u8,            // 3 bits -  Reserved for software use
     #[bits(4)]
-    pub imp_def: u8, // 4 bits -  Implementation defined
-    pub ignored: bool, // 1 bit  -  Not used outside of Realm translation regimes
+    pub imp_def: u8,              // 4 bits -  Implementation defined
+    pub ignored: bool,            // 1 bit  -  Not used outside of Realm translation regimes
 }
 
 impl VMSAv864PageDescriptor {
