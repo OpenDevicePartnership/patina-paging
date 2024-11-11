@@ -2,11 +2,9 @@
 
 use page_table_error::PtResult;
 extern crate alloc;
-#[cfg(any(feature = "doc", all(target_os = "uefi", target_arch = "aarch64"), test))]
 pub mod aarch64;
 pub mod page_allocator;
 pub mod page_table_error;
-#[cfg(any(feature = "doc", all(target_os = "uefi", target_arch = "x86_64"), test))]
 pub mod x64;
 
 // Cache attributes

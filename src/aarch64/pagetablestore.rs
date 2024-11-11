@@ -105,7 +105,7 @@ impl AArch64PageTableEntry {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
                 let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
-                entry.update_fields(attributes, pa.into())
+                entry.update_fields(attributes, pa)
             }
             PageLevel::Lvl3 => {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };

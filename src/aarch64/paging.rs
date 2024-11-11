@@ -302,11 +302,7 @@ impl AArch64PageTable {
                 );
             }
 
-            if sctlr & 0x1 == 1 {
-                true
-            } else {
-                false
-            }
+            sctlr & 0x1 == 1
         }
     }
 
@@ -341,9 +337,7 @@ impl PageTable for AArch64PageTable {
 
         // println!("start {:X} end {:X}", start_va, end_va);
 
-        let result = self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes);
-
-        result
+        self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes)
     }
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
@@ -354,9 +348,7 @@ impl PageTable for AArch64PageTable {
         let start_va = address;
         let end_va = address + size - 1;
 
-        let result = self.unmap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base);
-
-        result
+        self.unmap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base)
     }
 
     fn install_page_table(&self) -> PtResult<()> {
@@ -379,10 +371,7 @@ impl PageTable for AArch64PageTable {
         let mut prev_attributes = 0;
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)?;
 
-        let result =
-            self.remap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes);
-
-        result
+        self.remap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes)
     }
 
     fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64> {
