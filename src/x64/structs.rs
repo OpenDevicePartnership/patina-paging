@@ -6,8 +6,8 @@ use core::{
 use bitfield_struct::bitfield;
 
 use crate::{
-    page_table::{EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_XP},
     page_table_error::PtResult,
+    {EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_XP},
 };
 
 pub const PAGE_SIZE: u64 = 0x1000; // 4KB

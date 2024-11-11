@@ -2,12 +2,12 @@
 
 ## Introduction
 
-This repo include the x64/Arm64 paging logic.
+This repo include the X64/AArch64 paging logic.
 
 ## Public API
 
-The main traits/structs for public consumtion are `PageTable/PageAllocator`
-and `PageTableFactory`.
+The main traits/structs for public consumption are
+`PageTable/PageAllocator/X64PageTable/Aarch64PageTable`.
 
 ```rust
 pub trait PageTable {
@@ -88,33 +88,14 @@ pub trait PageAllocator {
 }
 ```
 
-```rust
-impl PageTableFactory {
-    /// Initialize the page table instance by providing the page allocator trait
-    /// object provided by the core. This object will be used to initialize the
-    /// root page table and return the page table instance.
-    ///
-    /// ## Arguments
-    /// * `page_allocator` - The page allocator trait object provided by the
-    ///   core.
-    ///
-    /// ## Returns
-    /// * `PageTable` - The page table instance.
-    ///
-    /// ## Errors
-    pub fn init(
-        page_allocator: Box<dyn PageAllocator>,
-        page_table_type: PagingType,
-    ) -> PtResult<Box<dyn PageTable>>;
-}
-```
-
 ## API usage
 
 ```rust
+    use PageTable;
+
     let page_allocator = ...;
 
-    let pt = PageTableFactory::init(page_allocator, PagingType::Paging4KB4Level)?;
+    let pt = X64PageTable::new(page_allocator, PagingType::Paging4KB4Level)?;
 
     let attributes = EFI_MEMORY_RP;
     let res = pt.map_memory_region(address, size, attributes);
@@ -125,4 +106,4 @@ impl PageTableFactory {
 
 ## Reference
 
-More reference test cases are in `tests\x64_4kb_page_table_tests.rs`
+More reference test cases are in `src\tests\x64_paging_tests.rs`

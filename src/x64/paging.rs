@@ -2,17 +2,13 @@
 /// Implements x64 paging. Supports below modes
 /// - x64 4KB 5 level paging
 /// - x64 4KB 4 level paging
-/// - x64 2MB 5 level paging
-/// - x64 2MB 4 level paging
 ///
-use alloc::boxed::Box;
-
 use crate::{
     page_allocator::PageAllocator,
-    page_table::PageTable,
     page_table_error::{PtError, PtResult},
-    page_table_factory::PagingType,
+    PageTable, PagingType,
 };
+use alloc::boxed::Box;
 
 use super::{
     pagetablestore::X64PageTableStore,

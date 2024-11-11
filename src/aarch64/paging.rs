@@ -1,8 +1,7 @@
 use crate::{
     page_allocator::PageAllocator,
-    page_table::PageTable,
     page_table_error::{PtError, PtResult},
-    page_table_factory::PagingType,
+    PageTable, PagingType,
 };
 
 use alloc::boxed::Box;

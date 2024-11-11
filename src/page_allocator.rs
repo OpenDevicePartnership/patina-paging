@@ -1,6 +1,7 @@
 use crate::page_table_error::PtResult;
 
-/// PageAllocator trait facilitates `allocate()` method for allocating new pages
+/// PageAllocator trait facilitates `allocate_page()` method for allocating new
+/// pages
 pub trait PageAllocator {
     /// Allocate aligned pages from physical memory.
     ///
