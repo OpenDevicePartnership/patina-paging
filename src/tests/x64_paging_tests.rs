@@ -73,7 +73,7 @@ fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) ->
 fn test_find_num_page_tables() {
     let max_pages: u64 = 10;
 
-    let page_allocator = Box::new(TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level));
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level);
     let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4KB4Level);
 
     assert!(pt.is_ok());
@@ -140,7 +140,7 @@ fn test_map_memory_address_simple() {
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
         // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-        let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
         assert!(pt.is_ok());
@@ -177,7 +177,7 @@ fn test_map_memory_address_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -227,7 +227,7 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -276,7 +276,7 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -312,7 +312,7 @@ fn test_map_memory_address_unaligned() {
 
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
         assert!(pt.is_ok());
@@ -343,7 +343,7 @@ fn test_map_memory_address_zero_size() {
 
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
         assert!(pt.is_ok());
@@ -377,7 +377,7 @@ fn test_unmap_memory_address_simple() {
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
         // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-        let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
         assert!(pt.is_ok());
@@ -413,7 +413,7 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -463,7 +463,7 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -511,7 +511,7 @@ fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -547,7 +547,7 @@ fn test_unmap_memory_address_unaligned() {
 
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
         assert!(pt.is_ok());
@@ -576,7 +576,7 @@ fn test_unmap_memory_address_zero_size() {
         let TestConfig { size, address, paging_type } = test_config;
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
         assert!(pt.is_ok());
@@ -608,7 +608,7 @@ fn test_query_memory_address_simple() {
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
         // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-        let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
         assert!(pt.is_ok());
@@ -643,7 +643,7 @@ fn test_query_memory_address_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -681,7 +681,7 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -728,7 +728,7 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -750,7 +750,7 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
 fn test_query_memory_address_unaligned() {
     let max_pages: u64 = 10;
 
-    let page_allocator = Box::new(TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level));
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level);
 
     let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4KB4Level);
 
@@ -768,7 +768,7 @@ fn test_query_memory_address_unaligned() {
 fn test_query_memory_address_zero_size() {
     let max_pages: u64 = 10;
 
-    let page_allocator = Box::new(TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level));
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level);
 
     let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4KB4Level);
 
@@ -802,7 +802,7 @@ fn test_remap_memory_address_simple() {
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
         // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-        let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
         assert!(pt.is_ok());
@@ -839,7 +839,7 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -890,7 +890,7 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -939,7 +939,7 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
             // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
-            let page_allocator = Box::new(TestPageAllocator::new(num_pages, paging_type));
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
             assert!(pt.is_ok());
@@ -975,7 +975,7 @@ fn test_remap_memory_address_unaligned() {
         let TestConfig { size, address, paging_type } = test_config;
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
 
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
@@ -1007,7 +1007,7 @@ fn test_remap_memory_address_zero_size() {
 
         let max_pages: u64 = 10;
 
-        let page_allocator = Box::new(TestPageAllocator::new(max_pages, paging_type));
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
 
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
