@@ -48,6 +48,37 @@ impl<A: PageAllocator> X64PageTable<A> {
         Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
     }
 
+    /// Create a page table from existing page table base. This can be used to
+    /// parse or edit an existing identity mapped page table.
+    ///
+    /// # Safety
+    ///
+    /// This routine will return a struct that will parse memory addresses from
+    /// PFNs in the provided base, so that caller is responsible for ensuring
+    /// safety of that base.
+    ///
+    pub unsafe fn from_existing(base: u64, page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
+        let base = PhysicalAddress::new(base);
+        if !base.is_4kb_aligned() {
+            return Err(PtError::UnalignedPageBase);
+        }
+
+        // For the given paging type identify the highest and lowest page levels.
+        // This is used during page building to stop the recursion.
+        let (highest_page_level, lowest_page_level) = match paging_type {
+            PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
+            PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
+            _ => return Err(PtError::InvalidParameter),
+        };
+
+        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
+    }
+
+    /// Consumes the page table structure and returns the page table root.
+    pub fn into_page_table_root(self) -> u64 {
+        self.base.into()
+    }
+
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
         let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
         let base = PhysicalAddress::new(base);
