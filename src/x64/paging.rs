@@ -32,20 +32,10 @@ impl<A: PageAllocator> X64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the top level page table(PML5)
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
-        let base = PhysicalAddress::new(base);
-        if !base.is_4kb_aligned() {
-            panic!("allocate_page() returned unaligned page");
-        }
+        assert!(PhysicalAddress::new(base).is_4kb_aligned());
 
-        // For the given paging type identify the highest and lowest page levels.
-        // This is used during page building to stop the recursion.
-        let (highest_page_level, lowest_page_level) = match paging_type {
-            PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
-            PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
-            _ => return Err(PtError::InvalidParameter),
-        };
-
-        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        unsafe { Self::from_existing(base, page_allocator, paging_type) }
     }
 
     /// Create a page table from existing page table base. This can be used to

@@ -960,3 +960,46 @@ fn test_remap_memory_address_zero_size() {
         assert_eq!(res, Err(PtError::UnalignedAddress));
     }
 }
+
+#[test]
+fn test_from_existing_page_table() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [TestConfig {
+        paging_type: PagingType::AArch64PageTable4KB,
+        address: 0x1000,
+        size: FRAME_SIZE_4KB * 512 * 512 * 10,
+    }];
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+
+        let pt = AArch64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = EFI_MEMORY_RO;
+        let res = pt.map_memory_region(address, size, attributes);
+        assert!(res.is_ok());
+        assert_eq!(page_allocator.pages_allocated(), num_pages);
+
+        // Create a new page table from the existing one
+        let new_pt =
+            unsafe { AArch64PageTable::from_existing(pt.into_page_table_root(), page_allocator.clone(), paging_type) };
+        assert!(new_pt.is_ok());
+        let new_pt = new_pt.unwrap();
+
+        // Validate the new page table
+        let res = new_pt.query_memory_region(address, size);
+        assert!(res.is_ok());
+    }
+}

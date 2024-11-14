@@ -28,10 +28,25 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the root page table
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+        assert!(PhysicalAddress::new(base).is_4kb_aligned());
+
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        unsafe { Self::from_existing(base, page_allocator, paging_type) }
+    }
+
+    /// Create a page table from existing page table root. This can be used to
+    /// parse or edit an existing identity mapped page table.
+    ///
+    /// # Safety
+    ///
+    /// This routine will return a struct that will parse memory addresses from
+    /// PFNs in the provided base, so that caller is responsible for ensuring
+    /// safety of that base.
+    ///
+    pub unsafe fn from_existing(base: u64, page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         let base: PhysicalAddress = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
-            // println!("allocated page is not 4k aligned {:X}", base);
-            return Err(crate::page_table_error::PtError::OutOfResources);
+            return Err(PtError::UnalignedPageBase);
         }
 
         // For the given paging type identify the highest and lowest page levels.
@@ -42,6 +57,11 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         };
 
         Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
+    }
+
+    /// Consumes the page table structure and returns the page table root.
+    pub fn into_page_table_root(self) -> u64 {
+        self.base.into()
     }
 
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
