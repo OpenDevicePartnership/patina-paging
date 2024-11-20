@@ -5,8 +5,9 @@ use core::{
 };
 
 use crate::{
-    page_table_error::PtResult, EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_UC, EFI_MEMORY_UCE, EFI_MEMORY_WB,
-    EFI_MEMORY_WC, EFI_MEMORY_WT, EFI_MEMORY_XP,
+    page_table_error::{PtError, PtResult},
+    EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_UC, EFI_MEMORY_UCE, EFI_MEMORY_WB, EFI_MEMORY_WC, EFI_MEMORY_WT,
+    EFI_MEMORY_XP,
 };
 
 pub(crate) const MAX_VA: u64 = 0x0000_ffff_ffff_ffff;
@@ -403,6 +404,12 @@ impl Add<u64> for VirtualAddress {
             Some(result) => VirtualAddress(result),
             None => panic!("Overflow occurred!"),
         }
+    }
+}
+
+impl VirtualAddress {
+    pub fn try_add(self, rhs: u64) -> PtResult<Self> {
+        self.0.checked_add(rhs).map(VirtualAddress).ok_or(PtError::InvalidMemoryRange)
     }
 }
 

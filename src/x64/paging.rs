@@ -354,7 +354,10 @@ impl<A: PageAllocator> X64PageTable<A> {
         Ok(*prev_attributes)
     }
 
-    fn check_memory_alignment(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
+    fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
+        // Overflow check
+        address.try_add(size)?;
+
         // Check the memory range
         match self.paging_type {
             PagingType::Paging4KB5Level => {
@@ -392,7 +395,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         // We map until next alignment
         let start_va = address;
@@ -410,7 +413,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -425,7 +428,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -451,7 +454,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;

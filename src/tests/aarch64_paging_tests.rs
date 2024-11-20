@@ -309,6 +309,37 @@ fn test_map_memory_address_unaligned() {
 }
 
 #[test]
+fn test_map_memory_address_range_overflow() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [
+        // VA range overflows
+        TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: MAX_VA, size: MAX_VA },
+    ];
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let max_pages: u64 = 10;
+
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
+        let pt = AArch64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = EFI_MEMORY_RO;
+        let res = pt.map_memory_region(address, size, attributes);
+        assert!(res.is_err());
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
+    }
+}
+
+#[test]
 fn test_map_memory_address_invalid_range() {
     struct TestConfig {
         paging_type: PagingType,
