@@ -13,6 +13,9 @@ use crate::{
 pub const PAGE_SIZE: u64 = 0x1000; // 4KB
 const PAGE_INDEX_MASK: u64 = 0x1FF;
 
+pub(crate) const MAX_PML5_VA: u64 = 0x01ff_ffff_ffff_ffff;
+pub(crate) const MAX_PML4_VA: u64 = 0x0000_ffff_ffff_ffff;
+
 const PML5_START_BIT: u64 = 48;
 const PML4_START_BIT: u64 = 39;
 const PDP_START_BIT: u64 = 30;

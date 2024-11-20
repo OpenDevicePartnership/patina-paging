@@ -9,26 +9,28 @@ use crate::{
     EFI_MEMORY_WC, EFI_MEMORY_WT, EFI_MEMORY_XP,
 };
 
-pub const LEVEL0_START_BIT: u64 = 39;
-pub const LEVEL1_START_BIT: u64 = 30;
-pub const LEVEL2_START_BIT: u64 = 21;
-pub const LEVEL3_START_BIT: u64 = 12;
+pub(crate) const MAX_VA: u64 = 0x0000_ffff_ffff_ffff;
+
+const LEVEL0_START_BIT: u64 = 39;
+const LEVEL1_START_BIT: u64 = 30;
+const LEVEL2_START_BIT: u64 = 21;
+const LEVEL3_START_BIT: u64 = 12;
 
 /// TODO: This needs to be moved some common places
-pub const FRAME_SIZE_4KB: u64 = 0x1000; // 4KB
-pub const PAGE_SIZE: u64 = 0x1000; // 4KB
-pub const INDEX_MASK: u64 = 0x1FF;
+pub(crate) const FRAME_SIZE_4KB: u64 = 0x1000; // 4KB
+pub(crate) const PAGE_SIZE: u64 = 0x1000; // 4KB
+pub(crate) const INDEX_MASK: u64 = 0x1FF;
 
-pub const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_SHIFT: u64 = 12u64; // lower 12 bits for alignment
-pub const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_MASK: u64 = 0x000f_ffff_ffff_f000u64; // 40 bit - lower 12 bits for alignment
+const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_SHIFT: u64 = 12u64; // lower 12 bits for alignment
+const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_MASK: u64 = 0x000f_ffff_ffff_f000u64; // 40 bit - lower 12 bits for alignment
 
-pub const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_SHIFT: u64 = 2u64; // bit 51:50
-pub const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK: u64 = 0x0030_0000_0000_0000u64; // 2 bits - bit 51:50
+const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_SHIFT: u64 = 2u64; // bit 51:50
+const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK: u64 = 0x0030_0000_0000_0000u64; // 2 bits - bit 51:50
 
-pub const EFI_MEMORY_CACHETYPE_MASK: u64 =
+pub(crate) const EFI_MEMORY_CACHETYPE_MASK: u64 =
     EFI_MEMORY_UC | EFI_MEMORY_WC | EFI_MEMORY_WT | EFI_MEMORY_WB | EFI_MEMORY_UCE;
 
-pub fn is_4kb_aligned(addr: u64) -> bool {
+fn is_4kb_aligned(addr: u64) -> bool {
     (addr & (FRAME_SIZE_4KB - 1)) == 0
 }
 

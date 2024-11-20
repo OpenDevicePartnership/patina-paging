@@ -22,4 +22,7 @@ pub enum PtError {
 
     // Unaligned Memory Range
     UnalignedMemoryRange,
+
+    // Invalid Memory Range
+    InvalidMemoryRange,
 }

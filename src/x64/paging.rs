@@ -12,7 +12,7 @@ use crate::{
 use super::{
     pagetablestore::X64PageTableStore,
     reg::{invalidate_tlb, write_cr3},
-    structs::{PageLevel, PhysicalAddress, VirtualAddress, PAGE_SIZE},
+    structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_PML4_VA, MAX_PML5_VA, PAGE_SIZE},
 };
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
@@ -355,6 +355,21 @@ impl<A: PageAllocator> X64PageTable<A> {
     }
 
     fn check_memory_alignment(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
+        // Check the memory range
+        match self.paging_type {
+            PagingType::Paging4KB5Level => {
+                if address + size > VirtualAddress::new(MAX_PML5_VA) {
+                    return Err(PtError::InvalidMemoryRange);
+                }
+            }
+            PagingType::Paging4KB4Level => {
+                if address + size > VirtualAddress::new(MAX_PML4_VA) {
+                    return Err(PtError::InvalidMemoryRange);
+                }
+            }
+            _ => return Err(PtError::InvalidParameter),
+        }
+
         match self.paging_type {
             PagingType::Paging4KB5Level | PagingType::Paging4KB4Level => {
                 if size == 0 || !address.is_4kb_aligned() {
