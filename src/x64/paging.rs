@@ -12,7 +12,7 @@ use crate::{
 use super::{
     pagetablestore::X64PageTableStore,
     reg::{invalidate_tlb, write_cr3},
-    structs::{PageLevel, PhysicalAddress, VirtualAddress, PAGE_SIZE},
+    structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_PML4_VA, MAX_PML5_VA, PAGE_SIZE},
 };
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
@@ -354,7 +354,25 @@ impl<A: PageAllocator> X64PageTable<A> {
         Ok(*prev_attributes)
     }
 
-    fn check_memory_alignment(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
+    fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
+        // Overflow check
+        address.try_add(size)?;
+
+        // Check the memory range
+        match self.paging_type {
+            PagingType::Paging4KB5Level => {
+                if address + size > VirtualAddress::new(MAX_PML5_VA) {
+                    return Err(PtError::InvalidMemoryRange);
+                }
+            }
+            PagingType::Paging4KB4Level => {
+                if address + size > VirtualAddress::new(MAX_PML4_VA) {
+                    return Err(PtError::InvalidMemoryRange);
+                }
+            }
+            _ => return Err(PtError::InvalidParameter),
+        }
+
         match self.paging_type {
             PagingType::Paging4KB5Level | PagingType::Paging4KB4Level => {
                 if size == 0 || !address.is_4kb_aligned() {
@@ -377,7 +395,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         // We map until next alignment
         let start_va = address;
@@ -395,7 +413,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -410,7 +428,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -436,7 +454,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;

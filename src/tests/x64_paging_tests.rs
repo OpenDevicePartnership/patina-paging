@@ -3,7 +3,7 @@ use crate::{
     tests::x64_test_page_allocator::TestPageAllocator,
     x64::{
         paging::X64PageTable,
-        structs::{PageLevel, VirtualAddress, FRAME_SIZE_4KB},
+        structs::{PageLevel, VirtualAddress, FRAME_SIZE_4KB, MAX_PML4_VA, MAX_PML5_VA},
     },
     PageTable, PagingType, EFI_MEMORY_RO, EFI_MEMORY_XP,
 };
@@ -322,6 +322,70 @@ fn test_map_memory_address_unaligned() {
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
+    }
+}
+
+#[test]
+fn test_map_memory_address_range_overflow() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [
+        // VA range overflows
+        TestConfig { paging_type: PagingType::Paging4KB4Level, address: MAX_PML4_VA, size: MAX_PML4_VA },
+        TestConfig { paging_type: PagingType::Paging4KB5Level, address: MAX_PML5_VA, size: MAX_PML5_VA },
+    ];
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let max_pages: u64 = 10;
+
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
+        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = EFI_MEMORY_RO;
+        let res = pt.map_memory_region(address, size, attributes);
+        assert!(res.is_err());
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
+    }
+}
+
+#[test]
+fn test_map_memory_address_invalid_range() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [
+        // VA above the valid address range
+        TestConfig { paging_type: PagingType::Paging4KB4Level, address: MAX_PML4_VA + 1, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging4KB5Level, address: MAX_PML5_VA + 1, size: FRAME_SIZE_4KB },
+    ];
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let max_pages: u64 = 10;
+
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
+        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = EFI_MEMORY_RO;
+        let res = pt.map_memory_region(address, size, attributes);
+        assert!(res.is_err());
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
     }
 }
 

@@ -8,7 +8,7 @@ use core::arch::asm;
 
 use super::{
     pagetablestore::AArch64PageTableStore,
-    structs::{PageLevel, PhysicalAddress, VirtualAddress, PAGE_SIZE},
+    structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
 };
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
@@ -325,9 +325,17 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         }
     }
 
-    fn check_memory_alignment(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
+    fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
         match self.paging_type {
             PagingType::AArch64PageTable4KB => {
+                // Overflow check
+                address.try_add(size)?;
+
+                // Check the memory range
+                if address + size > VirtualAddress::new(MAX_VA) {
+                    return Err(PtError::InvalidMemoryRange);
+                }
+
                 if size == 0 || !address.is_4kb_aligned() {
                     return Err(PtError::UnalignedAddress);
                 }
@@ -348,7 +356,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         // We map until next alignment
         let start_va = address;
@@ -362,7 +370,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -381,7 +389,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -396,7 +404,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64> {
         let address = VirtualAddress::new(address);
 
-        self.check_memory_alignment(address, size)?;
+        self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;

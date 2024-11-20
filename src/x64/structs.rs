@@ -6,12 +6,15 @@ use core::{
 use bitfield_struct::bitfield;
 
 use crate::{
-    page_table_error::PtResult,
-    {EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_XP},
+    page_table_error::{PtError, PtResult},
+    EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_XP,
 };
 
 pub const PAGE_SIZE: u64 = 0x1000; // 4KB
 const PAGE_INDEX_MASK: u64 = 0x1FF;
+
+pub(crate) const MAX_PML5_VA: u64 = 0x01ff_ffff_ffff_ffff;
+pub(crate) const MAX_PML4_VA: u64 = 0x0000_ffff_ffff_ffff;
 
 const PML5_START_BIT: u64 = 48;
 const PML4_START_BIT: u64 = 39;
@@ -325,8 +328,14 @@ impl Add<u64> for VirtualAddress {
     fn add(self, rhs: u64) -> Self::Output {
         match self.0.checked_add(rhs) {
             Some(result) => VirtualAddress(result),
-            None => panic!("Overflow occurred!"),
+            None => panic!("Overflow occurred! {:x} {:x}", self.0, rhs),
         }
+    }
+}
+
+impl VirtualAddress {
+    pub fn try_add(self, rhs: u64) -> PtResult<Self> {
+        self.0.checked_add(rhs).map(VirtualAddress).ok_or(PtError::InvalidMemoryRange)
     }
 }
 
@@ -336,7 +345,7 @@ impl Sub<u64> for VirtualAddress {
     fn sub(self, rhs: u64) -> Self::Output {
         match self.0.checked_sub(rhs) {
             Some(result) => VirtualAddress(result),
-            None => panic!("Underflow occurred!"),
+            None => panic!("Underflow occurred! {:x} {:x}", self.0, rhs),
         }
     }
 }
