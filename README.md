@@ -27,16 +27,16 @@ bitflags! {
         const ReadOnly          = 0x00000000_00020000u64;   // Maps to Read/Write bit on X64
 
 
-        const CacheAttributeMask = Self::Uncacheable.bits() |
-                                   Self::WriteCombining.bits() |
-                                   Self::WriteThrough.bits() |
-                                   Self::Writeback.bits() |
-                                   Self::UncacheableExport.bits() |
-                                   Self::WriteProtect.bits();
+        const CacheAttributesMask = Self::Uncacheable.bits() |
+                                    Self::WriteCombining.bits() |
+                                    Self::WriteThrough.bits() |
+                                    Self::Writeback.bits() |
+                                    Self::UncacheableExport.bits() |
+                                    Self::WriteProtect.bits();
 
-        const MemoryAttributeMask = Self::ReadProtect.bits() |
-                                    Self::ExecuteProtect.bits() |
-                                    Self::ReadOnly.bits();
+        const AccessAttributesMask = Self::ReadProtect.bits() |
+                                     Self::ExecuteProtect.bits() |
+                                     Self::ReadOnly.bits();
     }
 }
 

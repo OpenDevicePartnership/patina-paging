@@ -182,7 +182,7 @@ impl VMSAv864PageDescriptor {
 
     fn set_attributes(&mut self, attributes: MemoryAttributes) {
         // This change pretty much follows the GcdAttributeToPageAttribute
-        match attributes & MemoryAttributes::CacheAttributeMask {
+        match attributes & MemoryAttributes::CacheAttributesMask {
             MemoryAttributes::Uncacheable => {
                 self.set_attribute_index(0);
                 self.set_ng(false);
@@ -216,7 +216,7 @@ impl VMSAv864PageDescriptor {
         }
 
         if attributes.contains(MemoryAttributes::ExecuteProtect)
-            || (attributes & MemoryAttributes::CacheAttributeMask == MemoryAttributes::Uncacheable)
+            || (attributes & MemoryAttributes::CacheAttributesMask == MemoryAttributes::Uncacheable)
         {
             // TODO: need to check if the system in EL2 or EL1
             self.set_uxn(true);
