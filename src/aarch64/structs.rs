@@ -66,7 +66,7 @@ impl VMSAv864TableDescriptor {
     }
 
     /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: u64, next_pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, next_pa: PhysicalAddress) -> PtResult<()> {
         if !self.is_valid_table() {
             let next_level_table_base = next_pa.into();
             if !is_4kb_aligned(next_level_table_base) {
@@ -93,7 +93,7 @@ impl VMSAv864TableDescriptor {
     }
 
     /// return all the memory attributes for the current entry
-    fn set_attributes(&mut self, _attributes: u64) {
+    fn set_attributes(&mut self, _attributes: MemoryAttributes) {
         // For table entries, we don't need to set the memory attributes
         // Instead, we need to set the most permissive attributes to allow page
         // entries to drive the attributes.
@@ -103,7 +103,7 @@ impl VMSAv864TableDescriptor {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&mut self) -> u64 {
+    pub fn get_attributes(&mut self) -> MemoryAttributes {
         let mut attributes = MemoryAttributes::empty();
 
         if !self.is_valid_table() {
@@ -119,7 +119,7 @@ impl VMSAv864TableDescriptor {
             attributes |= MemoryAttributes::ExecuteProtect;
         }
 
-        attributes.bits()
+        attributes
     }
 
     pub fn set_table_invalid(&mut self) {
@@ -180,8 +180,7 @@ impl VMSAv864PageDescriptor {
         PhysicalAddress(level3_index | level2_index | level1_index | level0_index)
     }
 
-    fn set_attributes(&mut self, attributes: u64) {
-        let attributes = MemoryAttributes::from_bits_truncate(attributes);
+    fn set_attributes(&mut self, attributes: MemoryAttributes) {
         // This change pretty much follows the GcdAttributeToPageAttribute
         match attributes & MemoryAttributes::CacheAttributeMask {
             MemoryAttributes::Uncacheable => {
@@ -231,7 +230,7 @@ impl VMSAv864PageDescriptor {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> u64 {
+    pub fn get_attributes(&self) -> MemoryAttributes {
         let mut attributes = MemoryAttributes::empty();
 
         if !self.is_valid_page() {
@@ -256,11 +255,15 @@ impl VMSAv864PageDescriptor {
         }
 
         // TODO: add other attributes
-        attributes.bits()
+        attributes
     }
 
     /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: u64, page_table_base_address: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(
+        &mut self,
+        attributes: MemoryAttributes,
+        page_table_base_address: PhysicalAddress,
+    ) -> PtResult<()> {
         if !self.is_valid_page() {
             let next_level_table_base = u64::from(page_table_base_address);
 

@@ -1,7 +1,4 @@
-use crate::{
-    page_allocator::PageAllocator,
-    PageTable, PagingType, {PtError, PtResult},
-};
+use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
 
 use core::arch::asm;
 
@@ -79,7 +76,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        attributes: u64,
+        attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
 
@@ -183,7 +180,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        attributes: u64,
+        attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
 
@@ -240,8 +237,8 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        prev_attributes: &mut u64,
-    ) -> PtResult<u64> {
+        prev_attributes: &mut MemoryAttributes,
+    ) -> PtResult<MemoryAttributes> {
         let mut va = start_va;
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
@@ -254,7 +251,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 // Given memory range can span multiple page table entries, in such
                 // scenario, the expectation is all entries should have same attributes.
                 let current_attributes = entry.get_attributes();
-                if *prev_attributes == 0 {
+                if (*prev_attributes).is_empty() {
                     *prev_attributes = current_attributes;
                 }
 
@@ -352,7 +349,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 }
 
 impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
+    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -385,7 +382,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         Ok(())
     }
 
-    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
+    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -394,13 +391,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let end_va = address + size - 1;
 
         // make sure the memory region has same attributes set
-        let mut prev_attributes = 0;
+        let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)?;
 
         self.remap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes)
     }
 
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64> {
+    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -408,7 +405,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        let mut prev_attributes = 0;
+        let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
     }
 }

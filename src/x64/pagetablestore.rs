@@ -1,4 +1,4 @@
-use crate::{PagingType, PtResult};
+use crate::{MemoryAttributes, PagingType, PtResult};
 
 use super::structs::{PageLevel, PageMapEntry, PageTableEntry4KB, PhysicalAddress, VirtualAddress, PAGE_SIZE};
 
@@ -94,7 +94,7 @@ pub struct X64PageTableEntry {
 }
 
 impl X64PageTableEntry {
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         match self.level {
             PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {
                 let entry = unsafe { get_entry::<PageMapEntry>(self.page_base, self.index) };
@@ -150,7 +150,7 @@ impl X64PageTableEntry {
         }
     }
 
-    pub fn get_attributes(&self) -> u64 {
+    pub fn get_attributes(&self) -> MemoryAttributes {
         match self.level {
             PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {
                 let entry = unsafe { get_entry::<PageMapEntry>(self.page_base, self.index) };

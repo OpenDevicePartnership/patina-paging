@@ -1,4 +1,4 @@
-use crate::{PagingType, PtResult};
+use crate::{MemoryAttributes, PagingType, PtResult};
 
 use super::structs::{
     PageLevel, PhysicalAddress, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE,
@@ -101,7 +101,7 @@ pub struct AArch64PageTableEntry {
 }
 
 impl AArch64PageTableEntry {
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
                 let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
@@ -143,7 +143,7 @@ impl AArch64PageTableEntry {
         }
     }
 
-    pub fn get_attributes(&self) -> u64 {
+    pub fn get_attributes(&self) -> MemoryAttributes {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
                 let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };

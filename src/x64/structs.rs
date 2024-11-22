@@ -47,7 +47,7 @@ pub struct PageMapEntry {
 
 impl PageMapEntry {
     /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         if !self.present() {
             let mut next_level_table_base: u64 = pa.into();
 
@@ -73,7 +73,7 @@ impl PageMapEntry {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> u64 {
+    pub fn get_attributes(&self) -> MemoryAttributes {
         let mut attributes = MemoryAttributes::empty();
 
         if !self.present() {
@@ -88,11 +88,11 @@ impl PageMapEntry {
             attributes |= MemoryAttributes::ExecuteProtect;
         }
 
-        attributes.bits()
+        attributes
     }
 
     /// set all the memory attributes for the current entry
-    fn set_attributes(&mut self, _attributes: u64) {
+    fn set_attributes(&mut self, _attributes: MemoryAttributes) {
         self.set_read_write(true);
         self.set_user_supervisor(true);
         self.set_write_through(false);
@@ -131,7 +131,7 @@ pub struct PageTableEntry4KB {
 
 impl PageTableEntry4KB {
     /// update all the fields and next table base address
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         if !self.present() {
             let mut next_level_table_base: u64 = pa.into();
 
@@ -148,7 +148,7 @@ impl PageTableEntry4KB {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> u64 {
+    pub fn get_attributes(&self) -> MemoryAttributes {
         let mut attributes = MemoryAttributes::empty();
 
         if !self.present() {
@@ -163,18 +163,18 @@ impl PageTableEntry4KB {
             attributes |= MemoryAttributes::ExecuteProtect;
         }
 
-        attributes.bits()
+        attributes
     }
 
     /// set all the memory attributes for the current entry
-    fn set_attributes(&mut self, attributes: u64) {
-        if (attributes & MemoryAttributes::ReadProtect.bits()) != 0 {
+    fn set_attributes(&mut self, attributes: MemoryAttributes) {
+        if attributes.contains(MemoryAttributes::ReadProtect) {
             self.set_present(false);
         } else {
             self.set_present(true);
         }
 
-        if (attributes & MemoryAttributes::ReadOnly.bits()) != 0 {
+        if attributes.contains(MemoryAttributes::ReadOnly) {
             self.set_read_write(false);
         } else {
             self.set_read_write(true);
@@ -188,7 +188,7 @@ impl PageTableEntry4KB {
         self.set_available(0);
         self.set_available_high(0);
 
-        if (attributes & MemoryAttributes::ExecuteProtect.bits()) != 0 {
+        if attributes.contains(MemoryAttributes::ExecuteProtect) {
             self.set_nx(true);
         } else {
             self.set_nx(false);

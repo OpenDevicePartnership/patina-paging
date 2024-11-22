@@ -78,10 +78,11 @@ pub trait PageTable {
     /// * `attributes` - The memory attributes to map. The acceptable
     ///   input will be ExecuteProtect, ReadOnly, as well as Uncacheable,
     ///   WriteCombining, WriteThrough, Writeback, UncacheableExport
+    ///   Compatible attributes can be "Ored"
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()>;
+    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
 
     /// Function to unmap the memory region provided by the caller. The
     /// requested memory region must be fully mapped prior to this call. Unlike
@@ -107,7 +108,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()>;
+    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
 
     /// Function to install the page table from this page table instance.
     ///
@@ -127,7 +128,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(u64)` if successful else `Err(PtError)` if failed
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64>;
+    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes>;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
