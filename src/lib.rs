@@ -1,45 +1,72 @@
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 
-use page_table_error::PtResult;
 extern crate alloc;
 pub mod aarch64;
 pub mod page_allocator;
-pub mod page_table_error;
 pub mod x64;
+use bitflags::bitflags;
 
-// Cache attributes
+pub type PtResult<T> = Result<T, PtError>;
 
-//
-// For X64:
-// .-----------------.------.-----.-----.-----.-----.
-// |                 | UC   | WC  | WP  | WT  | WB  |
-// + --------------- + ---  + --- + --- + --- + --- +
-// | Read  Cacheable | no   | no  | yes | yes | yes |
-// | Write Cacheable | no   | no* | no  | yes | yes |
-// '-----------------'------'-----'-----'-----'-----'
-//
-// NOTE: All caching attributes for x64 are handled via MTRRs, So below
-// attributes are not expected to be used in x64 paging implementation. They are
-// left here mainly for aarch64 implementation(which does not have MTRRs).
-//
-// Cache attributes(sorted from not so cache friendly to cache friendly)
-pub const EFI_MEMORY_UC: u64 = 0x00000000_00000001u64;
-pub const EFI_MEMORY_WC: u64 = 0x00000000_00000002u64;
-pub const EFI_MEMORY_WP: u64 = 0x00000000_00001000u64;
-pub const EFI_MEMORY_WT: u64 = 0x00000000_00000004u64;
-pub const EFI_MEMORY_WB: u64 = 0x00000000_00000008u64;
-pub const EFI_MEMORY_UCE: u64 = 0x00000000_00000010u64;
+#[derive(Debug, PartialEq)]
+pub enum PtError {
+    // Invalid parameter
+    InvalidParameter,
 
-// Memory access attributes
-pub const EFI_MEMORY_RP: u64 = 0x00000000_00002000u64;
-pub const EFI_MEMORY_XP: u64 = 0x00000000_00004000u64;
-pub const EFI_MEMORY_RO: u64 = 0x00000000_00020000u64;
+    // Out of resources
+    OutOfResources,
 
-pub const EFI_MEMORY_SP: u64 = 0x00000000_00040000u64;
-pub const EFI_MEMORY_CPU_CRYPTO: u64 = 0x00000000_00080000u64;
-pub const EFI_CACHE_ATTRIBUTE_MASK: u64 =
-    EFI_MEMORY_UC | EFI_MEMORY_WC | EFI_MEMORY_WT | EFI_MEMORY_WB | EFI_MEMORY_UCE | EFI_MEMORY_WP;
-pub const EFI_MEMORY_ACCESS_MASK: u64 = EFI_MEMORY_RP | EFI_MEMORY_XP | EFI_MEMORY_RO;
+    // No Mapping
+    NoMapping,
+
+    // Incompatible Memory Attributes
+    IncompatibleMemoryAttributes,
+
+    // Unaligned Page Base
+    UnalignedPageBase,
+
+    // Unaligned Address
+    UnalignedAddress,
+
+    // Unaligned Memory Range
+    UnalignedMemoryRange,
+
+    // Invalid Memory Range
+    InvalidMemoryRange,
+}
+
+// NOTE: On X64, Memory caching attributes are handled via MTRRs. On AArch64,
+// paging handles both memory access and caching attributes. Hence we defined
+// both of them here.
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct MemoryAttributes: u64 {
+        // Memory Caching Attributes
+        const Uncacheable       = 0x00000000_00000001u64;
+        const WriteCombining    = 0x00000000_00000002u64;
+        const WriteThrough      = 0x00000000_00000004u64;
+        const Writeback         = 0x00000000_00000008u64;
+        const UncacheableExport = 0x00000000_00000010u64;
+        const WriteProtect      = 0x00000000_00001000u64;
+
+        // Memory Access Attributes
+        const ReadProtect       = 0x00000000_00002000u64;   // Maps to Present bit on X64
+        const ExecuteProtect    = 0x00000000_00004000u64;   // Maps to NX bit on X64
+        const ReadOnly          = 0x00000000_00020000u64;   // Maps to Read/Write bit on X64
+
+
+        const CacheAttributesMask = Self::Uncacheable.bits() |
+                                   Self::WriteCombining.bits() |
+                                   Self::WriteThrough.bits() |
+                                   Self::Writeback.bits() |
+                                   Self::UncacheableExport.bits() |
+                                   Self::WriteProtect.bits();
+
+        const AccessAttributesMask = Self::ReadProtect.bits() |
+                                    Self::ExecuteProtect.bits() |
+                                    Self::ReadOnly.bits();
+    }
+}
 
 pub trait PageTable {
     /// Function to map the designated memory region to with provided
@@ -49,12 +76,13 @@ pub trait PageTable {
     /// * `address` - The memory address to map.
     /// * `size` - The memory size to map.
     /// * `attributes` - The memory attributes to map. The acceptable
-    ///   input will be EFI_MEMORY_XP, EFI_MEMORY_RO, as well as EFI_MEMORY_UC,
-    ///   EFI_MEMORY_WC, EFI_MEMORY_WT, EFI_MEMORY_WB, EFI_MEMORY_UCE
+    ///   input will be ExecuteProtect, ReadOnly, as well as Uncacheable,
+    ///   WriteCombining, WriteThrough, Writeback, UncacheableExport
+    ///   Compatible attributes can be "Ored"
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()>;
+    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
 
     /// Function to unmap the memory region provided by the caller. The
     /// requested memory region must be fully mapped prior to this call. Unlike
@@ -80,7 +108,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()>;
+    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
 
     /// Function to install the page table from this page table instance.
     ///
@@ -100,7 +128,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(u64)` if successful else `Err(PtError)` if failed
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64>;
+    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes>;
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

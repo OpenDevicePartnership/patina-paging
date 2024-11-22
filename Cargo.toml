@@ -1,6 +1,6 @@
 [package]
 name = "paging"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
 license = "BSD-2-Clause-Patent"
 description = "Paging library for AArch64 & X64 architectures"
@@ -12,6 +12,7 @@ features = ["doc"]
 
 [dependencies]
 bitfield-struct = "0.9.2"
+bitflags = "2.6.0"
 
 [features]
 std = []

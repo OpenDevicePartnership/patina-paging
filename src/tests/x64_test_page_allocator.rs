@@ -3,9 +3,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::page_allocator::PageAllocator;
-use crate::page_table_error::{PtError, PtResult};
 use crate::x64::structs::{PageLevel, PageMapEntry, PageTableEntry4KB, VirtualAddress, PAGE_SIZE};
-use crate::PagingType;
+use crate::{MemoryAttributes, PagingType};
+use crate::{PtError, PtResult};
 
 // This struct will create a the buffer/memory needed for building the page
 // tables
@@ -86,7 +86,7 @@ impl TestPageAllocator {
     //  TestPageAllocator                         Page Tables
     //       Memory
     //
-    pub fn validate_pages(&self, address: u64, size: u64, attributes: u64) {
+    pub fn validate_pages(&self, address: u64, size: u64, attributes: MemoryAttributes) {
         let address = VirtualAddress::new(address);
         let start_va = address;
         let end_va = address + size - 1;
@@ -105,7 +105,7 @@ impl TestPageAllocator {
         end_va: VirtualAddress,
         level: PageLevel,
         page_index: &mut u64,
-        attributes: u64,
+        attributes: MemoryAttributes,
     ) {
         if level == self.lowest_page_level - 1 {
             return;
@@ -157,7 +157,7 @@ impl TestPageAllocator {
         entry_ptr: *const u64,
         expected_page_base: u64,
         level: PageLevel,
-        expected_attributes: u64,
+        expected_attributes: MemoryAttributes,
     ) {
         unsafe {
             let table_base = *entry_ptr;
@@ -167,7 +167,7 @@ impl TestPageAllocator {
                     let page_base: u64 = PageMapEntry::from_bits(table_base).get_canonical_page_table_base().into();
                     let attributes = PageMapEntry::from_bits(table_base).get_attributes();
                     assert_eq!(page_base, expected_page_base);
-                    assert_eq!(attributes, 0); // we don't set any attributes on higher level page table entries
+                    assert_eq!(attributes, MemoryAttributes::empty()); // we don't set any attributes on higher level page table entries
                 }
                 PageLevel::Pt => {
                     let page_base: u64 =

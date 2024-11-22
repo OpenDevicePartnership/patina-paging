@@ -5,10 +5,7 @@ use core::{
 
 use bitfield_struct::bitfield;
 
-use crate::{
-    page_table_error::{PtError, PtResult},
-    EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_XP,
-};
+use crate::{MemoryAttributes, PtError, PtResult};
 
 pub const PAGE_SIZE: u64 = 0x1000; // 4KB
 const PAGE_INDEX_MASK: u64 = 0x1FF;
@@ -50,7 +47,7 @@ pub struct PageMapEntry {
 
 impl PageMapEntry {
     /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         if !self.present() {
             let mut next_level_table_base: u64 = pa.into();
 
@@ -76,26 +73,26 @@ impl PageMapEntry {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> u64 {
-        let mut attributes = 0u64;
+    pub fn get_attributes(&self) -> MemoryAttributes {
+        let mut attributes = MemoryAttributes::empty();
 
         if !self.present() {
-            attributes |= EFI_MEMORY_RP;
+            attributes |= MemoryAttributes::ReadProtect;
         }
 
         if !self.read_write() {
-            attributes |= EFI_MEMORY_RO;
+            attributes |= MemoryAttributes::ReadOnly;
         }
 
         if self.nx() {
-            attributes |= EFI_MEMORY_XP;
+            attributes |= MemoryAttributes::ExecuteProtect;
         }
 
         attributes
     }
 
     /// set all the memory attributes for the current entry
-    fn set_attributes(&mut self, _attributes: u64) {
+    fn set_attributes(&mut self, _attributes: MemoryAttributes) {
         self.set_read_write(true);
         self.set_user_supervisor(true);
         self.set_write_through(false);
@@ -134,7 +131,7 @@ pub struct PageTableEntry4KB {
 
 impl PageTableEntry4KB {
     /// update all the fields and next table base address
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         if !self.present() {
             let mut next_level_table_base: u64 = pa.into();
 
@@ -151,33 +148,33 @@ impl PageTableEntry4KB {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> u64 {
-        let mut attributes = 0u64;
+    pub fn get_attributes(&self) -> MemoryAttributes {
+        let mut attributes = MemoryAttributes::empty();
 
         if !self.present() {
-            attributes |= EFI_MEMORY_RP;
+            attributes |= MemoryAttributes::ReadProtect;
         }
 
         if !self.read_write() {
-            attributes |= EFI_MEMORY_RO;
+            attributes |= MemoryAttributes::ReadOnly;
         }
 
         if self.nx() {
-            attributes |= EFI_MEMORY_XP;
+            attributes |= MemoryAttributes::ExecuteProtect;
         }
 
         attributes
     }
 
     /// set all the memory attributes for the current entry
-    fn set_attributes(&mut self, attributes: u64) {
-        if (attributes & EFI_MEMORY_RP) != 0 {
+    fn set_attributes(&mut self, attributes: MemoryAttributes) {
+        if attributes.contains(MemoryAttributes::ReadProtect) {
             self.set_present(false);
         } else {
             self.set_present(true);
         }
 
-        if (attributes & EFI_MEMORY_RO) != 0 {
+        if attributes.contains(MemoryAttributes::ReadOnly) {
             self.set_read_write(false);
         } else {
             self.set_read_write(true);
@@ -191,7 +188,7 @@ impl PageTableEntry4KB {
         self.set_available(0);
         self.set_available_high(0);
 
-        if (attributes & EFI_MEMORY_XP) != 0 {
+        if attributes.contains(MemoryAttributes::ExecuteProtect) {
             self.set_nx(true);
         } else {
             self.set_nx(false);

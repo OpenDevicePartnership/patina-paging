@@ -10,6 +10,36 @@ The main traits/structs for public consumption are
 `PageTable/PageAllocator/X64PageTable/Aarch64PageTable`.
 
 ```rust
+bitflags! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    pub struct MemoryAttributes: u64 {
+        // Memory Caching Attributes
+        const Uncacheable       = 0x00000000_00000001u64;
+        const WriteCombining    = 0x00000000_00000002u64;
+        const WriteThrough      = 0x00000000_00000004u64;
+        const Writeback         = 0x00000000_00000008u64;
+        const UncacheableExport = 0x00000000_00000010u64;
+        const WriteProtect      = 0x00000000_00001000u64;
+
+        // Memory Access Attributes
+        const ReadProtect       = 0x00000000_00002000u64;   // Maps to Present bit on X64
+        const ExecuteProtect    = 0x00000000_00004000u64;   // Maps to NX bit on X64
+        const ReadOnly          = 0x00000000_00020000u64;   // Maps to Read/Write bit on X64
+
+
+        const CacheAttributesMask = Self::Uncacheable.bits() |
+                                    Self::WriteCombining.bits() |
+                                    Self::WriteThrough.bits() |
+                                    Self::Writeback.bits() |
+                                    Self::UncacheableExport.bits() |
+                                    Self::WriteProtect.bits();
+
+        const AccessAttributesMask = Self::ReadProtect.bits() |
+                                     Self::ExecuteProtect.bits() |
+                                     Self::ReadOnly.bits();
+    }
+}
+
 pub trait PageTable {
     /// Function to map the designated memory region to with provided
     /// attributes.
@@ -18,12 +48,13 @@ pub trait PageTable {
     /// * `address` - The memory address to map.
     /// * `size` - The memory size to map.
     /// * `attributes` - The memory attributes to map. The acceptable
-    ///   input will be EFI_MEMORY_XP, EFI_MEMORY_RO, as well as EFI_MEMORY_UC,
-    ///   EFI_MEMORY_WC, EFI_MEMORY_WT, EFI_MEMORY_WB, EFI_MEMORY_UCE
+    ///   input will be ExecuteProtect, ReadOnly, as well as Uncacheable,
+    ///   WriteCombining, WriteThrough, Writeback, UncacheableExport.
+    ///   Compatible attributes can be "Ored"
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()>;
+    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
 
     /// Function to unmap the memory region provided by the caller. The
     /// requested memory region must be fully mapped prior to this call. Unlike
@@ -49,7 +80,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()>;
+    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
 
     /// Function to install the page table from this page table instance.
     ///
@@ -68,8 +99,8 @@ pub trait PageTable {
     /// Returns memory attributes
     ///
     /// ## Errors
-    /// * Returns `Ok(u64)` if successful else `Err(PtError)` if failed
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64>;
+    /// * Returns `Ok(MemoryAttributes)` if successful else `Err(PtError)` if failed
+    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes>;
 }
 ```
 
@@ -97,7 +128,7 @@ pub trait PageAllocator {
 
     let pt = X64PageTable::new(page_allocator, PagingType::Paging4KB4Level)?;
 
-    let attributes = EFI_MEMORY_RP;
+    let attributes = MemoryAttributes::ReadOnly;
     let res = pt.map_memory_region(address, size, attributes);
     ...
     let res = pt.unmap_memory_region(address, size);

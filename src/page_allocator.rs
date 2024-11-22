@@ -1,4 +1,4 @@
-use crate::page_table_error::PtResult;
+use crate::PtResult;
 
 /// PageAllocator trait facilitates `allocate_page()` method for allocating new
 /// pages
