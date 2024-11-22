@@ -18,8 +18,8 @@ pub trait PageTable {
     /// * `address` - The memory address to map.
     /// * `size` - The memory size to map.
     /// * `attributes` - The memory attributes to map. The acceptable
-    ///   input will be EFI_MEMORY_XP, EFI_MEMORY_RO, as well as EFI_MEMORY_UC,
-    ///   EFI_MEMORY_WC, EFI_MEMORY_WT, EFI_MEMORY_WB, EFI_MEMORY_UCE
+    ///   input will be ExecuteProtect, ReadOnly, as well as Uncacheable,
+    ///   WriteCombining, WriteThrough, Writeback, UncacheableExport
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
@@ -97,7 +97,7 @@ pub trait PageAllocator {
 
     let pt = X64PageTable::new(page_allocator, PagingType::Paging4KB4Level)?;
 
-    let attributes = EFI_MEMORY_RP;
+    let attributes = MemoryAttributes::ReadOnly.bits();
     let res = pt.map_memory_region(address, size, attributes);
     ...
     let res = pt.unmap_memory_region(address, size);

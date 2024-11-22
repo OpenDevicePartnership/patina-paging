@@ -1,7 +1,6 @@
 use crate::{
     page_allocator::PageAllocator,
-    page_table_error::{PtError, PtResult},
-    PageTable, PagingType,
+    PageTable, PagingType, {PtError, PtResult},
 };
 
 use core::arch::asm;
@@ -53,7 +52,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         // This is used during page building to stop the recursion.
         let (highest_page_level, lowest_page_level) = match paging_type {
             PagingType::AArch64PageTable4KB => (PageLevel::Lvl0, PageLevel::Lvl3),
-            _ => return Err(crate::page_table_error::PtError::InvalidParameter),
+            _ => return Err(PtError::InvalidParameter),
         };
 
         Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })

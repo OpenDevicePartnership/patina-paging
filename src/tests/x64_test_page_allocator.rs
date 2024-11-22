@@ -3,9 +3,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::page_allocator::PageAllocator;
-use crate::page_table_error::{PtError, PtResult};
 use crate::x64::structs::{PageLevel, PageMapEntry, PageTableEntry4KB, VirtualAddress, PAGE_SIZE};
 use crate::PagingType;
+use crate::{PtError, PtResult};
 
 // This struct will create a the buffer/memory needed for building the page
 // tables

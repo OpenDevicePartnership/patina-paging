@@ -3,11 +3,7 @@
 /// - x64 4KB 5 level paging
 /// - x64 4KB 4 level paging
 ///
-use crate::{
-    page_allocator::PageAllocator,
-    page_table_error::{PtError, PtResult},
-    PageTable, PagingType,
-};
+use crate::{page_allocator::PageAllocator, PageTable, PagingType, PtError, PtResult};
 
 use super::{
     pagetablestore::X64PageTableStore,

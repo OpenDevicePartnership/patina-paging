@@ -4,11 +4,7 @@ use core::{
     ops::{Add, Sub},
 };
 
-use crate::{
-    page_table_error::{PtError, PtResult},
-    EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_UC, EFI_MEMORY_UCE, EFI_MEMORY_WB, EFI_MEMORY_WC, EFI_MEMORY_WT,
-    EFI_MEMORY_XP,
-};
+use crate::{MemoryAttributes, PtError, PtResult};
 
 pub(crate) const MAX_VA: u64 = 0x0000_ffff_ffff_ffff;
 
@@ -27,9 +23,6 @@ const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_MASK: u64 = 0x000f_ffff_ffff_
 
 const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_SHIFT: u64 = 2u64; // bit 51:50
 const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK: u64 = 0x0030_0000_0000_0000u64; // 2 bits - bit 51:50
-
-pub(crate) const EFI_MEMORY_CACHETYPE_MASK: u64 =
-    EFI_MEMORY_UC | EFI_MEMORY_WC | EFI_MEMORY_WT | EFI_MEMORY_WB | EFI_MEMORY_UCE;
 
 fn is_4kb_aligned(addr: u64) -> bool {
     (addr & (FRAME_SIZE_4KB - 1)) == 0
@@ -111,22 +104,22 @@ impl VMSAv864TableDescriptor {
 
     /// return all the memory attributes for the current entry
     pub fn get_attributes(&mut self) -> u64 {
-        let mut attributes = 0u64;
+        let mut attributes = MemoryAttributes::empty();
 
         if !self.is_valid_table() {
-            attributes |= EFI_MEMORY_RP;
+            attributes |= MemoryAttributes::ReadProtect;
         }
 
         if (self.ap_table() == 0b10) | (self.ap_table() == 0b11) {
-            attributes |= EFI_MEMORY_RO;
+            attributes |= MemoryAttributes::ReadOnly;
         }
 
         if self.uxn_table() | self.pxn_table() {
             // TODO: need to check if the system in EL2 or EL1
-            attributes |= EFI_MEMORY_XP;
+            attributes |= MemoryAttributes::ExecuteProtect;
         }
 
-        attributes
+        attributes.bits()
     }
 
     pub fn set_table_invalid(&mut self) {
@@ -188,29 +181,30 @@ impl VMSAv864PageDescriptor {
     }
 
     fn set_attributes(&mut self, attributes: u64) {
+        let attributes = MemoryAttributes::from_bits_truncate(attributes);
         // This change pretty much follows the GcdAttributeToPageAttribute
-        match attributes & EFI_MEMORY_CACHETYPE_MASK {
-            EFI_MEMORY_UC => {
+        match attributes & MemoryAttributes::CacheAttributeMask {
+            MemoryAttributes::Uncacheable => {
                 self.set_attribute_index(0);
                 self.set_ng(false);
                 self.set_ns(false);
             }
-            EFI_MEMORY_WC => {
+            MemoryAttributes::WriteCombining => {
                 self.set_attribute_index(1);
                 self.set_ng(false);
                 self.set_ns(false);
             }
-            EFI_MEMORY_WT => {
+            MemoryAttributes::WriteThrough => {
                 self.set_attribute_index(2);
                 self.set_ng(false);
                 self.set_ns(false);
             }
-            EFI_MEMORY_WB => {
+            MemoryAttributes::Writeback => {
                 self.set_attribute_index(3);
                 self.set_ng(false);
                 self.set_ns(false);
             }
-            EFI_MEMORY_UCE => {
+            MemoryAttributes::UncacheableExport => {
                 self.set_attribute_index(4);
                 self.set_ng(false);
                 self.set_ns(false);
@@ -222,13 +216,15 @@ impl VMSAv864PageDescriptor {
             }
         }
 
-        if (attributes & EFI_MEMORY_XP != 0) || (attributes & EFI_MEMORY_CACHETYPE_MASK == EFI_MEMORY_UC) {
+        if attributes.contains(MemoryAttributes::ExecuteProtect)
+            || (attributes & MemoryAttributes::CacheAttributeMask == MemoryAttributes::Uncacheable)
+        {
             // TODO: need to check if the system in EL2 or EL1
             self.set_uxn(true);
             self.set_pxn(false);
         }
 
-        if attributes & EFI_MEMORY_RO != 0 {
+        if attributes.contains(MemoryAttributes::ReadOnly) {
             self.set_access_permission(2);
         }
         self.set_access_flag(true);
@@ -236,31 +232,31 @@ impl VMSAv864PageDescriptor {
 
     /// return all the memory attributes for the current entry
     pub fn get_attributes(&self) -> u64 {
-        let mut attributes = 0u64;
+        let mut attributes = MemoryAttributes::empty();
 
         if !self.is_valid_page() {
-            attributes = EFI_MEMORY_RP;
+            attributes = MemoryAttributes::ReadProtect;
         } else {
             match self.attribute_index() {
-                0 => attributes |= EFI_MEMORY_UC,
-                1 => attributes |= EFI_MEMORY_WC,
-                2 => attributes |= EFI_MEMORY_WT,
-                3 => attributes |= EFI_MEMORY_WB,
-                4 => attributes |= EFI_MEMORY_UCE,
-                _ => attributes |= EFI_MEMORY_UC,
+                0 => attributes |= MemoryAttributes::Uncacheable,
+                1 => attributes |= MemoryAttributes::WriteCombining,
+                2 => attributes |= MemoryAttributes::WriteThrough,
+                3 => attributes |= MemoryAttributes::Writeback,
+                4 => attributes |= MemoryAttributes::UncacheableExport,
+                _ => attributes |= MemoryAttributes::Uncacheable,
             }
 
             if self.access_permission() == 2 {
-                attributes |= EFI_MEMORY_RO;
+                attributes |= MemoryAttributes::ReadOnly;
             }
 
             if self.uxn() {
-                attributes |= EFI_MEMORY_XP;
+                attributes |= MemoryAttributes::ExecuteProtect;
             }
         }
 
         // TODO: add other attributes
-        attributes
+        attributes.bits()
     }
 
     /// update all the fields and table base address

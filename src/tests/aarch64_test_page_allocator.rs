@@ -2,12 +2,10 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::aarch64::structs::{
-    PageLevel, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, EFI_MEMORY_CACHETYPE_MASK, PAGE_SIZE,
-};
+use crate::aarch64::structs::{PageLevel, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE};
 use crate::page_allocator::PageAllocator;
-use crate::page_table_error::{PtError, PtResult};
-use crate::PagingType;
+use crate::{MemoryAttributes, PagingType};
+use crate::{PtError, PtResult};
 
 // This struct will create a the buffer/memory needed for building the page
 // tables
@@ -176,8 +174,8 @@ impl TestPageAllocator {
                         let page_base: u64 =
                             VMSAv864PageDescriptor::from_bits(table_base).get_canonical_page_table_base().into();
                         let attributes = VMSAv864PageDescriptor::from_bits(table_base).get_attributes();
-                        // Ignore EFI_MEMORY_CACHETYPE_MASK bits
-                        let attributes = attributes & (!EFI_MEMORY_CACHETYPE_MASK);
+                        // Ignore memory cache bits
+                        let attributes = attributes & (!MemoryAttributes::CacheAttributeMask.bits());
                         assert_eq!(page_base, expected_page_base);
                         assert_eq!(attributes, expected_attributes);
                     }
