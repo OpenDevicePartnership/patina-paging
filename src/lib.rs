@@ -131,7 +131,7 @@ pub trait PageTable {
     fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes>;
 
     /// Test Function to dump memory ranges with their attributes. This function
-    /// can be used from `test_dump_page_tabless()` test case
+    /// can be used from `test_dump_page_tables()` test case
     ///
     /// ## Arguments
     /// * `address` - The memory address to map.
