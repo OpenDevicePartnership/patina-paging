@@ -1124,3 +1124,32 @@ fn test_from_existing_page_table() {
         assert!(res.is_ok());
     }
 }
+
+#[test]
+fn test_dump_page_tables() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: 0x8000 }];
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly;
+        let res = pt.map_memory_region(address, size, attributes);
+        assert!(res.is_ok());
+
+        pt.dump_page_tables(address, size);
+    }
+}

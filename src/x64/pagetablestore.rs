@@ -163,6 +163,21 @@ impl X64PageTableEntry {
             PageLevel::Pa => panic!("unexpected call to get attributes for pa paging level"),
         }
     }
+
+    #[cfg(test)]
+    pub fn dump_entry(&self) -> String {
+        match self.level {
+            PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {
+                let entry = unsafe { get_entry::<PageMapEntry>(self.page_base, self.index) };
+                entry.dump_entry()
+            }
+            PageLevel::Pt => {
+                let entry = unsafe { get_entry::<PageTableEntry4KB>(self.page_base, self.index) };
+                entry.dump_entry()
+            }
+            PageLevel::Pa => panic!("unexpected call to get attributes for pa paging level"),
+        }
+    }
 }
 
 const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries

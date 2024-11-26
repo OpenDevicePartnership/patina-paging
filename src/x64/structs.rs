@@ -102,6 +102,39 @@ impl PageMapEntry {
         self.set_available_high(0);
         self.set_nx(false);
     }
+
+    #[cfg(test)]
+    pub fn dump_entry(&self) -> String {
+        let nx = self.nx() as u64;
+        let available_high = self.available_high() as u64;
+        let page_table_base_address = self.page_table_base_address();
+        let available = self.available() as u64;
+        let must_be_zero = self.must_be_zero() as u64;
+        let reserved = self.reserved() as u64;
+        let accessed = self.accessed() as u64;
+        let cache_disabled = self.cache_disabled() as u64;
+        let write_through = self.write_through() as u64;
+        let user_supervisor = self.user_supervisor() as u64;
+        let read_write = self.read_write() as u64;
+        let present = self.present() as u64;
+
+        format!(
+            "│{:01b}│{:011b}│{:040b}│{:03b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│",
+            nx,                      // 1 bit -  No Execute bit
+            available_high & 0x7FF,  // 11 bits -  Available for use by system software
+            page_table_base_address, // 40 bits -  Page Table Base Address
+            available & 0x7,         // 3 bits -  Available for use by system software
+            must_be_zero & 0x1,      // 1 bits -  Must Be Zero
+            must_be_zero & 0x1,      // 1 bits -  Must Be Zero
+            reserved,                // 1 bit -  Reserved
+            accessed,                // 1 bit -  0 = Not accessed, 1 = Accessed (set by CPU)
+            cache_disabled,          // 1 bit -  0 = Cached, 1=Non-Cached
+            write_through,           // 1 bit -  0 = Write-Back caching, 1=Write-Through caching
+            user_supervisor,         // 1 bit -  0 = Supervisor, 1=User
+            read_write,              // 1 bit -  0 = Read-Only, 1= Read/Write
+            present,                 // 1 bit -  0 = Not present in memory, 1 = Present in memory
+        )
+    }
 }
 
 pub(crate) const FRAME_SIZE_4KB: u64 = 0x1000; // 4KB
@@ -203,6 +236,40 @@ impl PageTableEntry4KB {
 
         PhysicalAddress(page_table_base_address)
     }
+
+    #[cfg(test)]
+    pub fn dump_entry(&self) -> String {
+        let nx = self.nx() as u64;
+        let available_high = self.available_high() as u64;
+        let page_table_base_address = self.page_table_base_address();
+        let available = self.available() as u64;
+        let global = self.global() as u64;
+        let pat = self.pat() as u64;
+        let dirty = self.dirty() as u64;
+        let accessed = self.accessed() as u64;
+        let cache_disabled = self.cache_disabled() as u64;
+        let write_through = self.write_through() as u64;
+        let user_supervisor = self.user_supervisor() as u64;
+        let read_write = self.read_write() as u64;
+        let present = self.present() as u64;
+
+        format!(
+            "│{:01b}│{:011b}│{:040b}│{:03b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│",
+            nx,                      // 1 bit -  0 = Execute Code, 1 = No Code Execution
+            available_high & 0x7FF,  // 11 bits -  Available for use by system software
+            page_table_base_address, // 40 bits -  Page Table Base Address
+            available & 0x7,         // 3 bits -  Available for use by system software
+            global,                  // 1 bit -  0 = Not global page, 1 = global page TLB not cleared on CR3 write
+            pat,                     // 1 bit
+            dirty,                   // 1 bit -  0 = Not Dirty, 1 = written by processor on access to page
+            accessed,                // 1 bit -  0 = Not accessed, 1 = Accessed (set by CPU)
+            cache_disabled,          // 1 bit -  0 = Cached, 1=Non-Cached
+            write_through,           // 1 bit -  0 = Write-Back caching, 1=Write-Through caching
+            user_supervisor,         // 1 bit -  0 = Supervisor, 1=User
+            read_write,              // 1 bit -  0 = Read-Only, 1= Read/Write
+            present                  // 1 bit -  0 = Not present in memory, 1 = Present in memory
+        )
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -243,7 +310,22 @@ impl Sub<u64> for PageLevel {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[cfg(test)]
+impl fmt::Display for PageLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let level_name = match self {
+            PageLevel::Pml5 => "PML5",
+            PageLevel::Pml4 => "PML4",
+            PageLevel::Pdp => "PDP",
+            PageLevel::Pd => "PD",
+            PageLevel::Pt => "PT",
+            PageLevel::Pa => "PA",
+        };
+        write!(f, "{:5}", level_name)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct VirtualAddress(u64);
 impl VirtualAddress {
     pub fn new(va: u64) -> Self {
