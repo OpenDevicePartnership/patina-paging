@@ -171,6 +171,21 @@ impl AArch64PageTableEntry {
             _ => panic!("Invalid page level"),
         }
     }
+
+    #[cfg(test)]
+    pub fn dump_entry(&self) -> String {
+        match self.level {
+            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
+                let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
+                entry.dump_entry()
+            }
+            PageLevel::Lvl3 => {
+                let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
+                entry.dump_entry()
+            }
+            _ => panic!("Invalid page level"),
+        }
+    }
 }
 
 const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries

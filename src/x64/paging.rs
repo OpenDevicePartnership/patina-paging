@@ -350,6 +350,73 @@ impl<A: PageAllocator> X64PageTable<A> {
         Ok(*prev_attributes)
     }
 
+    #[cfg(test)]
+    fn dump_page_tables_internal(
+        &self,
+        start_va: VirtualAddress,
+        end_va: VirtualAddress,
+        level: PageLevel,
+        base: PhysicalAddress,
+    ) {
+        let mut va = start_va;
+
+        let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        if level == self.lowest_page_level {
+            for entry in table {
+                if !entry.present() {
+                    return;
+                }
+
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
+
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                let l: u64 = level.into();
+                let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
+                println!("{}|{:48}{}", level, range, entry.dump_entry());
+
+                va = va.get_next_va(level);
+            }
+            return;
+        }
+
+        for entry in table {
+            if !entry.present() {
+                return;
+            }
+            let next_base = entry.get_canonical_page_table_base();
+
+            // split the va range appropriately for the next level pages
+
+            // start of the next level va. It will be same as current va
+            let next_level_start_va = va;
+
+            // get max va addressable by current entry
+            let curr_va_ceil = va.round_up(level);
+
+            // end of next level va. It will be minimum of next va and end va
+            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+            let l: u64 = level.into();
+            let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
+            println!("{}|{:48}{}", level, range, entry.dump_entry());
+
+            self.dump_page_tables_internal(
+                next_level_start_va,
+                next_level_end_va,
+                (level as u64 - 1).into(),
+                next_base,
+            );
+
+            va = va.get_next_va(level);
+        }
+    }
+
     fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
         // Overflow check
         address.try_add(size)?;
@@ -457,5 +524,26 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
 
         let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
+    }
+
+    #[cfg(test)]
+    fn dump_page_tables(&self, address: u64, size: u64) {
+        let address = VirtualAddress::new(address);
+
+        self.validate_address_range(address, size).unwrap();
+
+        let start_va = address;
+        let end_va = address + size - 1;
+
+        println!("{}[{} {}]{}", "-".repeat(45), start_va, end_va, "-".repeat(48));
+        println!("                                                      6362        52 51                                   12 11 9 8 7 6 5 4 3 2 1 0 ");
+        println!("                                                      ┌─┬───────────┬───────────────────────────────────────┬────┬─┬─┬─┬─┬─┬─┬─┬─┬─┐");
+        println!("                                                      │N│           │                                       │    │M│M│I│ │P│P│U│R│ │");
+        println!("                                                      │X│ Available │     Page-Map Level-4 Base Address     │AVL │B│B│G│A│C│W│/│/│P│");
+        println!("                                                      │ │           │                                       │    │Z│Z│N│ │D│T│S│W│ │");
+        println!("                                                      └─┴───────────┴───────────────────────────────────────┴────┴─┴─┴─┴─┴─┴─┴─┴─┴─┘");
+        println!("{}", "-".repeat(132));
+        self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base);
+        println!("{}", "-".repeat(132));
     }
 }

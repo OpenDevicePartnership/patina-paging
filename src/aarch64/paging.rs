@@ -293,6 +293,73 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         Ok(*prev_attributes)
     }
 
+    #[cfg(test)]
+    fn dump_page_tables_internal(
+        &self,
+        start_va: VirtualAddress,
+        end_va: VirtualAddress,
+        level: PageLevel,
+        base: PhysicalAddress,
+    ) {
+        let mut va = start_va;
+
+        let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        if level == self.lowest_page_level {
+            for entry in table {
+                if !entry.is_valid() {
+                    return;
+                }
+
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
+
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                let l: u64 = level.into();
+                let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
+                println!("{}|{:48}{}", level, range, entry.dump_entry());
+
+                va = va.get_next_va(level);
+            }
+            return;
+        }
+
+        for entry in table {
+            if !entry.is_valid() {
+                return;
+            }
+            let next_base = entry.get_canonical_page_table_base();
+
+            // split the va range appropriately for the next level pages
+
+            // start of the next level va. It will be same as current va
+            let next_level_start_va = va;
+
+            // get max va addressable by current entry
+            let curr_va_ceil = va.round_up(level);
+
+            // end of next level va. It will be minimum of next va and end va
+            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+            let l: u64 = level.into();
+            let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
+            println!("{}|{:48}{}", level, range, entry.dump_entry());
+
+            self.dump_page_tables_internal(
+                next_level_start_va,
+                next_level_end_va,
+                (level as u64 - 1).into(),
+                next_base,
+            );
+
+            va = va.get_next_va(level);
+        }
+    }
+
     // Private function to check if this page table is active
     fn _is_this_page_table_active(&self) -> bool {
         // Check the TTBR0 register to see if this page table matches
@@ -407,5 +474,19 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
 
         let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
+    }
+
+    #[cfg(test)]
+    fn dump_page_tables(&self, address: u64, size: u64) {
+        let address = VirtualAddress::new(address);
+
+        self.validate_address_range(address, size).unwrap();
+
+        let start_va = address;
+        let end_va = address + size - 1;
+
+        println!("start-end:[{} {}]", start_va, end_va);
+        println!("{}", "-".repeat(130));
+        self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base)
     }
 }

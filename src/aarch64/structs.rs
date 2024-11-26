@@ -125,6 +125,40 @@ impl VMSAv864TableDescriptor {
     pub fn set_table_invalid(&mut self) {
         self.set_valid_desc(false);
     }
+
+    #[cfg(test)]
+    pub fn dump_entry(&self) -> String {
+        let valid_desc = self.valid_desc() as u64;
+        let table_desc = self.table_desc() as u64;
+        let ignored0 = self.ignored0() as u64;
+        let nlta_upper = self.nlta_upper() as u64;
+        let access_flag = self.access_flag() as u64;
+        let ignored1 = self.ignored1() as u64;
+        let nlta_lower = self.nlta_lower() as u64;
+        let ignored2 = self.ignored2() as u64;
+        let ignored3 = self.ignored3() as u64;
+        let pxn_table = self.pxn_table() as u64;
+        let uxn_table = self.uxn_table() as u64;
+        let ap_table = self.ap_table() as u64;
+        let ns_table = self.ns_table() as u64;
+
+        format!(
+            "|{:01b}|{:02b}|{:01b}|{:01b}|{:06b}|{:01b}|{:040b}|{:01b}|{:01b}|{:02b}|{:06b}|{:01b}|{:01b}|",
+            ns_table,    // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
+            ap_table,    // 2 bits -  Hierarchical permissions.
+            uxn_table,   // 1 bit  -  Hierarchical permissions.
+            pxn_table,   // 1 bit  -  Hierarchical permissions.
+            ignored3,    // 6 bits -  Not used.
+            ignored2,    // 1 bit  -  Not used with PnCH being 0.
+            nlta_lower,  // 40 bits - Address to the next level table descriptor, depending on the granule.
+            ignored1,    // 1 bit  -  Not used.
+            access_flag, // 1 bit  -  When hardware managed access flag is enabled
+            nlta_upper,  // 2 bits -  NTLA for 4KB or 16KB granule
+            ignored0,    // 6 bits -  Not used.
+            table_desc,  // 1 bit -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
+            valid_desc,  // 1 bit -  Valid descriptor
+        )
+    }
 }
 
 // Below is the implementation of the block descriptor for AArch64 systems.
@@ -289,6 +323,53 @@ impl VMSAv864PageDescriptor {
     pub fn set_page_invalid(&mut self) {
         self.set_descriptor_type(0);
     }
+
+    #[cfg(test)]
+    pub fn dump_entry(&self) -> String {
+        let descriptor_type = self.descriptor_type() as u64;
+        let attribute_index = self.attribute_index() as u64;
+        let ns = self.ns() as u64;
+        let access_permission = self.access_permission() as u64;
+        let shareable = self.shareable() as u64;
+        let access_flag = self.access_flag() as u64;
+        let ng = self.ng() as u64;
+        let level3_index = self.level3_index() as u64;
+        let level2_index = self.level2_index() as u64;
+        let level1_index = self.level1_index() as u64;
+        let level0_index = self.level0_index() as u64;
+        let reserved0 = self.reserved0() as u64;
+        let guarded_page = self.guarded_page() as u64;
+        let dirty_bit_modifier = self.dirty_bit_modifier() as u64;
+        let contig = self.contig() as u64;
+        let pxn = self.pxn() as u64;
+        let uxn = self.uxn() as u64;
+        let reserved1 = self.reserved1() as u64;
+        let imp_def = self.imp_def() as u64;
+        let ignored = self.ignored() as u64;
+        format!(
+            "|{:01b}|{:04b}|{:03b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:02b}|{:09b}|{:09b}|{:09b}|{:09b}|{:01b}|{:01b}|{:02b}|{:02b}|{:01b}|{:03b}|{:02b}|",
+            ignored,         // 1 bit  -  Not used outside of Realm translation regimes
+            imp_def,         // 4 bits -  Implementation defined
+            reserved1,       // 3 bits -  Reserved for software use
+            uxn,             // 1 bit  -  UXN Execution permissions
+            pxn,             // 1 bit  -  PXN Execution permissions
+            contig,          // 1 bit  -  Contiguous
+            dirty_bit_modifier, // 1 bit  -  DBM
+            guarded_page,    // 1 bit  -  GP
+            reserved0,       // 2 bits -  Not used
+            level0_index,    // 9 bits -  Level 0 index, that points to L1 table or a 512GB block
+            level1_index,    // 9 bits -  Level 1 index, that points to L2 table or a 1GB block
+            level2_index,    // 9 bits -  Level 2 index, that points to L3 table or a 2MB block
+            level3_index,    // 9 bits -  Level 3 index, that points to a 4KB block
+            ng,              // 1 bit  -  Not global
+            access_flag,     // 1 bit  -  Access flag
+            shareable,       // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
+            access_permission, // 2 bits -  AP
+            ns,              // 1 bit  -  NS
+            attribute_index, // 3 bits -  AttrIndx 0 = Device memory, 1 = non-cacheable memory, 2 = write-through, 3 = write-back, 4 = write-back.
+            descriptor_type, // 2 bits -  1 = Block entry, 3 = Page entry or level 3 block entry, Others = Faulty entry
+        )
+    }
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -324,6 +405,20 @@ impl Sub<u64> for PageLevel {
 
     fn sub(self, _rhs: u64) -> Self::Output {
         ((self as u64) - 1).into()
+    }
+}
+
+#[cfg(test)]
+impl fmt::Display for PageLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let level_name = match self {
+            PageLevel::Lvl0 => "LVL0",
+            PageLevel::Lvl1 => "LVL1",
+            PageLevel::Lvl2 => "LVL2",
+            PageLevel::Lvl3 => "LVL3",
+            PageLevel::NA => "NA",
+        };
+        write!(f, "{:5}", level_name)
     }
 }
 
