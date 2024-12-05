@@ -1,8 +1,8 @@
-use crate::{MemoryAttributes, PagingType, PtResult};
-
 use super::structs::{
     PageLevel, PhysicalAddress, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE,
 };
+use crate::{MemoryAttributes, PagingType, PtResult};
+use alloc::string::String;
 
 /// Contains enough metadata to work with a single page table
 pub struct AArch64PageTableStore {
@@ -172,7 +172,6 @@ impl AArch64PageTableEntry {
         }
     }
 
-    #[cfg(test)]
     pub fn dump_entry(&self) -> String {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {

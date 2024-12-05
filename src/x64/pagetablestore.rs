@@ -1,6 +1,6 @@
-use crate::{MemoryAttributes, PagingType, PtResult};
-
 use super::structs::{PageLevel, PageMapEntry, PageTableEntry4KB, PhysicalAddress, VirtualAddress, PAGE_SIZE};
+use crate::{MemoryAttributes, PagingType, PtResult};
+use alloc::string::String;
 
 /// Contains enough metadata to work with a single page table
 pub struct X64PageTableStore {
@@ -164,7 +164,6 @@ impl X64PageTableEntry {
         }
     }
 
-    #[cfg(test)]
     pub fn dump_entry(&self) -> String {
         match self.level {
             PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {

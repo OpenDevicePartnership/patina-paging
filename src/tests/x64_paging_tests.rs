@@ -6,6 +6,29 @@ use crate::{
     },
     MemoryAttributes, PageTable, PagingType, PtError, PtResult,
 };
+use log::{Level, LevelFilter, Metadata, Record};
+
+// Sample logger for log crate to dump stuff in tests
+struct SimpleLogger;
+
+impl log::Log for SimpleLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= Level::Info
+    }
+
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) {
+            println!("{}", record.args());
+        }
+    }
+
+    fn flush(&self) {}
+}
+static LOGGER: SimpleLogger = SimpleLogger;
+
+fn set_logger() {
+    let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info));
+}
 
 fn find_num_entries(start_offset: u64, end_offset: u64, num_parent_level_entries: u64) -> u64 {
     let mut num_entries = 0;
@@ -43,7 +66,6 @@ fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) ->
         PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
         _ => return Err(PtError::InvalidParameter),
     };
-    // println!("address: {:x} size: {:x} start: {:x} end: {:x}", address, size, start, end);
 
     // The key to calculate the number of tables required for the current level
     // dependents on the number of entries in the parent level. Also, the number
@@ -57,13 +79,10 @@ fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) ->
         let end_offset = end_va.get_index(level.into());
 
         num_entries = find_num_entries(start_offset, end_offset, num_entries);
-        // println!("{} num_entries: {}", level, num_entries);
-        // println!("{} num_tables: {}", level, num_tables);
+
         total_num_tables += num_tables;
         num_tables = num_entries;
     }
-
-    // println!("total_num_tables: {}", total_num_tables);
 
     Ok(total_num_tables)
 }
@@ -137,7 +156,6 @@ fn test_map_memory_address_simple() {
         let TestConfig { size, address, paging_type } = test_config;
 
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-        // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -147,7 +165,7 @@ fn test_map_memory_address_simple() {
 
         let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
-        // println!("pages allocated: {}", page_allocator.pages_allocated());
+
         assert!(res.is_ok());
 
         assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -174,7 +192,6 @@ fn test_map_memory_address_0_to_ffff_ffff() {
 
         while size < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -224,7 +241,6 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
         let TestConfig { size, mut address, address_increment, paging_type } = test_config;
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -273,7 +289,6 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -438,7 +453,6 @@ fn test_unmap_memory_address_simple() {
         let TestConfig { size, address, paging_type } = test_config;
 
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-        // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -474,7 +488,6 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
 
         while size < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -524,7 +537,6 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -572,7 +584,6 @@ fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -669,7 +680,6 @@ fn test_query_memory_address_simple() {
         let TestConfig { size, address, paging_type } = test_config;
 
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-        // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -704,7 +714,6 @@ fn test_query_memory_address_0_to_ffff_ffff() {
         let TestConfig { mut size, address, paging_type } = test_config;
         while size < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -742,7 +751,6 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
         let TestConfig { size, mut address, paging_type, step } = test_config;
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -789,7 +797,6 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
         let TestConfig { size, mut address, paging_type, step } = test_config;
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -863,7 +870,6 @@ fn test_remap_memory_address_simple() {
         let TestConfig { size, address, paging_type } = test_config;
 
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-        // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -900,7 +906,6 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
 
         while size < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -951,7 +956,6 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -1000,7 +1004,6 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -1134,6 +1137,8 @@ fn test_dump_page_tables() {
     }
 
     let test_configs = [TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: 0x8000 }];
+
+    set_logger();
 
     for test_config in test_configs {
         let TestConfig { size, address, paging_type } = test_config;

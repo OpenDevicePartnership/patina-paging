@@ -1,11 +1,10 @@
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use crate::page_allocator::PageAllocator;
 use crate::x64::structs::{PageLevel, PageMapEntry, PageTableEntry4KB, VirtualAddress, PAGE_SIZE};
 use crate::{MemoryAttributes, PagingType};
 use crate::{PtError, PtResult};
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 // This struct will create a the buffer/memory needed for building the page
 // tables
@@ -95,7 +94,6 @@ impl TestPageAllocator {
         // This needed for the recursive page walk logic
         let mut page_index = 0;
 
-        // println!("### validating: {} {}", start_va, end_va + 1);
         self.validate_pages_internal(start_va, end_va, self.highest_page_level, &mut page_index, attributes);
     }
 
@@ -181,7 +179,7 @@ impl TestPageAllocator {
 
             // Compare the actual page base address populated in the entry with
             // the expected page base address
-            // println!("{:016X} {:016X}", page_base, expected_page_base);
+
             // assert_eq!(page_base, expected_page_base);
             // assert_eq!(attributes, expected_attributes);
         }
@@ -229,7 +227,6 @@ impl TestPageAllocatorImpl {
             return Err(PtError::OutOfResources);
         }
 
-        // println!("page allocated: {}", self.page_index);
         let ptr = unsafe { self.memory.0.add((PAGE_SIZE * self.page_index) as usize) as u64 };
         self.page_index += 1;
         Ok(ptr)
