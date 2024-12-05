@@ -3,13 +3,12 @@
 /// - x64 4KB 5 level paging
 /// - x64 4KB 4 level paging
 ///
-use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
-
 use super::{
     pagetablestore::X64PageTableStore,
     reg::{invalidate_tlb, write_cr3},
     structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_PML4_VA, MAX_PML5_VA, PAGE_SIZE},
 };
+use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
@@ -350,7 +349,6 @@ impl<A: PageAllocator> X64PageTable<A> {
         Ok(*prev_attributes)
     }
 
-    #[cfg(test)]
     fn dump_page_tables_internal(
         &self,
         start_va: VirtualAddress,
@@ -363,10 +361,6 @@ impl<A: PageAllocator> X64PageTable<A> {
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
         if level == self.lowest_page_level {
             for entry in table {
-                if !entry.present() {
-                    return;
-                }
-
                 // start of the next level va. It will be same as current va
                 let next_level_start_va = va;
 
@@ -378,7 +372,7 @@ impl<A: PageAllocator> X64PageTable<A> {
 
                 let l: u64 = level.into();
                 let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
-                println!("{}|{:48}{}", level, range, entry.dump_entry());
+                log::info!("{}|{:48}{}", level, range, entry.dump_entry());
 
                 va = va.get_next_va(level);
             }
@@ -404,7 +398,7 @@ impl<A: PageAllocator> X64PageTable<A> {
 
             let l: u64 = level.into();
             let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
-            println!("{}|{:48}{}", level, range, entry.dump_entry());
+            log::info!("{}|{:48}{}", level, range, entry.dump_entry());
 
             self.dump_page_tables_internal(
                 next_level_start_va,
@@ -464,7 +458,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        // println!("start {:X} end {:X}", start_va, end_va);
+        // log::info!("start {:X} end {:X}", start_va, end_va);
 
         let result = self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes);
 
@@ -526,7 +520,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
     }
 
-    #[cfg(test)]
     fn dump_page_tables(&self, address: u64, size: u64) {
         let address = VirtualAddress::new(address);
 
@@ -535,15 +528,14 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        println!("{}[{} {}]{}", "-".repeat(45), start_va, end_va, "-".repeat(48));
-        println!("                                                      6362        52 51                                   12 11 9 8 7 6 5 4 3 2 1 0 ");
-        println!("                                                      ┌─┬───────────┬───────────────────────────────────────┬────┬─┬─┬─┬─┬─┬─┬─┬─┬─┐");
-        println!("                                                      │N│           │                                       │    │M│M│I│ │P│P│U│R│ │");
-        println!("                                                      │X│ Available │     Page-Map Level-4 Base Address     │AVL │B│B│G│A│C│W│/│/│P│");
-        println!("                                                      │ │           │                                       │    │Z│Z│N│ │D│T│S│W│ │");
-        println!("                                                      └─┴───────────┴───────────────────────────────────────┴────┴─┴─┴─┴─┴─┴─┴─┴─┴─┘");
-        println!("{}", "-".repeat(132));
+        log::info!("{}[{} {}]{}", "-".repeat(45), start_va, end_va, "-".repeat(48));
+        log::info!("                                                      6362        52 51                                   12 11 9 8 7 6 5 4 3 2 1 0 ");
+        log::info!("                                                      |N|           |                                        |   |M|M|I| |P|P|U|R| |");
+        log::info!("                                                      |X| Available |     Page-Map Level-4 Base Address      |AVL|B|B|G|A|C|W|/|/|P|");
+        log::info!("                                                      | |           |                                        |   |Z|Z|N| |D|T|S|W| |");
+        log::info!("{}", "-".repeat(132));
+        // uses current cr3 base
         self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base);
-        println!("{}", "-".repeat(132));
+        log::info!("{}", "-".repeat(132));
     }
 }

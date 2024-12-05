@@ -1,5 +1,6 @@
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 
+#[macro_use]
 extern crate alloc;
 pub mod aarch64;
 pub mod page_allocator;
@@ -127,16 +128,16 @@ pub trait PageTable {
     /// Returns memory attributes
     ///
     /// ## Errors
-    /// * Returns `Ok(u64)` if successful else `Err(PtError)` if failed
+    /// * Returns `Ok(MemoryAttributes)` if successful else `Err(PtError)` if failed
     fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes>;
 
-    /// Test Function to dump memory ranges with their attributes. This function
-    /// can be used from `test_dump_page_tables()` test case
+    /// Function to dump memory ranges with their attributes. It uses current
+    /// cr3 as the base. This function can be used from
+    /// `test_dump_page_tables()` test case
     ///
     /// ## Arguments
     /// * `address` - The memory address to map.
     /// * `size` - The memory size to map.
-    #[cfg(test)]
     fn dump_page_tables(&self, address: u64, size: u64);
 }
 

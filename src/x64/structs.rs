@@ -1,11 +1,10 @@
+use crate::{MemoryAttributes, PtError, PtResult};
+use alloc::string::String;
+use bitfield_struct::bitfield;
 use core::{
     fmt::{self, Display, Formatter},
     ops::{Add, Sub},
 };
-
-use bitfield_struct::bitfield;
-
-use crate::{MemoryAttributes, PtError, PtResult};
 
 pub const PAGE_SIZE: u64 = 0x1000; // 4KB
 const PAGE_INDEX_MASK: u64 = 0x1FF;
@@ -103,7 +102,6 @@ impl PageMapEntry {
         self.set_nx(false);
     }
 
-    #[cfg(test)]
     pub fn dump_entry(&self) -> String {
         let nx = self.nx() as u64;
         let available_high = self.available_high() as u64;
@@ -119,7 +117,7 @@ impl PageMapEntry {
         let present = self.present() as u64;
 
         format!(
-            "│{:01b}│{:011b}│{:040b}│{:03b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│",
+            "|{:01b}|{:011b}|{:040b}|{:03b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|",
             nx,                      // 1 bit -  No Execute bit
             available_high & 0x7FF,  // 11 bits -  Available for use by system software
             page_table_base_address, // 40 bits -  Page Table Base Address
@@ -237,7 +235,6 @@ impl PageTableEntry4KB {
         PhysicalAddress(page_table_base_address)
     }
 
-    #[cfg(test)]
     pub fn dump_entry(&self) -> String {
         let nx = self.nx() as u64;
         let available_high = self.available_high() as u64;
@@ -254,7 +251,7 @@ impl PageTableEntry4KB {
         let present = self.present() as u64;
 
         format!(
-            "│{:01b}│{:011b}│{:040b}│{:03b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│{:01b}│",
+            "|{:01b}|{:011b}|{:040b}|{:03b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|",
             nx,                      // 1 bit -  0 = Execute Code, 1 = No Code Execution
             available_high & 0x7FF,  // 11 bits -  Available for use by system software
             page_table_base_address, // 40 bits -  Page Table Base Address
@@ -310,7 +307,6 @@ impl Sub<u64> for PageLevel {
     }
 }
 
-#[cfg(test)]
 impl fmt::Display for PageLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let level_name = match self {

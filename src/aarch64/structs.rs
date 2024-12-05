@@ -1,10 +1,10 @@
+use crate::{MemoryAttributes, PtError, PtResult};
+use alloc::string::String;
 use bitfield_struct::bitfield;
 use core::{
     fmt::{self, Display, Formatter},
     ops::{Add, Sub},
 };
-
-use crate::{MemoryAttributes, PtError, PtResult};
 
 pub(crate) const MAX_VA: u64 = 0x0000_ffff_ffff_ffff;
 
@@ -73,7 +73,6 @@ impl VMSAv864TableDescriptor {
                 panic!("allocated page is not 4k aligned {:X}", next_level_table_base);
             }
 
-            // println!("next_level_table_base: {:X}", next_level_table_base);
             let nlta_lower = (next_level_table_base & PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_MASK)
                 >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_SHIFT;
             let nlta_upper = ((next_level_table_base & PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK)
@@ -126,7 +125,6 @@ impl VMSAv864TableDescriptor {
         self.set_valid_desc(false);
     }
 
-    #[cfg(test)]
     pub fn dump_entry(&self) -> String {
         let valid_desc = self.valid_desc() as u64;
         let table_desc = self.table_desc() as u64;
@@ -134,7 +132,7 @@ impl VMSAv864TableDescriptor {
         let nlta_upper = self.nlta_upper() as u64;
         let access_flag = self.access_flag() as u64;
         let ignored1 = self.ignored1() as u64;
-        let nlta_lower = self.nlta_lower() as u64;
+        let nlta_lower = self.nlta_lower();
         let ignored2 = self.ignored2() as u64;
         let ignored3 = self.ignored3() as u64;
         let pxn_table = self.pxn_table() as u64;
@@ -324,7 +322,6 @@ impl VMSAv864PageDescriptor {
         self.set_descriptor_type(0);
     }
 
-    #[cfg(test)]
     pub fn dump_entry(&self) -> String {
         let descriptor_type = self.descriptor_type() as u64;
         let attribute_index = self.attribute_index() as u64;
@@ -408,7 +405,6 @@ impl Sub<u64> for PageLevel {
     }
 }
 
-#[cfg(test)]
 impl fmt::Display for PageLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let level_name = match self {
