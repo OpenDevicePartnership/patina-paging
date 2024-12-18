@@ -69,7 +69,23 @@ bitflags! {
     }
 }
 
+use page_allocator::PageAllocator;
+
 pub trait PageTable {
+    /// This type is used to allow the caller to borrow the allocator and get a concrete type back
+    /// in the borrow_allocator function
+    type ALLOCATOR: PageAllocator;
+
+    /// Function to borrow the allocator from the page table instance.
+    /// This is done this way to allow the page table to return a concrete
+    /// type instead of the dyn ref. This is required to allow the page allocator to
+    /// be managed by the caller, while the page table can still allocate pages from
+    /// the allocator
+    ///
+    /// ## Returns
+    /// * `&mut Self::ALLOCATOR` - Borrowed allocator
+    fn borrow_allocator(&mut self) -> &mut Self::ALLOCATOR;
+
     /// Function to map the designated memory region to with provided
     /// attributes.
     ///

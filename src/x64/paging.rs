@@ -33,6 +33,10 @@ impl<A: PageAllocator> X64PageTable<A> {
         unsafe { Self::from_existing(base, page_allocator, paging_type) }
     }
 
+    pub fn borrow_allocator(&mut self) -> &mut A {
+        &mut self.page_allocator
+    }
+
     /// Create a page table from existing page table base. This can be used to
     /// parse or edit an existing identity mapped page table.
     ///
@@ -449,6 +453,12 @@ impl<A: PageAllocator> X64PageTable<A> {
 }
 
 impl<A: PageAllocator> PageTable for X64PageTable<A> {
+    type ALLOCATOR = A;
+
+    fn borrow_allocator(&mut self) -> &mut A {
+        self.borrow_allocator()
+    }
+
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
@@ -457,8 +467,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         // We map until next alignment
         let start_va = address;
         let end_va = address + size - 1;
-
-        // log::info!("start {:X} end {:X}", start_va, end_va);
 
         let result = self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes);
 
