@@ -3,7 +3,7 @@ use super::{
     structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
 };
 use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
-use core::arch::asm;
+use core::{arch::asm, ptr};
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
@@ -22,6 +22,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the root page table
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
+        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
+        // entries in the page table.
+        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
         assert!(PhysicalAddress::new(base).is_4kb_aligned());
 
         // SAFETY: We just allocated the page, so it is safe to use it.
@@ -64,6 +70,13 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
         let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
+        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
+        // entries in the page table.
+        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
+
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
             panic!("allocate_page() returned unaligned page");
