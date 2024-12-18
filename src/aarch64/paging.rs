@@ -489,4 +489,8 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         log::info!("{}", "-".repeat(130));
         self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base)
     }
+
+    fn get_page_table_pages_for_size(&self, _address: u64, _size: u64) -> PtResult<u64> {
+        Err(PtError::InvalidParameter)
+    }
 }

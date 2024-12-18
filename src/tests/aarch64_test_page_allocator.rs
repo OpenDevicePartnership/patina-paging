@@ -199,7 +199,7 @@ impl TestPageAllocator {
 }
 
 impl PageAllocator for TestPageAllocator {
-    fn allocate_page(&mut self, align: u64, size: u64) -> PtResult<u64> {
+    fn allocate_page(&mut self, align: u64, size: u64, _is_root: bool) -> PtResult<u64> {
         self.rimpl.borrow_mut().allocate_page(align, size)
     }
 }
