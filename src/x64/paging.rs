@@ -27,7 +27,7 @@ pub struct X64PageTable<A: PageAllocator> {
 impl<A: PageAllocator> X64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the top level page table(PML5)
-        let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+        let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
@@ -76,7 +76,7 @@ impl<A: PageAllocator> X64PageTable<A> {
     }
 
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
-        let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+        let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
