@@ -1,10 +1,10 @@
 use crate::{
     aarch64::{
-        paging::AArch64PageTable,
-        structs::{PageLevel, VirtualAddress, FRAME_SIZE_4KB, MAX_VA},
+        paging::{num_page_tables_required, AArch64PageTable},
+        structs::{FRAME_SIZE_4KB, MAX_VA},
     },
     tests::aarch64_test_page_allocator::TestPageAllocator,
-    MemoryAttributes, PageTable, PagingType, PtError, PtResult,
+    MemoryAttributes, PageTable, PagingType, PtError,
 };
 
 #[test]
