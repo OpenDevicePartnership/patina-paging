@@ -4,6 +4,9 @@ use super::{
 };
 use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
 use core::{arch::asm, ptr};
+use uefi_sdk::base::{SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB};
+
+const MAX_VA_BITS: u64 = 48;
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
@@ -98,7 +101,20 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
         if level == self.lowest_page_level {
             for mut entry in table {
-                entry.update_fields(attributes, va.into())?;
+                if self._is_this_page_table_active() {
+                    // Need to do the heavy duty break-before-make sequence
+                    unsafe {
+                        ArmReplaceLiveTranslationEntry (entry.into(), attributes, va.into())?;
+                    }
+                }
+                else {
+                    // Just update the entry and flush TLB
+                    entry.update_fields(attributes, va.into())?;
+                    unsafe {
+                        update_translation_table_entry(entry.into(), va.into());
+                    }
+                }
+
 
                 // get max va addressable by current entry
                 va = va.get_next_va(level);
@@ -109,7 +125,20 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         for mut entry in table {
             if !entry.is_valid() {
                 let pa = self.allocate_page()?;
-                entry.update_fields(attributes, pa)?;
+
+                if self._is_this_page_table_active() {
+                    // Need to do the heavy duty break-before-make sequence
+                    unsafe {
+                        ArmReplaceLiveTranslationEntry (entry.into(), attributes, pa)?;
+                    }
+                }
+                else {
+                    // Just update the entry and flush TLB
+                    entry.update_fields(attributes, pa)?;
+                    unsafe {
+                        update_translation_table_entry(entry.into(), pa);
+                    }
+                }
             }
             let next_base = entry.get_canonical_page_table_base();
 
@@ -206,7 +235,19 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     return Err(PtError::NoMapping);
                 }
 
-                entry.update_fields(attributes, va.into())?;
+                if self._is_this_page_table_active() {
+                    // Need to do the heavy duty break-before-make sequence
+                    unsafe {
+                        ArmReplaceLiveTranslationEntry (entry.into(), *prev_attributes, va.into())?;
+                    }
+                }
+                else {
+                    // Just update the entry and flush TLB
+                    entry.update_fields(*prev_attributes, va.into())?;
+                    unsafe {
+                        update_translation_table_entry(entry.into(), va.into());
+                    }
+                }
 
                 // get max va addressable by current entry
                 va = va.get_next_va(level);
@@ -458,7 +499,104 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     fn install_page_table(&self) -> PtResult<()> {
         // This step will need to configure the MMU and then activate it on the newly created table.
 
-        // TODO: Implement this function
+        let pa_bits = self.get_phys_addr_bits();
+        //
+        // Limit the virtual address space to what we can actually use: core
+        // mandates a 1:1 mapping, so no point in making the virtual address
+        // space larger than the physical address space. We also have to take
+        // into account the architectural limitations that result from firmware's
+        // use of 4 KB pages.
+        //
+        let max_address_bits = core::cmp::min(pa_bits, MAX_VA_BITS);
+        let max_address = (1 << max_address_bits) - 1 as u64;
+
+        let t0sz = 64 - max_address_bits;
+
+        let mut tcr: u64;
+
+        if self.get_current_el() == 2 {
+            // Note: Bits 23 and 31 are reserved(RES1) bits in TCR_EL2
+            tcr = t0sz | (1 << 31) | (1 << 23);
+
+            // Set the Physical Address Size using MaxAddress
+            if max_address < SIZE_4GB {
+                tcr |= 0 << 16;
+            } else if max_address < SIZE_64GB {
+                tcr |= 1 << 16;
+            } else if max_address < SIZE_1TB {
+                tcr |= 2 << 16;
+            } else if max_address < SIZE_4TB {
+                tcr |= 3 << 16;
+            } else if max_address < SIZE_16TB {
+                tcr |= 4 << 16;
+            } else if max_address < SIZE_256TB {
+                tcr |= 5 << 16;
+            } else {
+                panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
+            }
+        } else if self.get_current_el() == 1 {
+            // Due to Cortex-A57 erratum #822227 we must set TG1[1] == 1, regardless of EPD1.
+            tcr = t0sz | 1 << 30 | 1 << 23;
+
+            // Set the Physical Address Size using MaxAddress
+            if max_address < 4 * 1024 * 1024 * 1024 {
+                tcr |= 0 << 32;
+            } else if max_address < 64 * 1024 * 1024 * 1024 {
+                tcr |= 1 << 32;
+            } else if max_address < 1024 * 1024 * 1024 * 1024 {
+                tcr |= 2 << 32;
+            } else if max_address < 4 * 1024 * 1024 * 1024 * 1024 {
+                tcr |= 3 << 32;
+            } else if max_address < 16 * 1024 * 1024 * 1024 * 1024 {
+                tcr |= 4 << 32;
+            } else if max_address < 256 * 1024 * 1024 * 1024 * 1024 {
+                tcr |= 5 << 32;
+            } else {
+                panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
+            }
+        } else {
+            panic!("mu-paging is only expected to run at EL2 and EL1, not EL3.");
+        }
+
+        //
+        // Translation table walks are always cache coherent on ARMv8-A, so cache
+        // maintenance on page tables is never needed. Since there is a risk of
+        // loss of coherency when using mismatched attributes, and given that memory
+        // is mapped cacheable except for extraordinary cases (such as non-coherent
+        // DMA), have the page table walker perform cached accesses as well, and
+        // assert below that matches the attributes we use for CPU accesses to
+        // the region.
+        //
+        tcr |= 3 << 12 | 1 << 10 | 1 << 8;
+
+        // Set TCR
+        self.set_tcr(tcr);
+
+        // if (!ArmMmuEnabled ()) {
+        if self.is_mmu_enabled() {
+            // Make sure we are not inadvertently hitting in the caches
+            // when populating the page tables.
+            // TODO: InvalidateDataCacheRange
+            
+        }
+
+        // EFI_MEMORY_UC ==> MAIR_ATTR_DEVICE_MEMORY
+        // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
+        // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
+        // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
+        self.set_mair(0b000 << 0 | 0b001 << 8 | 0b010 << 16 | 0b011 << 24);
+
+        // Set TTBR0
+        self.set_ttbr0(self.base.into());
+
+        if !self.is_mmu_enabled() {
+            self.set_stack_alignment_check(false);
+            self.set_stack_alignment_check(true);
+            self.enable_instruction_cache();
+            self.enable_data_cache();
+
+            self.enable_mmu();
+        }
 
         Ok(())
     }
