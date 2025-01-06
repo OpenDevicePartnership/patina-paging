@@ -356,6 +356,11 @@ impl VirtualAddress {
         self.round_up(level) + 1
     }
 
+    /// This will return the index at the current entry
+    /// For example:
+    ///                             |      PML5|     PML4| PDP/PML3|  PD/PML2|  PT/PML1|    Physical
+    /// va                  = 000000|0000000000|000000000|000000000|000000011|000000000|000000000000
+    /// get_index(va, PD)   = 000000011  <------------------------------'
     pub fn get_index(&self, level: PageLevel) -> u64 {
         let va = self.0;
         match level {
