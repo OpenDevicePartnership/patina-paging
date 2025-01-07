@@ -1,7 +1,6 @@
+use super::structs::CR3_PAGE_BASE_ADDRESS_MASK;
 #[allow(unused_imports)]
 use core::arch::asm;
-
-use super::structs::CR3_PAGE_BASE_ADDRESS_MASK;
 
 /// Write CR3 register. Also invalidates TLB.
 pub unsafe fn write_cr3(_value: u64) {

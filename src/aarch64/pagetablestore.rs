@@ -1,8 +1,8 @@
-use crate::{page_table_error::PtResult, PagingType};
-
 use super::structs::{
     PageLevel, PhysicalAddress, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE,
 };
+use crate::{MemoryAttributes, PagingType, PtResult};
+use alloc::string::String;
 
 /// Contains enough metadata to work with a single page table
 pub struct AArch64PageTableStore {
@@ -101,7 +101,7 @@ pub struct AArch64PageTableEntry {
 }
 
 impl AArch64PageTableEntry {
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
                 let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
@@ -143,7 +143,7 @@ impl AArch64PageTableEntry {
         }
     }
 
-    pub fn get_attributes(&self) -> u64 {
+    pub fn get_attributes(&self) -> MemoryAttributes {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
                 let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
@@ -168,6 +168,20 @@ impl AArch64PageTableEntry {
                 entry.set_page_invalid()
             }
             // not expected to reach here
+            _ => panic!("Invalid page level"),
+        }
+    }
+
+    pub fn dump_entry(&self) -> String {
+        match self.level {
+            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
+                let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
+                entry.dump_entry()
+            }
+            PageLevel::Lvl3 => {
+                let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
+                entry.dump_entry()
+            }
             _ => panic!("Invalid page level"),
         }
     }

@@ -1,13 +1,10 @@
+use crate::aarch64::structs::{PageLevel, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE};
+use crate::page_allocator::PageAllocator;
+use crate::{MemoryAttributes, PagingType};
+use crate::{PtError, PtResult};
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::rc::Rc;
-
-use crate::aarch64::structs::{
-    PageLevel, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, EFI_MEMORY_CACHETYPE_MASK, PAGE_SIZE,
-};
-use crate::page_allocator::PageAllocator;
-use crate::page_table_error::{PtError, PtResult};
-use crate::PagingType;
 
 // This struct will create a the buffer/memory needed for building the page
 // tables
@@ -87,7 +84,7 @@ impl TestPageAllocator {
     //  TestPageAllocator                         Page Tables
     //       Memory
     //
-    pub fn validate_pages(&self, address: u64, size: u64, attributes: u64) {
+    pub fn validate_pages(&self, address: u64, size: u64, attributes: MemoryAttributes) {
         let address = VirtualAddress::new(address);
         let start_va = address;
         let end_va = address + size - 1;
@@ -96,7 +93,6 @@ impl TestPageAllocator {
         // This needed for the recursive page walk logic
         let mut page_index = 0;
 
-        // println!("### validating: {} {}", start_va, end_va + 1);
         self.validate_pages_internal(start_va, end_va, self.highest_page_level, &mut page_index, attributes);
     }
 
@@ -106,7 +102,7 @@ impl TestPageAllocator {
         end_va: VirtualAddress,
         level: PageLevel,
         page_index: &mut u64,
-        attributes: u64,
+        attributes: MemoryAttributes,
     ) {
         if level == self.lowest_page_level - 1 {
             return;
@@ -158,7 +154,7 @@ impl TestPageAllocator {
         entry_ptr: *const u64,
         expected_page_base: u64,
         level: PageLevel,
-        expected_attributes: u64,
+        expected_attributes: MemoryAttributes,
     ) {
         unsafe {
             let table_base = *entry_ptr;
@@ -170,14 +166,14 @@ impl TestPageAllocator {
                             VMSAv864TableDescriptor::from_bits(table_base).get_canonical_page_table_base().into();
                         let attributes = VMSAv864TableDescriptor::from_bits(table_base).get_attributes();
                         assert_eq!(page_base, expected_page_base);
-                        assert_eq!(attributes, 0); // we don't set any attributes on higher level page table entries
+                        assert_eq!(attributes, MemoryAttributes::empty()); // we don't set any attributes on higher level page table entries
                     }
                     PageLevel::Lvl3 => {
                         let page_base: u64 =
                             VMSAv864PageDescriptor::from_bits(table_base).get_canonical_page_table_base().into();
                         let attributes = VMSAv864PageDescriptor::from_bits(table_base).get_attributes();
-                        // Ignore EFI_MEMORY_CACHETYPE_MASK bits
-                        let attributes = attributes & (!EFI_MEMORY_CACHETYPE_MASK);
+                        // Ignore memory cache bits
+                        let attributes = attributes & (!MemoryAttributes::CacheAttributesMask);
                         assert_eq!(page_base, expected_page_base);
                         assert_eq!(attributes, expected_attributes);
                     }
@@ -187,7 +183,7 @@ impl TestPageAllocator {
 
             // Compare the actual page base address populated in the entry with
             // the expected page base address
-            // println!("{:016X} {:016X}", page_base, expected_page_base);
+            // log::info!("{:016X} {:016X}", page_base, expected_page_base);
             // assert_eq!(page_base, expected_page_base);
             // assert_eq!(attributes, expected_attributes);
         }
@@ -203,7 +199,7 @@ impl TestPageAllocator {
 }
 
 impl PageAllocator for TestPageAllocator {
-    fn allocate_page(&mut self, align: u64, size: u64) -> PtResult<u64> {
+    fn allocate_page(&mut self, align: u64, size: u64, _is_root: bool) -> PtResult<u64> {
         self.rimpl.borrow_mut().allocate_page(align, size)
     }
 }
@@ -235,7 +231,6 @@ impl TestPageAllocatorImpl {
             return Err(PtError::OutOfResources);
         }
 
-        // println!("page allocated: {}", self.page_index);
         let ptr = unsafe { self.memory.0.add((PAGE_SIZE * self.page_index) as usize) as u64 };
         self.page_index += 1;
         Ok(ptr)

@@ -1,6 +1,6 @@
-use crate::{page_table_error::PtResult, PagingType};
-
 use super::structs::{PageLevel, PageMapEntry, PageTableEntry4KB, PhysicalAddress, VirtualAddress, PAGE_SIZE};
+use crate::{MemoryAttributes, PagingType, PtResult};
+use alloc::string::String;
 
 /// Contains enough metadata to work with a single page table
 pub struct X64PageTableStore {
@@ -94,7 +94,7 @@ pub struct X64PageTableEntry {
 }
 
 impl X64PageTableEntry {
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         match self.level {
             PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {
                 let entry = unsafe { get_entry::<PageMapEntry>(self.page_base, self.index) };
@@ -150,7 +150,7 @@ impl X64PageTableEntry {
         }
     }
 
-    pub fn get_attributes(&self) -> u64 {
+    pub fn get_attributes(&self) -> MemoryAttributes {
         match self.level {
             PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {
                 let entry = unsafe { get_entry::<PageMapEntry>(self.page_base, self.index) };
@@ -159,6 +159,20 @@ impl X64PageTableEntry {
             PageLevel::Pt => {
                 let entry = unsafe { get_entry::<PageTableEntry4KB>(self.page_base, self.index) };
                 entry.get_attributes()
+            }
+            PageLevel::Pa => panic!("unexpected call to get attributes for pa paging level"),
+        }
+    }
+
+    pub fn dump_entry(&self) -> String {
+        match self.level {
+            PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {
+                let entry = unsafe { get_entry::<PageMapEntry>(self.page_base, self.index) };
+                entry.dump_entry()
+            }
+            PageLevel::Pt => {
+                let entry = unsafe { get_entry::<PageTableEntry4KB>(self.page_base, self.index) };
+                entry.dump_entry()
             }
             PageLevel::Pa => panic!("unexpected call to get attributes for pa paging level"),
         }

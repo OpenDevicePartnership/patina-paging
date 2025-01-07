@@ -1,72 +1,33 @@
 use crate::{
-    page_table_error::{PtError, PtResult},
     tests::x64_test_page_allocator::TestPageAllocator,
     x64::{
-        paging::X64PageTable,
-        structs::{PageLevel, VirtualAddress, FRAME_SIZE_4KB, MAX_PML4_VA, MAX_PML5_VA},
+        paging::{num_page_tables_required, X64PageTable},
+        structs::{FRAME_SIZE_4KB, MAX_PML4_VA, MAX_PML5_VA},
     },
-    PageTable, PagingType, EFI_MEMORY_RO, EFI_MEMORY_XP,
+    MemoryAttributes, PageTable, PagingType, PtError,
 };
+use log::{Level, LevelFilter, Metadata, Record};
 
-fn find_num_entries(start_offset: u64, end_offset: u64, num_parent_level_entries: u64) -> u64 {
-    let mut num_entries = 0;
-    if num_parent_level_entries > 1 {
-        // entries spanning multiple pages
-        num_entries += 512 - start_offset; // number of upper entries in first page
-        num_entries += (num_parent_level_entries - 2) * 512; // number of entries in between pages
-        num_entries += end_offset + 1; // number of lower entries in the last page
-    } else {
-        // entries do not span multiple pages(end_offset is guaranteed to be higher than start offset)
-        num_entries = end_offset - start_offset + 1; // number of entries in the page
+// Sample logger for log crate to dump stuff in tests
+struct SimpleLogger;
+
+impl log::Log for SimpleLogger {
+    fn enabled(&self, metadata: &Metadata) -> bool {
+        metadata.level() <= Level::Info
     }
 
-    num_entries
+    fn log(&self, record: &Record) {
+        if self.enabled(record.metadata()) {
+            println!("{}", record.args());
+        }
+    }
+
+    fn flush(&self) {}
 }
+static LOGGER: SimpleLogger = SimpleLogger;
 
-fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) -> PtResult<u64> {
-    let address = VirtualAddress::new(address);
-    if size == 0 || !address.is_4kb_aligned() {
-        return Err(PtError::UnalignedAddress);
-    }
-
-    // Check the memory range is aligned
-    if !(address + size).is_4kb_aligned() {
-        return Err(PtError::UnalignedAddress);
-    }
-
-    let start_va = address;
-    let end_va = address + size - 1;
-
-    // For the given paging type identify the highest and lowest page levels.
-    // This is used during page building to stop the recursion.
-    let (highest_page_level, lowest_page_level) = match paging_type {
-        PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
-        PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
-        _ => return Err(PtError::InvalidParameter),
-    };
-    // println!("address: {:x} size: {:x} start: {:x} end: {:x}", address, size, start, end);
-
-    // The key to calculate the number of tables required for the current level
-    // dependents on the number of entries in the parent level. Also, the number
-    // of entries in the current level depends on the number of tables in the
-    // current level and the current offset(done by `find_num_entries()`).
-    let mut num_entries = 0;
-    let mut num_tables = 1; // top level table
-    let mut total_num_tables = 0;
-    for level in ((lowest_page_level as u64)..=(highest_page_level as u64)).rev() {
-        let start_offset = start_va.get_index(level.into());
-        let end_offset = end_va.get_index(level.into());
-
-        num_entries = find_num_entries(start_offset, end_offset, num_entries);
-        // println!("{} num_entries: {}", level, num_entries);
-        // println!("{} num_tables: {}", level, num_tables);
-        total_num_tables += num_tables;
-        num_tables = num_entries;
-    }
-
-    // println!("total_num_tables: {}", total_num_tables);
-
-    Ok(total_num_tables)
+fn set_logger() {
+    let _ = log::set_logger(&LOGGER).map(|()| log::set_max_level(LevelFilter::Info));
 }
 
 #[test]
@@ -138,7 +99,6 @@ fn test_map_memory_address_simple() {
         let TestConfig { size, address, paging_type } = test_config;
 
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-        // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -146,9 +106,9 @@ fn test_map_memory_address_simple() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
-        // println!("pages allocated: {}", page_allocator.pages_allocated());
+
         assert!(res.is_ok());
 
         assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -175,7 +135,6 @@ fn test_map_memory_address_0_to_ffff_ffff() {
 
         while size < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -183,7 +142,7 @@ fn test_map_memory_address_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -225,7 +184,6 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
         let TestConfig { size, mut address, address_increment, paging_type } = test_config;
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -233,7 +191,7 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -274,7 +232,6 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -282,7 +239,7 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -318,7 +275,7 @@ fn test_map_memory_address_unaligned() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
@@ -350,7 +307,7 @@ fn test_map_memory_address_range_overflow() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
@@ -382,7 +339,7 @@ fn test_map_memory_address_invalid_range() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
@@ -413,7 +370,7 @@ fn test_map_memory_address_zero_size() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
@@ -439,7 +396,6 @@ fn test_unmap_memory_address_simple() {
         let TestConfig { size, address, paging_type } = test_config;
 
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-        // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -447,7 +403,7 @@ fn test_unmap_memory_address_simple() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
         assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -475,7 +431,6 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
 
         while size < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -483,7 +438,7 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -525,7 +480,6 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -533,7 +487,7 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -573,7 +527,6 @@ fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -581,7 +534,7 @@ fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -670,7 +623,6 @@ fn test_query_memory_address_simple() {
         let TestConfig { size, address, paging_type } = test_config;
 
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-        // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -678,7 +630,7 @@ fn test_query_memory_address_simple() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
         assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -705,7 +657,6 @@ fn test_query_memory_address_0_to_ffff_ffff() {
         let TestConfig { mut size, address, paging_type } = test_config;
         while size < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -713,7 +664,7 @@ fn test_query_memory_address_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -743,7 +694,6 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
         let TestConfig { size, mut address, paging_type, step } = test_config;
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -751,7 +701,7 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -790,7 +740,6 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
         let TestConfig { size, mut address, paging_type, step } = test_config;
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -798,7 +747,7 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -864,7 +813,6 @@ fn test_remap_memory_address_simple() {
         let TestConfig { size, address, paging_type } = test_config;
 
         let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-        // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -872,12 +820,12 @@ fn test_remap_memory_address_simple() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
         assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-        let attributes = EFI_MEMORY_XP;
+        let attributes = MemoryAttributes::ExecuteProtect;
         let res = pt.remap_memory_region(address, size, attributes);
         assert!(res.is_ok());
     }
@@ -901,7 +849,6 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
 
         while size < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -909,12 +856,12 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-            let attributes = EFI_MEMORY_XP;
+            let attributes = MemoryAttributes::ExecuteProtect;
             let res = pt.remap_memory_region(address, size, attributes);
             assert!(res.is_ok());
             size <<= 1;
@@ -952,7 +899,6 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -960,11 +906,11 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
-            let attributes = EFI_MEMORY_XP;
+            let attributes = MemoryAttributes::ExecuteProtect;
             let res = pt.remap_memory_region(address, size, attributes);
             assert!(res.is_ok());
             address += address_increment;
@@ -1001,7 +947,6 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
         while address < 0xffff_ffff {
             let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
-            // println!("num pages: {} address: {:x} size: {:x}", num_pages, address, size);
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = X64PageTable::new(page_allocator.clone(), paging_type);
@@ -1009,12 +954,12 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = EFI_MEMORY_RO;
+            let attributes = MemoryAttributes::ReadOnly;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-            let attributes = EFI_MEMORY_XP;
+            let attributes = MemoryAttributes::ExecuteProtect;
             let res = pt.remap_memory_region(address, size, attributes);
             assert!(res.is_ok());
             address += address_increment;
@@ -1046,7 +991,7 @@ fn test_remap_memory_address_unaligned() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_XP;
+        let attributes = MemoryAttributes::ExecuteProtect;
         let res = pt.remap_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
@@ -1078,7 +1023,7 @@ fn test_remap_memory_address_zero_size() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_XP;
+        let attributes = MemoryAttributes::ExecuteProtect;
         let res = pt.remap_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
@@ -1109,7 +1054,7 @@ fn test_from_existing_page_table() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = EFI_MEMORY_RO;
+        let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
         assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -1123,5 +1068,36 @@ fn test_from_existing_page_table() {
         // Validate the new page table
         let res = new_pt.query_memory_region(address, size);
         assert!(res.is_ok());
+    }
+}
+
+#[test]
+fn test_dump_page_tables() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: 0x8000 }];
+
+    set_logger();
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly;
+        let res = pt.map_memory_region(address, size, attributes);
+        assert!(res.is_ok());
+
+        pt.dump_page_tables(address, size);
     }
 }

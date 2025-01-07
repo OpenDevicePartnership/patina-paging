@@ -1,15 +1,9 @@
-use crate::{
-    page_allocator::PageAllocator,
-    page_table_error::{PtError, PtResult},
-    PageTable, PagingType,
-};
-
-use core::arch::asm;
-
 use super::{
     pagetablestore::AArch64PageTableStore,
     structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
 };
+use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
+use core::{arch::asm, ptr};
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
@@ -27,11 +21,21 @@ pub struct AArch64PageTable<A: PageAllocator> {
 impl<A: PageAllocator> AArch64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the root page table
-        let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+        let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
+
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
+        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
+        // entries in the page table.
+        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
         assert!(PhysicalAddress::new(base).is_4kb_aligned());
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         unsafe { Self::from_existing(base, page_allocator, paging_type) }
+    }
+
+    pub fn borrow_allocator(&mut self) -> &mut A {
+        &mut self.page_allocator
     }
 
     /// Create a page table from existing page table root. This can be used to
@@ -53,7 +57,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         // This is used during page building to stop the recursion.
         let (highest_page_level, lowest_page_level) = match paging_type {
             PagingType::AArch64PageTable4KB => (PageLevel::Lvl0, PageLevel::Lvl3),
-            _ => return Err(crate::page_table_error::PtError::InvalidParameter),
+            _ => return Err(PtError::InvalidParameter),
         };
 
         Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
@@ -65,7 +69,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     }
 
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
-        let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+        let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
+
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
+        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
+        // entries in the page table.
+        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
+
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
             panic!("allocate_page() returned unaligned page");
@@ -80,7 +91,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        attributes: u64,
+        attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
 
@@ -184,7 +195,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        attributes: u64,
+        attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
 
@@ -241,8 +252,8 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        prev_attributes: &mut u64,
-    ) -> PtResult<u64> {
+        prev_attributes: &mut MemoryAttributes,
+    ) -> PtResult<MemoryAttributes> {
         let mut va = start_va;
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
@@ -255,7 +266,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 // Given memory range can span multiple page table entries, in such
                 // scenario, the expectation is all entries should have same attributes.
                 let current_attributes = entry.get_attributes();
-                if *prev_attributes == 0 {
+                if (*prev_attributes).is_empty() {
                     *prev_attributes = current_attributes;
                 }
 
@@ -295,6 +306,68 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         }
 
         Ok(*prev_attributes)
+    }
+
+    fn dump_page_tables_internal(
+        &self,
+        start_va: VirtualAddress,
+        end_va: VirtualAddress,
+        level: PageLevel,
+        base: PhysicalAddress,
+    ) {
+        let mut va = start_va;
+
+        let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        if level == self.lowest_page_level {
+            for entry in table {
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
+
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                let l: u64 = level.into();
+                let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
+                log::info!("{}|{:48}{}", level, range, entry.dump_entry());
+
+                va = va.get_next_va(level);
+            }
+            return;
+        }
+
+        for entry in table {
+            if !entry.is_valid() {
+                return;
+            }
+            let next_base = entry.get_canonical_page_table_base();
+
+            // split the va range appropriately for the next level pages
+
+            // start of the next level va. It will be same as current va
+            let next_level_start_va = va;
+
+            // get max va addressable by current entry
+            let curr_va_ceil = va.round_up(level);
+
+            // end of next level va. It will be minimum of next va and end va
+            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+            let l: u64 = level.into();
+            let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
+            log::info!("{}|{:48}{}", level, range, entry.dump_entry());
+
+            self.dump_page_tables_internal(
+                next_level_start_va,
+                next_level_end_va,
+                (level as u64 - 1).into(),
+                next_base,
+            );
+
+            va = va.get_next_va(level);
+        }
     }
 
     // Private function to check if this page table is active
@@ -353,7 +426,13 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 }
 
 impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
+    type ALLOCATOR = A;
+
+    fn borrow_allocator(&mut self) -> &mut A {
+        self.borrow_allocator()
+    }
+
+    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -361,8 +440,6 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         // We map until next alignment
         let start_va = address;
         let end_va = address + size - 1;
-
-        // println!("start {:X} end {:X}", start_va, end_va);
 
         self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes)
     }
@@ -386,7 +463,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         Ok(())
     }
 
-    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
+    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -395,13 +472,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let end_va = address + size - 1;
 
         // make sure the memory region has same attributes set
-        let mut prev_attributes = 0;
+        let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)?;
 
         self.remap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes)
     }
 
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64> {
+    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -409,7 +486,24 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        let mut prev_attributes = 0;
+        let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
+    }
+
+    fn dump_page_tables(&self, address: u64, size: u64) {
+        let address = VirtualAddress::new(address);
+
+        self.validate_address_range(address, size).unwrap();
+
+        let start_va = address;
+        let end_va = address + size - 1;
+
+        log::info!("start-end:[{} {}]", start_va, end_va);
+        log::info!("{}", "-".repeat(130));
+        self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base)
+    }
+
+    fn get_page_table_pages_for_size(&self, _address: u64, _size: u64) -> PtResult<u64> {
+        Err(PtError::InvalidParameter)
     }
 }

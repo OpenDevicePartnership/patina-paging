@@ -1,13 +1,9 @@
+use crate::{MemoryAttributes, PtError, PtResult};
+use alloc::string::String;
 use bitfield_struct::bitfield;
 use core::{
     fmt::{self, Display, Formatter},
     ops::{Add, Sub},
-};
-
-use crate::{
-    page_table_error::{PtError, PtResult},
-    EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_UC, EFI_MEMORY_UCE, EFI_MEMORY_WB, EFI_MEMORY_WC, EFI_MEMORY_WT,
-    EFI_MEMORY_XP,
 };
 
 pub(crate) const MAX_VA: u64 = 0x0000_ffff_ffff_ffff;
@@ -27,9 +23,6 @@ const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_MASK: u64 = 0x000f_ffff_ffff_
 
 const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_SHIFT: u64 = 2u64; // bit 51:50
 const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK: u64 = 0x0030_0000_0000_0000u64; // 2 bits - bit 51:50
-
-pub(crate) const EFI_MEMORY_CACHETYPE_MASK: u64 =
-    EFI_MEMORY_UC | EFI_MEMORY_WC | EFI_MEMORY_WT | EFI_MEMORY_WB | EFI_MEMORY_UCE;
 
 fn is_4kb_aligned(addr: u64) -> bool {
     (addr & (FRAME_SIZE_4KB - 1)) == 0
@@ -73,14 +66,13 @@ impl VMSAv864TableDescriptor {
     }
 
     /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: u64, next_pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, next_pa: PhysicalAddress) -> PtResult<()> {
         if !self.is_valid_table() {
             let next_level_table_base = next_pa.into();
             if !is_4kb_aligned(next_level_table_base) {
                 panic!("allocated page is not 4k aligned {:X}", next_level_table_base);
             }
 
-            // println!("next_level_table_base: {:X}", next_level_table_base);
             let nlta_lower = (next_level_table_base & PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_MASK)
                 >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_SHIFT;
             let nlta_upper = ((next_level_table_base & PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK)
@@ -100,7 +92,7 @@ impl VMSAv864TableDescriptor {
     }
 
     /// return all the memory attributes for the current entry
-    fn set_attributes(&mut self, _attributes: u64) {
+    fn set_attributes(&mut self, _attributes: MemoryAttributes) {
         // For table entries, we don't need to set the memory attributes
         // Instead, we need to set the most permissive attributes to allow page
         // entries to drive the attributes.
@@ -110,20 +102,20 @@ impl VMSAv864TableDescriptor {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&mut self) -> u64 {
-        let mut attributes = 0u64;
+    pub fn get_attributes(&mut self) -> MemoryAttributes {
+        let mut attributes = MemoryAttributes::empty();
 
         if !self.is_valid_table() {
-            attributes |= EFI_MEMORY_RP;
+            attributes |= MemoryAttributes::ReadProtect;
         }
 
         if (self.ap_table() == 0b10) | (self.ap_table() == 0b11) {
-            attributes |= EFI_MEMORY_RO;
+            attributes |= MemoryAttributes::ReadOnly;
         }
 
         if self.uxn_table() | self.pxn_table() {
             // TODO: need to check if the system in EL2 or EL1
-            attributes |= EFI_MEMORY_XP;
+            attributes |= MemoryAttributes::ExecuteProtect;
         }
 
         attributes
@@ -131,6 +123,39 @@ impl VMSAv864TableDescriptor {
 
     pub fn set_table_invalid(&mut self) {
         self.set_valid_desc(false);
+    }
+
+    pub fn dump_entry(&self) -> String {
+        let valid_desc = self.valid_desc() as u64;
+        let table_desc = self.table_desc() as u64;
+        let ignored0 = self.ignored0() as u64;
+        let nlta_upper = self.nlta_upper() as u64;
+        let access_flag = self.access_flag() as u64;
+        let ignored1 = self.ignored1() as u64;
+        let nlta_lower = self.nlta_lower();
+        let ignored2 = self.ignored2() as u64;
+        let ignored3 = self.ignored3() as u64;
+        let pxn_table = self.pxn_table() as u64;
+        let uxn_table = self.uxn_table() as u64;
+        let ap_table = self.ap_table() as u64;
+        let ns_table = self.ns_table() as u64;
+
+        format!(
+            "|{:01b}|{:02b}|{:01b}|{:01b}|{:06b}|{:01b}|{:040b}|{:01b}|{:01b}|{:02b}|{:06b}|{:01b}|{:01b}|",
+            ns_table,    // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
+            ap_table,    // 2 bits -  Hierarchical permissions.
+            uxn_table,   // 1 bit  -  Hierarchical permissions.
+            pxn_table,   // 1 bit  -  Hierarchical permissions.
+            ignored3,    // 6 bits -  Not used.
+            ignored2,    // 1 bit  -  Not used with PnCH being 0.
+            nlta_lower,  // 40 bits - Address to the next level table descriptor, depending on the granule.
+            ignored1,    // 1 bit  -  Not used.
+            access_flag, // 1 bit  -  When hardware managed access flag is enabled
+            nlta_upper,  // 2 bits -  NTLA for 4KB or 16KB granule
+            ignored0,    // 6 bits -  Not used.
+            table_desc,  // 1 bit -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
+            valid_desc,  // 1 bit -  Valid descriptor
+        )
     }
 }
 
@@ -187,30 +212,30 @@ impl VMSAv864PageDescriptor {
         PhysicalAddress(level3_index | level2_index | level1_index | level0_index)
     }
 
-    fn set_attributes(&mut self, attributes: u64) {
+    fn set_attributes(&mut self, attributes: MemoryAttributes) {
         // This change pretty much follows the GcdAttributeToPageAttribute
-        match attributes & EFI_MEMORY_CACHETYPE_MASK {
-            EFI_MEMORY_UC => {
+        match attributes & MemoryAttributes::CacheAttributesMask {
+            MemoryAttributes::Uncacheable => {
                 self.set_attribute_index(0);
                 self.set_ng(false);
                 self.set_ns(false);
             }
-            EFI_MEMORY_WC => {
+            MemoryAttributes::WriteCombining => {
                 self.set_attribute_index(1);
                 self.set_ng(false);
                 self.set_ns(false);
             }
-            EFI_MEMORY_WT => {
+            MemoryAttributes::WriteThrough => {
                 self.set_attribute_index(2);
                 self.set_ng(false);
                 self.set_ns(false);
             }
-            EFI_MEMORY_WB => {
+            MemoryAttributes::Writeback => {
                 self.set_attribute_index(3);
                 self.set_ng(false);
                 self.set_ns(false);
             }
-            EFI_MEMORY_UCE => {
+            MemoryAttributes::UncacheableExport => {
                 self.set_attribute_index(4);
                 self.set_ng(false);
                 self.set_ns(false);
@@ -222,40 +247,42 @@ impl VMSAv864PageDescriptor {
             }
         }
 
-        if (attributes & EFI_MEMORY_XP != 0) || (attributes & EFI_MEMORY_CACHETYPE_MASK == EFI_MEMORY_UC) {
+        if attributes.contains(MemoryAttributes::ExecuteProtect)
+            || (attributes & MemoryAttributes::CacheAttributesMask == MemoryAttributes::Uncacheable)
+        {
             // TODO: need to check if the system in EL2 or EL1
             self.set_uxn(true);
             self.set_pxn(false);
         }
 
-        if attributes & EFI_MEMORY_RO != 0 {
+        if attributes.contains(MemoryAttributes::ReadOnly) {
             self.set_access_permission(2);
         }
         self.set_access_flag(true);
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> u64 {
-        let mut attributes = 0u64;
+    pub fn get_attributes(&self) -> MemoryAttributes {
+        let mut attributes = MemoryAttributes::empty();
 
         if !self.is_valid_page() {
-            attributes = EFI_MEMORY_RP;
+            attributes = MemoryAttributes::ReadProtect;
         } else {
             match self.attribute_index() {
-                0 => attributes |= EFI_MEMORY_UC,
-                1 => attributes |= EFI_MEMORY_WC,
-                2 => attributes |= EFI_MEMORY_WT,
-                3 => attributes |= EFI_MEMORY_WB,
-                4 => attributes |= EFI_MEMORY_UCE,
-                _ => attributes |= EFI_MEMORY_UC,
+                0 => attributes |= MemoryAttributes::Uncacheable,
+                1 => attributes |= MemoryAttributes::WriteCombining,
+                2 => attributes |= MemoryAttributes::WriteThrough,
+                3 => attributes |= MemoryAttributes::Writeback,
+                4 => attributes |= MemoryAttributes::UncacheableExport,
+                _ => attributes |= MemoryAttributes::Uncacheable,
             }
 
             if self.access_permission() == 2 {
-                attributes |= EFI_MEMORY_RO;
+                attributes |= MemoryAttributes::ReadOnly;
             }
 
             if self.uxn() {
-                attributes |= EFI_MEMORY_XP;
+                attributes |= MemoryAttributes::ExecuteProtect;
             }
         }
 
@@ -264,7 +291,11 @@ impl VMSAv864PageDescriptor {
     }
 
     /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: u64, page_table_base_address: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(
+        &mut self,
+        attributes: MemoryAttributes,
+        page_table_base_address: PhysicalAddress,
+    ) -> PtResult<()> {
         if !self.is_valid_page() {
             let next_level_table_base = u64::from(page_table_base_address);
 
@@ -289,6 +320,52 @@ impl VMSAv864PageDescriptor {
 
     pub fn set_page_invalid(&mut self) {
         self.set_descriptor_type(0);
+    }
+
+    pub fn dump_entry(&self) -> String {
+        let descriptor_type = self.descriptor_type() as u64;
+        let attribute_index = self.attribute_index() as u64;
+        let ns = self.ns() as u64;
+        let access_permission = self.access_permission() as u64;
+        let shareable = self.shareable() as u64;
+        let access_flag = self.access_flag() as u64;
+        let ng = self.ng() as u64;
+        let level3_index = self.level3_index() as u64;
+        let level2_index = self.level2_index() as u64;
+        let level1_index = self.level1_index() as u64;
+        let level0_index = self.level0_index() as u64;
+        let reserved0 = self.reserved0() as u64;
+        let guarded_page = self.guarded_page() as u64;
+        let dirty_bit_modifier = self.dirty_bit_modifier() as u64;
+        let contig = self.contig() as u64;
+        let pxn = self.pxn() as u64;
+        let uxn = self.uxn() as u64;
+        let reserved1 = self.reserved1() as u64;
+        let imp_def = self.imp_def() as u64;
+        let ignored = self.ignored() as u64;
+        format!(
+            "|{:01b}|{:04b}|{:03b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:02b}|{:09b}|{:09b}|{:09b}|{:09b}|{:01b}|{:01b}|{:02b}|{:02b}|{:01b}|{:03b}|{:02b}|",
+            ignored,         // 1 bit  -  Not used outside of Realm translation regimes
+            imp_def,         // 4 bits -  Implementation defined
+            reserved1,       // 3 bits -  Reserved for software use
+            uxn,             // 1 bit  -  UXN Execution permissions
+            pxn,             // 1 bit  -  PXN Execution permissions
+            contig,          // 1 bit  -  Contiguous
+            dirty_bit_modifier, // 1 bit  -  DBM
+            guarded_page,    // 1 bit  -  GP
+            reserved0,       // 2 bits -  Not used
+            level0_index,    // 9 bits -  Level 0 index, that points to L1 table or a 512GB block
+            level1_index,    // 9 bits -  Level 1 index, that points to L2 table or a 1GB block
+            level2_index,    // 9 bits -  Level 2 index, that points to L3 table or a 2MB block
+            level3_index,    // 9 bits -  Level 3 index, that points to a 4KB block
+            ng,              // 1 bit  -  Not global
+            access_flag,     // 1 bit  -  Access flag
+            shareable,       // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
+            access_permission, // 2 bits -  AP
+            ns,              // 1 bit  -  NS
+            attribute_index, // 3 bits -  AttrIndx 0 = Device memory, 1 = non-cacheable memory, 2 = write-through, 3 = write-back, 4 = write-back.
+            descriptor_type, // 2 bits -  1 = Block entry, 3 = Page entry or level 3 block entry, Others = Faulty entry
+        )
     }
 }
 
@@ -325,6 +402,19 @@ impl Sub<u64> for PageLevel {
 
     fn sub(self, _rhs: u64) -> Self::Output {
         ((self as u64) - 1).into()
+    }
+}
+
+impl fmt::Display for PageLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let level_name = match self {
+            PageLevel::Lvl0 => "LVL0",
+            PageLevel::Lvl1 => "LVL1",
+            PageLevel::Lvl2 => "LVL2",
+            PageLevel::Lvl3 => "LVL3",
+            PageLevel::NA => "NA",
+        };
+        write!(f, "{:5}", level_name)
     }
 }
 

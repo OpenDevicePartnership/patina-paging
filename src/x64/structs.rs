@@ -1,13 +1,9 @@
+use crate::{MemoryAttributes, PtError, PtResult};
+use alloc::string::String;
+use bitfield_struct::bitfield;
 use core::{
     fmt::{self, Display, Formatter},
     ops::{Add, Sub},
-};
-
-use bitfield_struct::bitfield;
-
-use crate::{
-    page_table_error::{PtError, PtResult},
-    EFI_MEMORY_RO, EFI_MEMORY_RP, EFI_MEMORY_XP,
 };
 
 pub const PAGE_SIZE: u64 = 0x1000; // 4KB
@@ -50,7 +46,7 @@ pub struct PageMapEntry {
 
 impl PageMapEntry {
     /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         if !self.present() {
             let mut next_level_table_base: u64 = pa.into();
 
@@ -76,26 +72,26 @@ impl PageMapEntry {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> u64 {
-        let mut attributes = 0u64;
+    pub fn get_attributes(&self) -> MemoryAttributes {
+        let mut attributes = MemoryAttributes::empty();
 
         if !self.present() {
-            attributes |= EFI_MEMORY_RP;
+            attributes |= MemoryAttributes::ReadProtect;
         }
 
         if !self.read_write() {
-            attributes |= EFI_MEMORY_RO;
+            attributes |= MemoryAttributes::ReadOnly;
         }
 
         if self.nx() {
-            attributes |= EFI_MEMORY_XP;
+            attributes |= MemoryAttributes::ExecuteProtect;
         }
 
         attributes
     }
 
     /// set all the memory attributes for the current entry
-    fn set_attributes(&mut self, _attributes: u64) {
+    fn set_attributes(&mut self, _attributes: MemoryAttributes) {
         self.set_read_write(true);
         self.set_user_supervisor(true);
         self.set_write_through(false);
@@ -104,6 +100,38 @@ impl PageMapEntry {
         self.set_available(0);
         self.set_available_high(0);
         self.set_nx(false);
+    }
+
+    pub fn dump_entry(&self) -> String {
+        let nx = self.nx() as u64;
+        let available_high = self.available_high() as u64;
+        let page_table_base_address = self.page_table_base_address();
+        let available = self.available() as u64;
+        let must_be_zero = self.must_be_zero() as u64;
+        let reserved = self.reserved() as u64;
+        let accessed = self.accessed() as u64;
+        let cache_disabled = self.cache_disabled() as u64;
+        let write_through = self.write_through() as u64;
+        let user_supervisor = self.user_supervisor() as u64;
+        let read_write = self.read_write() as u64;
+        let present = self.present() as u64;
+
+        format!(
+            "|{:01b}|{:011b}|{:040b}|{:03b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|",
+            nx,                      // 1 bit -  No Execute bit
+            available_high & 0x7FF,  // 11 bits -  Available for use by system software
+            page_table_base_address, // 40 bits -  Page Table Base Address
+            available & 0x7,         // 3 bits -  Available for use by system software
+            must_be_zero & 0x1,      // 1 bits -  Must Be Zero
+            must_be_zero & 0x1,      // 1 bits -  Must Be Zero
+            reserved,                // 1 bit -  Reserved
+            accessed,                // 1 bit -  0 = Not accessed, 1 = Accessed (set by CPU)
+            cache_disabled,          // 1 bit -  0 = Cached, 1=Non-Cached
+            write_through,           // 1 bit -  0 = Write-Back caching, 1=Write-Through caching
+            user_supervisor,         // 1 bit -  0 = Supervisor, 1=User
+            read_write,              // 1 bit -  0 = Read-Only, 1= Read/Write
+            present,                 // 1 bit -  0 = Not present in memory, 1 = Present in memory
+        )
     }
 }
 
@@ -134,7 +162,7 @@ pub struct PageTableEntry4KB {
 
 impl PageTableEntry4KB {
     /// update all the fields and next table base address
-    pub fn update_fields(&mut self, attributes: u64, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
         if !self.present() {
             let mut next_level_table_base: u64 = pa.into();
 
@@ -151,33 +179,33 @@ impl PageTableEntry4KB {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> u64 {
-        let mut attributes = 0u64;
+    pub fn get_attributes(&self) -> MemoryAttributes {
+        let mut attributes = MemoryAttributes::empty();
 
         if !self.present() {
-            attributes |= EFI_MEMORY_RP;
+            attributes |= MemoryAttributes::ReadProtect;
         }
 
         if !self.read_write() {
-            attributes |= EFI_MEMORY_RO;
+            attributes |= MemoryAttributes::ReadOnly;
         }
 
         if self.nx() {
-            attributes |= EFI_MEMORY_XP;
+            attributes |= MemoryAttributes::ExecuteProtect;
         }
 
         attributes
     }
 
     /// set all the memory attributes for the current entry
-    fn set_attributes(&mut self, attributes: u64) {
-        if (attributes & EFI_MEMORY_RP) != 0 {
+    fn set_attributes(&mut self, attributes: MemoryAttributes) {
+        if attributes.contains(MemoryAttributes::ReadProtect) {
             self.set_present(false);
         } else {
             self.set_present(true);
         }
 
-        if (attributes & EFI_MEMORY_RO) != 0 {
+        if attributes.contains(MemoryAttributes::ReadOnly) {
             self.set_read_write(false);
         } else {
             self.set_read_write(true);
@@ -191,7 +219,7 @@ impl PageTableEntry4KB {
         self.set_available(0);
         self.set_available_high(0);
 
-        if (attributes & EFI_MEMORY_XP) != 0 {
+        if attributes.contains(MemoryAttributes::ExecuteProtect) {
             self.set_nx(true);
         } else {
             self.set_nx(false);
@@ -205,6 +233,39 @@ impl PageTableEntry4KB {
         page_table_base_address <<= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT;
 
         PhysicalAddress(page_table_base_address)
+    }
+
+    pub fn dump_entry(&self) -> String {
+        let nx = self.nx() as u64;
+        let available_high = self.available_high() as u64;
+        let page_table_base_address = self.page_table_base_address();
+        let available = self.available() as u64;
+        let global = self.global() as u64;
+        let pat = self.pat() as u64;
+        let dirty = self.dirty() as u64;
+        let accessed = self.accessed() as u64;
+        let cache_disabled = self.cache_disabled() as u64;
+        let write_through = self.write_through() as u64;
+        let user_supervisor = self.user_supervisor() as u64;
+        let read_write = self.read_write() as u64;
+        let present = self.present() as u64;
+
+        format!(
+            "|{:01b}|{:011b}|{:040b}|{:03b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|",
+            nx,                      // 1 bit -  0 = Execute Code, 1 = No Code Execution
+            available_high & 0x7FF,  // 11 bits -  Available for use by system software
+            page_table_base_address, // 40 bits -  Page Table Base Address
+            available & 0x7,         // 3 bits -  Available for use by system software
+            global,                  // 1 bit -  0 = Not global page, 1 = global page TLB not cleared on CR3 write
+            pat,                     // 1 bit
+            dirty,                   // 1 bit -  0 = Not Dirty, 1 = written by processor on access to page
+            accessed,                // 1 bit -  0 = Not accessed, 1 = Accessed (set by CPU)
+            cache_disabled,          // 1 bit -  0 = Cached, 1=Non-Cached
+            write_through,           // 1 bit -  0 = Write-Back caching, 1=Write-Through caching
+            user_supervisor,         // 1 bit -  0 = Supervisor, 1=User
+            read_write,              // 1 bit -  0 = Read-Only, 1= Read/Write
+            present                  // 1 bit -  0 = Not present in memory, 1 = Present in memory
+        )
     }
 }
 
@@ -246,7 +307,21 @@ impl Sub<u64> for PageLevel {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+impl fmt::Display for PageLevel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let level_name = match self {
+            PageLevel::Pml5 => "PML5",
+            PageLevel::Pml4 => "PML4",
+            PageLevel::Pdp => "PDP",
+            PageLevel::Pd => "PD",
+            PageLevel::Pt => "PT",
+            PageLevel::Pa => "PA",
+        };
+        write!(f, "{:5}", level_name)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct VirtualAddress(u64);
 impl VirtualAddress {
     pub fn new(va: u64) -> Self {
@@ -281,6 +356,11 @@ impl VirtualAddress {
         self.round_up(level) + 1
     }
 
+    /// This will return the index at the current entry
+    /// For example:
+    ///                             |      PML5|     PML4| PDP/PML3|  PD/PML2|  PT/PML1|    Physical
+    /// va                  = 000000|0000000000|000000000|000000000|000000011|000000000|000000000000
+    /// get_index(va, PD)   = 000000011  <------------------------------'
     pub fn get_index(&self, level: PageLevel) -> u64 {
         let va = self.0;
         match level {

@@ -3,17 +3,13 @@
 /// - x64 4KB 5 level paging
 /// - x64 4KB 4 level paging
 ///
-use crate::{
-    page_allocator::PageAllocator,
-    page_table_error::{PtError, PtResult},
-    PageTable, PagingType,
-};
-
 use super::{
     pagetablestore::X64PageTableStore,
     reg::{invalidate_tlb, write_cr3},
     structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_PML4_VA, MAX_PML5_VA, PAGE_SIZE},
 };
+use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
+use core::ptr;
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
@@ -31,11 +27,21 @@ pub struct X64PageTable<A: PageAllocator> {
 impl<A: PageAllocator> X64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the top level page table(PML5)
-        let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+        let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
+
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
+        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
+        // entries in the page table.
+        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
         assert!(PhysicalAddress::new(base).is_4kb_aligned());
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         unsafe { Self::from_existing(base, page_allocator, paging_type) }
+    }
+
+    pub fn borrow_allocator(&mut self) -> &mut A {
+        &mut self.page_allocator
     }
 
     /// Create a page table from existing page table base. This can be used to
@@ -70,7 +76,13 @@ impl<A: PageAllocator> X64PageTable<A> {
     }
 
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
-        let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE)?;
+        let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
+
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
+        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
+        // entries in the page table.
+        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
             panic!("allocate_page() returned unaligned page");
@@ -137,7 +149,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        attributes: u64,
+        attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
 
@@ -241,7 +253,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        attributes: u64,
+        attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
 
@@ -298,8 +310,8 @@ impl<A: PageAllocator> X64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        prev_attributes: &mut u64,
-    ) -> PtResult<u64> {
+        prev_attributes: &mut MemoryAttributes,
+    ) -> PtResult<MemoryAttributes> {
         let mut va = start_va;
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
@@ -312,7 +324,7 @@ impl<A: PageAllocator> X64PageTable<A> {
                 // Given memory range can span multiple page table entries, in such
                 // scenario, the expectation is all entries should have same attributes.
                 let current_attributes = entry.get_attributes();
-                if *prev_attributes == 0 {
+                if (*prev_attributes).is_empty() {
                     *prev_attributes = current_attributes;
                 }
 
@@ -354,6 +366,68 @@ impl<A: PageAllocator> X64PageTable<A> {
         Ok(*prev_attributes)
     }
 
+    fn dump_page_tables_internal(
+        &self,
+        start_va: VirtualAddress,
+        end_va: VirtualAddress,
+        level: PageLevel,
+        base: PhysicalAddress,
+    ) {
+        let mut va = start_va;
+
+        let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        if level == self.lowest_page_level {
+            for entry in table {
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
+
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                let l: u64 = level.into();
+                let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
+                log::info!("{}|{:48}{}", level, range, entry.dump_entry());
+
+                va = va.get_next_va(level);
+            }
+            return;
+        }
+
+        for entry in table {
+            if !entry.present() {
+                return;
+            }
+            let next_base = entry.get_canonical_page_table_base();
+
+            // split the va range appropriately for the next level pages
+
+            // start of the next level va. It will be same as current va
+            let next_level_start_va = va;
+
+            // get max va addressable by current entry
+            let curr_va_ceil = va.round_up(level);
+
+            // end of next level va. It will be minimum of next va and end va
+            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+            let l: u64 = level.into();
+            let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
+            log::info!("{}|{:48}{}", level, range, entry.dump_entry());
+
+            self.dump_page_tables_internal(
+                next_level_start_va,
+                next_level_end_va,
+                (level as u64 - 1).into(),
+                next_base,
+            );
+
+            va = va.get_next_va(level);
+        }
+    }
+
     fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
         // Overflow check
         address.try_add(size)?;
@@ -392,7 +466,13 @@ impl<A: PageAllocator> X64PageTable<A> {
 }
 
 impl<A: PageAllocator> PageTable for X64PageTable<A> {
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
+    type ALLOCATOR = A;
+
+    fn borrow_allocator(&mut self) -> &mut A {
+        self.borrow_allocator()
+    }
+
+    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -400,8 +480,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         // We map until next alignment
         let start_va = address;
         let end_va = address + size - 1;
-
-        // println!("start {:X} end {:X}", start_va, end_va);
 
         let result = self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes);
 
@@ -425,7 +503,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         result
     }
 
-    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: u64) -> PtResult<()> {
+    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -434,7 +512,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let end_va = address + size - 1;
 
         // make sure the memory region has same attributes set
-        let mut prev_attributes = 0;
+        let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)?;
 
         let result =
@@ -451,7 +529,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         Ok(())
     }
 
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<u64> {
+    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -459,7 +537,132 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        let mut prev_attributes = 0;
+        let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
     }
+
+    fn dump_page_tables(&self, address: u64, size: u64) {
+        let address = VirtualAddress::new(address);
+
+        self.validate_address_range(address, size).unwrap();
+
+        let start_va = address;
+        let end_va = address + size - 1;
+
+        log::info!("{}[{} {}]{}", "-".repeat(45), start_va, end_va, "-".repeat(48));
+        log::info!("                                                      6362        52 51                                   12 11 9 8 7 6 5 4 3 2 1 0 ");
+        log::info!("                                                      |N|           |                                        |   |M|M|I| |P|P|U|R| |");
+        log::info!("                                                      |X| Available |     Page-Map Level-4 Base Address      |AVL|B|B|G|A|C|W|/|/|P|");
+        log::info!("                                                      | |           |                                        |   |Z|Z|N| |D|T|S|W| |");
+        log::info!("{}", "-".repeat(132));
+        // uses current cr3 base
+        self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base);
+        log::info!("{}", "-".repeat(132));
+    }
+
+    fn get_page_table_pages_for_size(&self, address: u64, size: u64) -> PtResult<u64> {
+        num_page_tables_required(address, size, self.paging_type)
+    }
+}
+
+/// Given the [start, end offset] at the current level from the [start, end VA],
+/// this function calculates the number of entries required for the range. It
+/// considers the number of entries at the parent level because the start and
+/// end offsets might span across multiple pages.
+fn find_num_entries(start_offset: u64, end_offset: u64, num_entries_at_parent_level: u64) -> u64 {
+    let mut num_entries = 0;
+
+    // Entries spanning multiple pages
+    if num_entries_at_parent_level > 1 {
+        num_entries += 512 - start_offset; // Number of upper entries in first page
+        num_entries += (num_entries_at_parent_level - 2) * 512; // number of entries in between pages
+        num_entries += end_offset + 1; // Number of lower entries in the last page
+    } else {
+        // Entries do not span multiple pages(end_offset is guaranteed to be higher than start offset)
+        num_entries = end_offset - start_offset + 1; // Number of entries in the page
+    }
+
+    num_entries
+}
+
+pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) -> PtResult<u64> {
+    let address = VirtualAddress::new(address);
+    if size == 0 || !address.is_4kb_aligned() {
+        return Err(PtError::UnalignedAddress);
+    }
+
+    // Check the memory range is aligned
+    if !(address + size).is_4kb_aligned() {
+        return Err(PtError::UnalignedAddress);
+    }
+
+    let start_va = address;
+    let end_va = address + size - 1;
+
+    // For the given paging type, identify the highest and lowest page levels.
+    // This is used during page building to terminate the recursion.
+    let (highest_page_level, lowest_page_level) = match paging_type {
+        PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
+        PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
+        _ => return Err(PtError::InvalidParameter),
+    };
+
+    let mut num_entries_at_parent_level = 0;
+    let mut num_tables_at_current_level = 1; // top level table
+    let mut total_num_tables = 0;
+
+    // Rust does not support creating ranges [high..=low], so we use
+    // [low..=high].rev() instead.
+    for level in ((lowest_page_level as u64)..=(highest_page_level as u64)).rev() {
+        // Add the number of tables required at the current level to the total
+        // pages. This has already been computed in the previous iteration.
+        total_num_tables += num_tables_at_current_level;
+
+        let start_offset = start_va.get_index(level.into());
+        let end_offset = end_va.get_index(level.into());
+
+        // Prepare for the next level: Calculating the number of tables required
+        // at the next level (e.g., PDP) depends on the number of entries
+        // present at the current level (e.g., PML4). Calculating the number of
+        // entries at the current level (PML4) in turn depends on the number of
+        // entries at the parent level (PML5 — this is the third parameter).
+        // Why? See below.
+
+        //  |  parent level |  current level |  next level
+        //  |               |                |
+        //  │               │  ┌─────┐       │
+        //  │               │  │     │       │
+        //  │               │  ├─────┤       │
+        //  │               │  │     │       │
+        //  │               │  ├─────┤       │
+        //  │               └─►│PML4E│       │
+        //  │               │  ├─────┤       │
+        //  │               │  │PML4E|       │
+        //  │          ┌──────►└─────┘       │
+        //  │          │    │  ┌─────┐       │  ┌─────┐
+        //  │          │    │  │PML4E│       │  │     │
+        //  │          │    │  ├─────┤       │  ├─────┤
+        //  │          │    │  │PML4E│       │  │     │
+        //  │          │    │  ├─────┤       │  ├─────┤
+        //  │          │    └─►│PML4E│       │  │PDPE │
+        //  │          │    │  ├─────┤       │  ├─────┤
+        //  │          │    │  │PML4E|       |  │PDPE |
+        //  │          │ ┌────►└─────┘   ┌─────►└─────┘
+        //  │  ┌─────┐ │ │  │  ┌─────┐   │   │  ┌─────┐
+        //  │  │PML5E│─┘ │  │  │PML4E|───┘   │  │PDPE |
+        //  │  ├─────┤   │  │  ├─────┤       │  ├─────┤
+        //  │  │PML5E│───┘  └─►│PML4E│───┐   │  │PDPE │
+        //  │  ├─────┤         ├─────┤   │   │  ├─────┤
+        //  └─►│PML5E├───┐     │     │   │   └─►│PDPE │───┐
+        //     ├─────┤   │     ├─────┤   │      ├─────┤   │
+        //     │     │   │     │     │   │      │     │   │
+        //     └─────┘   └────►└─────┘   └─────►└─────┘   └───►
+        let num_entries_at_current_level = find_num_entries(start_offset, end_offset, num_entries_at_parent_level);
+
+        // These are truely consumed in the next iteration.
+        num_tables_at_current_level = num_entries_at_current_level;
+        num_entries_at_parent_level = num_entries_at_current_level;
+    }
+
+    Ok(total_num_tables)
 }
