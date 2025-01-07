@@ -56,8 +56,8 @@ impl<A: PageAllocator> X64PageTable<A> {
         // For the given paging type identify the highest and lowest page levels.
         // This is used during page building to stop the recursion.
         let (highest_page_level, lowest_page_level) = match paging_type {
-            PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
-            PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
+            PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
+            PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
             _ => return Err(PtError::InvalidParameter),
         };
 
@@ -360,12 +360,12 @@ impl<A: PageAllocator> X64PageTable<A> {
 
         // Check the memory range
         match self.paging_type {
-            PagingType::Paging4KB5Level => {
+            PagingType::Paging5Level => {
                 if address + size > VirtualAddress::new(MAX_PML5_VA) {
                     return Err(PtError::InvalidMemoryRange);
                 }
             }
-            PagingType::Paging4KB4Level => {
+            PagingType::Paging4Level => {
                 if address + size > VirtualAddress::new(MAX_PML4_VA) {
                     return Err(PtError::InvalidMemoryRange);
                 }
@@ -374,7 +374,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         }
 
         match self.paging_type {
-            PagingType::Paging4KB5Level | PagingType::Paging4KB4Level => {
+            PagingType::Paging5Level | PagingType::Paging4Level => {
                 if size == 0 || !address.is_4kb_aligned() {
                     return Err(PtError::UnalignedAddress);
                 }

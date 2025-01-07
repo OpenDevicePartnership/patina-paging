@@ -23,8 +23,8 @@ impl TestPageAllocator {
         // For the given paging type identify the highest and lowest page levels.
         // This is used during page building to stop the recursion.
         let (highest_page_level, lowest_page_level) = match paging_type {
-            PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
-            PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
+            PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
+            PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
             PagingType::AArch64PageTable4KB => (PageLevel::Pml4, PageLevel::Pt),
         };
 

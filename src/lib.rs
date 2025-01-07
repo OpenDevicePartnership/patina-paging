@@ -105,8 +105,8 @@ pub trait PageTable {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PagingType {
-    Paging4KB5Level,
-    Paging4KB4Level,
+    Paging5Level,
+    Paging4Level,
     AArch64PageTable4KB,
 }
 

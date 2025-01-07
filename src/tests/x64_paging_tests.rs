@@ -40,8 +40,8 @@ fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) ->
     // For the given paging type identify the highest and lowest page levels.
     // This is used during page building to stop the recursion.
     let (highest_page_level, lowest_page_level) = match paging_type {
-        PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
-        PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
+        PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
+        PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
         _ => return Err(PtError::InvalidParameter),
     };
     // println!("address: {:x} size: {:x} start: {:x} end: {:x}", address, size, start, end);
@@ -73,15 +73,15 @@ fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) ->
 fn test_find_num_page_tables() {
     let max_pages: u64 = 10;
 
-    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level);
-    let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4KB4Level);
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4Level);
+    let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4Level);
 
     assert!(pt.is_ok());
 
     // Mapping one page of physical address require 5 page tables(PML5/PML4/PDPE/PDP/PT)
     let address = 0x0;
     let size = FRAME_SIZE_4KB; // 4k
-    let res = num_page_tables_required(address, size, PagingType::Paging4KB4Level);
+    let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
     assert_eq!(table_count, 4);
@@ -89,7 +89,7 @@ fn test_find_num_page_tables() {
     // Mapping one page of physical address require 5 page tables(PML5/PML4/PDPE/PDP/PT)
     let address = FRAME_SIZE_4KB;
     let size = FRAME_SIZE_4KB << 1;
-    let res = num_page_tables_required(address, size, PagingType::Paging4KB4Level);
+    let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
     assert_eq!(table_count, 4);
@@ -97,7 +97,7 @@ fn test_find_num_page_tables() {
     // Mapping 512 pages of physical address require 5 page tables(PML5/PML4/PDPE/PDP/PT)
     let address = 0x0;
     let size = 512 * FRAME_SIZE_4KB;
-    let res = num_page_tables_required(address, size, PagingType::Paging4KB4Level);
+    let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
     assert_eq!(table_count, 4);
@@ -105,7 +105,7 @@ fn test_find_num_page_tables() {
     // Mapping 513 pages of physical address require 6 page tables(PML5(1)/PML4(1)/PDPE(1)/PDP(1)/PT(2))
     let address = 0x0;
     let size = 512 * FRAME_SIZE_4KB + FRAME_SIZE_4KB;
-    let res = num_page_tables_required(address, size, PagingType::Paging4KB4Level);
+    let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
     assert_eq!(table_count, 5);
@@ -113,7 +113,7 @@ fn test_find_num_page_tables() {
     // Mapping 512 + 512 pages of physical address require 6 page tables(PML5(1)/PML4(1)/PDPE(1)/PDP(1)/PT(2))
     let address = 0x0;
     let size = 512 * FRAME_SIZE_4KB + 512 * FRAME_SIZE_4KB;
-    let res = num_page_tables_required(address, size, PagingType::Paging4KB4Level);
+    let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
     assert_eq!(table_count, 5);
@@ -130,8 +130,8 @@ fn test_map_memory_address_simple() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: 0x400000 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0, size: 0x400000 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0, size: 0x400000 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0, size: 0x400000 },
     ];
 
     for test_config in test_configs {
@@ -166,8 +166,8 @@ fn test_map_memory_address_0_to_ffff_ffff() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: FRAME_SIZE_4KB },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0, size: FRAME_SIZE_4KB },
     ];
 
     for test_config in test_configs {
@@ -208,13 +208,13 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
 
     let test_configs = [
         TestConfig {
-            paging_type: PagingType::Paging4KB4Level,
+            paging_type: PagingType::Paging4Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB,
         },
         TestConfig {
-            paging_type: PagingType::Paging4KB5Level,
+            paging_type: PagingType::Paging5Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB,
@@ -256,13 +256,13 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
     let test_configs = [
         TestConfig {
-            paging_type: PagingType::Paging4KB4Level,
+            paging_type: PagingType::Paging4Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB << 1,
         },
         TestConfig {
-            paging_type: PagingType::Paging4KB5Level,
+            paging_type: PagingType::Paging5Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB << 1,
@@ -303,8 +303,8 @@ fn test_map_memory_address_unaligned() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1, size: 200 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1, size: 200 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 200 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 200 },
     ];
 
     for test_config in test_configs {
@@ -335,8 +335,8 @@ fn test_map_memory_address_range_overflow() {
 
     let test_configs = [
         // VA range overflows
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: MAX_PML4_VA, size: MAX_PML4_VA },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: MAX_PML5_VA, size: MAX_PML5_VA },
+        TestConfig { paging_type: PagingType::Paging4Level, address: MAX_PML4_VA, size: MAX_PML4_VA },
+        TestConfig { paging_type: PagingType::Paging5Level, address: MAX_PML5_VA, size: MAX_PML5_VA },
     ];
 
     for test_config in test_configs {
@@ -367,8 +367,8 @@ fn test_map_memory_address_invalid_range() {
 
     let test_configs = [
         // VA above the valid address range
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: MAX_PML4_VA + 1, size: FRAME_SIZE_4KB },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: MAX_PML5_VA + 1, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging4Level, address: MAX_PML4_VA + 1, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging5Level, address: MAX_PML5_VA + 1, size: FRAME_SIZE_4KB },
     ];
 
     for test_config in test_configs {
@@ -398,8 +398,8 @@ fn test_map_memory_address_zero_size() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1, size: 0 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 0 },
     ];
 
     for test_config in test_configs {
@@ -431,8 +431,8 @@ fn test_unmap_memory_address_simple() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
     ];
 
     for test_config in test_configs {
@@ -466,8 +466,8 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: FRAME_SIZE_4KB },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0, size: FRAME_SIZE_4KB },
     ];
 
     for test_config in test_configs {
@@ -507,13 +507,13 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
 
     let test_configs = [
         TestConfig {
-            paging_type: PagingType::Paging4KB4Level,
+            paging_type: PagingType::Paging4Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB,
         },
         TestConfig {
-            paging_type: PagingType::Paging4KB5Level,
+            paging_type: PagingType::Paging5Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB,
@@ -555,13 +555,13 @@ fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
     let test_configs = [
         TestConfig {
-            paging_type: PagingType::Paging4KB4Level,
+            paging_type: PagingType::Paging4Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB << 1,
         },
         TestConfig {
-            paging_type: PagingType::Paging4KB5Level,
+            paging_type: PagingType::Paging5Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB << 1,
@@ -602,8 +602,8 @@ fn test_unmap_memory_address_unaligned() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1, size: 200 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1, size: 200 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 200 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 200 },
     ];
 
     for test_config in test_configs {
@@ -632,8 +632,8 @@ fn test_unmap_memory_address_zero_size() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1, size: 0 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 0 },
     ];
 
     for test_config in test_configs {
@@ -662,8 +662,8 @@ fn test_query_memory_address_simple() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
     ];
 
     for test_config in test_configs {
@@ -697,8 +697,8 @@ fn test_query_memory_address_0_to_ffff_ffff() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1000, size: FRAME_SIZE_4KB },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1000, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: FRAME_SIZE_4KB },
     ];
 
     for test_config in test_configs {
@@ -735,8 +735,8 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: FRAME_SIZE_4KB, step: FRAME_SIZE_4KB },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0, size: FRAME_SIZE_4KB, step: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0, size: FRAME_SIZE_4KB, step: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0, size: FRAME_SIZE_4KB, step: FRAME_SIZE_4KB },
     ];
 
     for test_config in test_configs {
@@ -773,13 +773,13 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
     let test_configs = [
         TestConfig {
-            paging_type: PagingType::Paging4KB4Level,
+            paging_type: PagingType::Paging4Level,
             address: 0,
             size: FRAME_SIZE_4KB << 1,
             step: FRAME_SIZE_4KB,
         },
         TestConfig {
-            paging_type: PagingType::Paging4KB5Level,
+            paging_type: PagingType::Paging5Level,
             address: 0,
             size: FRAME_SIZE_4KB << 1,
             step: FRAME_SIZE_4KB,
@@ -814,9 +814,9 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
 fn test_query_memory_address_unaligned() {
     let max_pages: u64 = 10;
 
-    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level);
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4Level);
 
-    let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4KB4Level);
+    let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4Level);
 
     assert!(pt.is_ok());
     let pt = pt.unwrap();
@@ -832,9 +832,9 @@ fn test_query_memory_address_unaligned() {
 fn test_query_memory_address_zero_size() {
     let max_pages: u64 = 10;
 
-    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4KB4Level);
+    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4Level);
 
-    let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4KB4Level);
+    let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4Level);
 
     assert!(pt.is_ok());
     let pt = pt.unwrap();
@@ -856,8 +856,8 @@ fn test_remap_memory_address_simple() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
     ];
 
     for test_config in test_configs {
@@ -892,8 +892,8 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: FRAME_SIZE_4KB },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0, size: FRAME_SIZE_4KB },
     ];
 
     for test_config in test_configs {
@@ -934,13 +934,13 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
 
     let test_configs = [
         TestConfig {
-            paging_type: PagingType::Paging4KB4Level,
+            paging_type: PagingType::Paging4Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB,
         },
         TestConfig {
-            paging_type: PagingType::Paging4KB5Level,
+            paging_type: PagingType::Paging5Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB,
@@ -983,13 +983,13 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
     let test_configs = [
         TestConfig {
-            paging_type: PagingType::Paging4KB4Level,
+            paging_type: PagingType::Paging4Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB << 1,
         },
         TestConfig {
-            paging_type: PagingType::Paging4KB5Level,
+            paging_type: PagingType::Paging5Level,
             address: 0,
             address_increment: FRAME_SIZE_4KB,
             size: FRAME_SIZE_4KB << 1,
@@ -1031,8 +1031,8 @@ fn test_remap_memory_address_unaligned() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1, size: 200 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1, size: 200 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 200 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 200 },
     ];
 
     for test_config in test_configs {
@@ -1062,8 +1062,8 @@ fn test_remap_memory_address_zero_size() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1, size: 0 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 0 },
     ];
 
     for test_config in test_configs {
@@ -1094,8 +1094,8 @@ fn test_from_existing_page_table() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
-        TestConfig { paging_type: PagingType::Paging4KB5Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: FRAME_SIZE_4KB * 512 * 512 * 10 },
     ];
 
     for test_config in test_configs {
