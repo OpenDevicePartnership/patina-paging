@@ -1,5 +1,5 @@
 use crate::page_allocator::PageAllocator;
-use crate::x64::structs::{PageLevel, PageMapEntry, PageTableEntry4KB, VirtualAddress, PAGE_SIZE};
+use crate::x64::structs::{PageLevel, PageTableEntry, VirtualAddress, PAGE_SIZE};
 use crate::{MemoryAttributes, PagingType};
 use crate::{PtError, PtResult};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -162,15 +162,15 @@ impl TestPageAllocator {
 
             match level {
                 PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {
-                    let page_base: u64 = PageMapEntry::from_bits(table_base).get_canonical_page_table_base().into();
-                    let attributes = PageMapEntry::from_bits(table_base).get_attributes();
+                    let page_base: u64 = PageTableEntry::from_bits(table_base).get_canonical_page_table_base().into();
+                    let attributes = PageTableEntry::from_bits(table_base).get_attributes();
                     assert_eq!(page_base, expected_page_base);
                     assert_eq!(attributes, MemoryAttributes::empty()); // we don't set any attributes on higher level page table entries
                 }
                 PageLevel::Pt => {
                     let page_base: u64 =
-                        PageTableEntry4KB::from_bits(table_base).get_canonical_page_table_base().into();
-                    let attributes = PageTableEntry4KB::from_bits(table_base).get_attributes();
+                        PageTableEntry::from_bits(table_base).get_canonical_page_table_base().into();
+                    let attributes = PageTableEntry::from_bits(table_base).get_attributes();
                     assert_eq!(page_base, expected_page_base);
                     assert_eq!(attributes, expected_attributes);
                 }

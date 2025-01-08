@@ -1079,7 +1079,7 @@ fn test_dump_page_tables() {
         size: u64,
     }
 
-    let test_configs = [TestConfig { paging_type: PagingType::Paging4KB4Level, address: 0, size: 0x8000 }];
+    let test_configs = [TestConfig { paging_type: PagingType::Paging4Level, address: 0, size: 0x8000 }];
 
     set_logger();
 

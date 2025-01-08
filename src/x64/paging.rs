@@ -167,7 +167,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         for mut entry in table {
             if !entry.present() {
                 let pa = self.allocate_page()?;
-                entry.update_fields(attributes, pa)?;
+                entry.update_fields(MemoryAttributes::empty(), pa)?;
             }
             let next_base = entry.get_canonical_page_table_base();
 
@@ -315,14 +315,12 @@ impl<A: PageAllocator> X64PageTable<A> {
         let mut va = start_va;
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for entry in table {
-                if !entry.present() {
-                    return Err(PtError::NoMapping);
-                }
+        for entry in table {
+            if !entry.present() {
+                return Err(PtError::NoMapping);
+            }
 
-                // Given memory range can span multiple page table entries, in such
-                // scenario, the expectation is all entries should have same attributes.
+            if entry.points_to_pa() {
                 let current_attributes = entry.get_attributes();
                 if (*prev_attributes).is_empty() {
                     *prev_attributes = current_attributes;
@@ -331,35 +329,28 @@ impl<A: PageAllocator> X64PageTable<A> {
                 if *prev_attributes != current_attributes {
                     return Err(PtError::IncompatibleMemoryAttributes);
                 }
+            } else {
+                let next_base = entry.get_canonical_page_table_base();
+
+                // split the va range appropriately for the next level pages
+
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
+
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                self.query_memory_region_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                    prev_attributes,
+                )?;
             }
-            return Ok(*prev_attributes);
-        }
-
-        for entry in table {
-            if !entry.present() {
-                return Err(PtError::NoMapping);
-            }
-            let next_base = entry.get_canonical_page_table_base();
-
-            // split the va range appropriately for the next level pages
-
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
-
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
-
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-            self.query_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-                prev_attributes,
-            )?;
-
             va = va.get_next_va(level);
         }
 
@@ -602,8 +593,8 @@ pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: Pag
     // For the given paging type, identify the highest and lowest page levels.
     // This is used during page building to terminate the recursion.
     let (highest_page_level, lowest_page_level) = match paging_type {
-        PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
-        PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
+        PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
+        PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
         _ => return Err(PtError::InvalidParameter),
     };
 
