@@ -19,10 +19,49 @@ pub struct AArch64PageTable<A: PageAllocator> {
 
     highest_page_level: PageLevel,
     lowest_page_level: PageLevel,
+    idmap: IdMap,
 }
 
+use aarch64_paging::{
+    paging::{PageTable, Attributes, MemoryRegion, TranslationRegime, Translation},
+    Mapping
+};
+use core::ptr::NonNull;
+
+impl<A: PageAllocator> Translation for AArch64PageTable<A> {
+    /// Allocates a zeroed page, which is already mapped, to be used for a new subtable of some
+    /// pagetable. Returns both a pointer to the page and its physical address.
+    fn allocate_table(&mut self) -> (NonNull<PageTable>, PhysicalAddress) {
+        let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
+        (base, aarch64_paging::paging::PhysicalAddress::from(base))
+    }
+
+    /// Deallocates the page which was previous allocated by [`allocate_table`](Self::allocate_table).
+    ///
+    /// # Safety
+    ///
+    /// The memory must have been allocated by `allocate_table` on the same `Translation`, and not
+    /// yet deallocated.
+    unsafe fn deallocate_table(&mut self, page_table: NonNull<PageTable>) {
+        // Do nothing
+    }
+
+    /// Given the physical address of a subtable, returns the virtual address at which it is mapped.
+    fn physical_to_virtual(&self, pa: PhysicalAddress) -> NonNull<PageTable> {
+        NonNull::new(pa.0 as *mut PageTable).expect("Got physical address 0 for pagetable")
+    }
+}
+
+
 impl<A: PageAllocator> AArch64PageTable<A> {
+    const ASID: usize = 1;
+    const ROOT_LEVEL: usize = 0;
+    const NORMAL_CACHEABLE: Attributes = Attributes::ATTRIBUTE_INDEX_1.union(Attributes::INNER_SHAREABLE);
+
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
+        // Create a new EL1 page table with identity mapping.
+        let idmap = IdMap::new(Self::ASID, Self::ROOT_LEVEL, TranslationRegime::El2And0);
+
         // Allocate the root page table
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
 
@@ -34,7 +73,47 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         assert!(PhysicalAddress::new(base).is_4kb_aligned());
 
         // SAFETY: We just allocated the page, so it is safe to use it.
-        unsafe { Self::from_existing(base, page_allocator, paging_type) }
+        unsafe { Self::from_existing(base, page_allocator, paging_type, idmap) }
+    }
+
+    fn convert_mem_attr_to_pt_attr(&self, attributes: MemoryAttributes) -> Attributes {
+        let mut pt_attr = Attributes::empty();
+
+        if attributes.contains(MemoryAttributes::ReadProtect) {
+            return Attributes::empty();
+        }
+
+        if attributes.contains(MemoryAttributes::ReadOnly) {
+            pt_attr |= Attributes::READ_ONLY;
+        }
+
+        if attributes.contains(MemoryAttributes::ExecuteProtect) {
+            pt_attr |= Attributes::UXN;
+        }
+
+        // This change pretty much follows the GcdAttributeToPageAttribute
+        match attributes & MemoryAttributes::CacheAttributesMask {
+            MemoryAttributes::Uncacheable => {
+                pt_attr |= Attributes::ATTRIBUTE_INDEX_0;
+            }
+            MemoryAttributes::WriteCombining => {
+                pt_attr |= Attributes::ATTRIBUTE_INDEX_1;
+            }
+            MemoryAttributes::WriteThrough => {
+                pt_attr |= Attributes::ATTRIBUTE_INDEX_2;
+            }
+            MemoryAttributes::Writeback => {
+                pt_attr |= Attributes::ATTRIBUTE_INDEX_3;
+            }
+            MemoryAttributes::UncacheableExport => {
+                pt_attr |= Attributes::ATTRIBUTE_INDEX_4;
+            }
+            _ => {
+                pt_attr |= Attributes::ATTRIBUTE_INDEX_0 | Attributes::NON_GLOBAL;
+            }
+        }
+
+        pt_attr
     }
 
     pub fn borrow_allocator(&mut self) -> &mut A {
@@ -50,7 +129,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     /// PFNs in the provided base, so that caller is responsible for ensuring
     /// safety of that base.
     ///
-    pub unsafe fn from_existing(base: u64, page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
+    pub unsafe fn from_existing(base: u64, page_allocator: A, paging_type: PagingType, idmap: IdMap) -> PtResult<Self> {
         let base: PhysicalAddress = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
             return Err(PtError::UnalignedPageBase);
@@ -63,7 +142,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             _ => return Err(PtError::InvalidParameter),
         };
 
-        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
+        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level, idmap })
     }
 
     /// Consumes the page table structure and returns the page table root.
@@ -86,85 +165,6 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         }
 
         Ok(base)
-    }
-
-    fn map_memory_region_internal(
-        &mut self,
-        start_va: VirtualAddress,
-        end_va: VirtualAddress,
-        level: PageLevel,
-        base: PhysicalAddress,
-        attributes: MemoryAttributes,
-    ) -> PtResult<()> {
-        let mut va = start_va;
-
-        let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for mut entry in table {
-                if self._is_this_page_table_active() {
-                    // Need to do the heavy duty break-before-make sequence
-                    unsafe {
-                        ArmReplaceLiveTranslationEntry (entry.into(), attributes, va.into())?;
-                    }
-                }
-                else {
-                    // Just update the entry and flush TLB
-                    entry.update_fields(attributes, va.into())?;
-                    unsafe {
-                        update_translation_table_entry(entry.into(), va.into());
-                    }
-                }
-
-
-                // get max va addressable by current entry
-                va = va.get_next_va(level);
-            }
-            return Ok(());
-        }
-
-        for mut entry in table {
-            if !entry.is_valid() {
-                let pa = self.allocate_page()?;
-
-                if self._is_this_page_table_active() {
-                    // Need to do the heavy duty break-before-make sequence
-                    unsafe {
-                        ArmReplaceLiveTranslationEntry (entry.into(), attributes, pa)?;
-                    }
-                }
-                else {
-                    // Just update the entry and flush TLB
-                    entry.update_fields(attributes, pa)?;
-                    unsafe {
-                        update_translation_table_entry(entry.into(), pa);
-                    }
-                }
-            }
-            let next_base = entry.get_canonical_page_table_base();
-
-            // split the va range appropriately for the next level pages
-
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
-
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
-
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-            self.map_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-                attributes,
-            )?;
-
-            va = va.get_next_va(level);
-        }
-
-        Ok(())
     }
 
     fn unmap_memory_region_internal(
@@ -235,19 +235,19 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     return Err(PtError::NoMapping);
                 }
 
-                if self._is_this_page_table_active() {
-                    // Need to do the heavy duty break-before-make sequence
-                    unsafe {
-                        ArmReplaceLiveTranslationEntry (entry.into(), *prev_attributes, va.into())?;
-                    }
-                }
-                else {
+                // if self._is_this_page_table_active() {
+                //     // Need to do the heavy duty break-before-make sequence
+                //     unsafe {
+                //         ArmReplaceLiveTranslationEntry (entry.into(), *prev_attributes, va.into())?;
+                //     }
+                // }
+                // else {
                     // Just update the entry and flush TLB
-                    entry.update_fields(*prev_attributes, va.into())?;
-                    unsafe {
-                        update_translation_table_entry(entry.into(), va.into());
-                    }
-                }
+                    entry.update_fields(attributes, va.into())?;
+                //     unsafe {
+                //         update_translation_table_entry(entry.into(), va.into());
+                //     }
+                // }
 
                 // get max va addressable by current entry
                 va = va.get_next_va(level);
@@ -474,15 +474,22 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     }
 
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
-        let address = VirtualAddress::new(address);
+        let address_va = VirtualAddress::new(address);
 
-        self.validate_address_range(address, size)?;
+        self.validate_address_range(address_va, size)?;
 
         // We map until next alignment
         let start_va = address;
-        let end_va = address + size - 1;
+        let end_va = address + size;
+        let flags = self.convert_mem_attr_to_pt_attr(attributes);
 
-        self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes)
+        let res = self.idmap.map_range(&MemoryRegion::new(start_va as usize, end_va as usize), flags);
+        if res.is_err() {
+            debug_assert!(false, "Failed to map memory region: {}", res.unwrap_err());
+            return Err(PtError::IncompatibleMemoryAttributes);
+        } else {
+            Ok(())
+        }
     }
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
@@ -497,106 +504,106 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     }
 
     fn install_page_table(&self) -> PtResult<()> {
-        // This step will need to configure the MMU and then activate it on the newly created table.
+        // // This step will need to configure the MMU and then activate it on the newly created table.
 
-        let pa_bits = self.get_phys_addr_bits();
-        //
-        // Limit the virtual address space to what we can actually use: core
-        // mandates a 1:1 mapping, so no point in making the virtual address
-        // space larger than the physical address space. We also have to take
-        // into account the architectural limitations that result from firmware's
-        // use of 4 KB pages.
-        //
-        let max_address_bits = core::cmp::min(pa_bits, MAX_VA_BITS);
-        let max_address = (1 << max_address_bits) - 1 as u64;
+        // let pa_bits = self.get_phys_addr_bits();
+        // //
+        // // Limit the virtual address space to what we can actually use: core
+        // // mandates a 1:1 mapping, so no point in making the virtual address
+        // // space larger than the physical address space. We also have to take
+        // // into account the architectural limitations that result from firmware's
+        // // use of 4 KB pages.
+        // //
+        // let max_address_bits = core::cmp::min(pa_bits, MAX_VA_BITS);
+        // let max_address = (1 << max_address_bits) - 1 as u64;
 
-        let t0sz = 64 - max_address_bits;
+        // let t0sz = 64 - max_address_bits;
 
-        let mut tcr: u64;
+        // let mut tcr: u64;
 
-        if self.get_current_el() == 2 {
-            // Note: Bits 23 and 31 are reserved(RES1) bits in TCR_EL2
-            tcr = t0sz | (1 << 31) | (1 << 23);
+        // if self.get_current_el() == 2 {
+        //     // Note: Bits 23 and 31 are reserved(RES1) bits in TCR_EL2
+        //     tcr = t0sz | (1 << 31) | (1 << 23);
 
-            // Set the Physical Address Size using MaxAddress
-            if max_address < SIZE_4GB {
-                tcr |= 0 << 16;
-            } else if max_address < SIZE_64GB {
-                tcr |= 1 << 16;
-            } else if max_address < SIZE_1TB {
-                tcr |= 2 << 16;
-            } else if max_address < SIZE_4TB {
-                tcr |= 3 << 16;
-            } else if max_address < SIZE_16TB {
-                tcr |= 4 << 16;
-            } else if max_address < SIZE_256TB {
-                tcr |= 5 << 16;
-            } else {
-                panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
-            }
-        } else if self.get_current_el() == 1 {
-            // Due to Cortex-A57 erratum #822227 we must set TG1[1] == 1, regardless of EPD1.
-            tcr = t0sz | 1 << 30 | 1 << 23;
+        //     // Set the Physical Address Size using MaxAddress
+        //     if max_address < SIZE_4GB {
+        //         tcr |= 0 << 16;
+        //     } else if max_address < SIZE_64GB {
+        //         tcr |= 1 << 16;
+        //     } else if max_address < SIZE_1TB {
+        //         tcr |= 2 << 16;
+        //     } else if max_address < SIZE_4TB {
+        //         tcr |= 3 << 16;
+        //     } else if max_address < SIZE_16TB {
+        //         tcr |= 4 << 16;
+        //     } else if max_address < SIZE_256TB {
+        //         tcr |= 5 << 16;
+        //     } else {
+        //         panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
+        //     }
+        // } else if self.get_current_el() == 1 {
+        //     // Due to Cortex-A57 erratum #822227 we must set TG1[1] == 1, regardless of EPD1.
+        //     tcr = t0sz | 1 << 30 | 1 << 23;
 
-            // Set the Physical Address Size using MaxAddress
-            if max_address < 4 * 1024 * 1024 * 1024 {
-                tcr |= 0 << 32;
-            } else if max_address < 64 * 1024 * 1024 * 1024 {
-                tcr |= 1 << 32;
-            } else if max_address < 1024 * 1024 * 1024 * 1024 {
-                tcr |= 2 << 32;
-            } else if max_address < 4 * 1024 * 1024 * 1024 * 1024 {
-                tcr |= 3 << 32;
-            } else if max_address < 16 * 1024 * 1024 * 1024 * 1024 {
-                tcr |= 4 << 32;
-            } else if max_address < 256 * 1024 * 1024 * 1024 * 1024 {
-                tcr |= 5 << 32;
-            } else {
-                panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
-            }
-        } else {
-            panic!("mu-paging is only expected to run at EL2 and EL1, not EL3.");
-        }
+        //     // Set the Physical Address Size using MaxAddress
+        //     if max_address < 4 * 1024 * 1024 * 1024 {
+        //         tcr |= 0 << 32;
+        //     } else if max_address < 64 * 1024 * 1024 * 1024 {
+        //         tcr |= 1 << 32;
+        //     } else if max_address < 1024 * 1024 * 1024 * 1024 {
+        //         tcr |= 2 << 32;
+        //     } else if max_address < 4 * 1024 * 1024 * 1024 * 1024 {
+        //         tcr |= 3 << 32;
+        //     } else if max_address < 16 * 1024 * 1024 * 1024 * 1024 {
+        //         tcr |= 4 << 32;
+        //     } else if max_address < 256 * 1024 * 1024 * 1024 * 1024 {
+        //         tcr |= 5 << 32;
+        //     } else {
+        //         panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
+        //     }
+        // } else {
+        //     panic!("mu-paging is only expected to run at EL2 and EL1, not EL3.");
+        // }
 
-        //
-        // Translation table walks are always cache coherent on ARMv8-A, so cache
-        // maintenance on page tables is never needed. Since there is a risk of
-        // loss of coherency when using mismatched attributes, and given that memory
-        // is mapped cacheable except for extraordinary cases (such as non-coherent
-        // DMA), have the page table walker perform cached accesses as well, and
-        // assert below that matches the attributes we use for CPU accesses to
-        // the region.
-        //
-        tcr |= 3 << 12 | 1 << 10 | 1 << 8;
+        // //
+        // // Translation table walks are always cache coherent on ARMv8-A, so cache
+        // // maintenance on page tables is never needed. Since there is a risk of
+        // // loss of coherency when using mismatched attributes, and given that memory
+        // // is mapped cacheable except for extraordinary cases (such as non-coherent
+        // // DMA), have the page table walker perform cached accesses as well, and
+        // // assert below that matches the attributes we use for CPU accesses to
+        // // the region.
+        // //
+        // tcr |= 3 << 12 | 1 << 10 | 1 << 8;
 
-        // Set TCR
-        self.set_tcr(tcr);
+        // // Set TCR
+        // self.set_tcr(tcr);
 
-        // if (!ArmMmuEnabled ()) {
-        if self.is_mmu_enabled() {
-            // Make sure we are not inadvertently hitting in the caches
-            // when populating the page tables.
-            // TODO: InvalidateDataCacheRange
+        // // if (!ArmMmuEnabled ()) {
+        // if self.is_mmu_enabled() {
+        //     // Make sure we are not inadvertently hitting in the caches
+        //     // when populating the page tables.
+        //     // TODO: InvalidateDataCacheRange
             
-        }
+        // }
 
-        // EFI_MEMORY_UC ==> MAIR_ATTR_DEVICE_MEMORY
-        // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
-        // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
-        // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
-        self.set_mair(0b000 << 0 | 0b001 << 8 | 0b010 << 16 | 0b011 << 24);
+        // // EFI_MEMORY_UC ==> MAIR_ATTR_DEVICE_MEMORY
+        // // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
+        // // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
+        // // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
+        // self.set_mair(0b000 << 0 | 0b001 << 8 | 0b010 << 16 | 0b011 << 24);
 
-        // Set TTBR0
-        self.set_ttbr0(self.base.into());
+        // // Set TTBR0
+        // self.set_ttbr0(self.base.into());
 
-        if !self.is_mmu_enabled() {
-            self.set_stack_alignment_check(false);
-            self.set_stack_alignment_check(true);
-            self.enable_instruction_cache();
-            self.enable_data_cache();
+        // if !self.is_mmu_enabled() {
+        //     self.set_stack_alignment_check(false);
+        //     self.set_stack_alignment_check(true);
+        //     self.enable_instruction_cache();
+        //     self.enable_data_cache();
 
-            self.enable_mmu();
-        }
+        //     self.enable_mmu();
+        // }
 
         Ok(())
     }

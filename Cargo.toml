@@ -15,6 +15,7 @@ bitfield-struct = "0.9.2"
 bitflags = "2.6.0"
 log = { version = "=0.4.22", default-features = false }
 uefi_sdk = { git = "https://github.com/pop-project/uefi-sdk.git", rev = "v0.1.4" }
+aarch64-paging = "0.8.0"
 
 [features]
 std = []
