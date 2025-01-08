@@ -565,18 +565,21 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     }
 }
 
-/// Given the start and end offset of the entries in the page, this function
-/// calculates the number of entries in the page.
-fn find_num_entries(start_offset: u64, end_offset: u64, num_parent_level_entries: u64) -> u64 {
+/// Given the [start, end offset] at the current level from the [start, end VA],
+/// this function calculates the number of entries required for the range. It
+/// considers the number of entries at the parent level because the start and
+/// end offsets might span across multiple pages.
+fn find_num_entries(start_offset: u64, end_offset: u64, num_entries_at_parent_level: u64) -> u64 {
     let mut num_entries = 0;
-    if num_parent_level_entries > 1 {
-        // entries spanning multiple pages
-        num_entries += 512 - start_offset; // number of upper entries in first page
-        num_entries += (num_parent_level_entries - 2) * 512; // number of entries in between pages
-        num_entries += end_offset + 1; // number of lower entries in the last page
+
+    // Entries spanning multiple pages
+    if num_entries_at_parent_level > 1 {
+        num_entries += 512 - start_offset; // Number of upper entries in first page
+        num_entries += (num_entries_at_parent_level - 2) * 512; // number of entries in between pages
+        num_entries += end_offset + 1; // Number of lower entries in the last page
     } else {
-        // entries do not span multiple pages(end_offset is guaranteed to be higher than start offset)
-        num_entries = end_offset - start_offset + 1; // number of entries in the page
+        // Entries do not span multiple pages(end_offset is guaranteed to be higher than start offset)
+        num_entries = end_offset - start_offset + 1; // Number of entries in the page
     }
 
     num_entries
@@ -596,29 +599,69 @@ pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: Pag
     let start_va = address;
     let end_va = address + size - 1;
 
-    // For the given paging type identify the highest and lowest page levels.
-    // This is used during page building to stop the recursion.
+    // For the given paging type, identify the highest and lowest page levels.
+    // This is used during page building to terminate the recursion.
     let (highest_page_level, lowest_page_level) = match paging_type {
         PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
         PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
         _ => return Err(PtError::InvalidParameter),
     };
 
-    // The key to calculate the number of tables required for the current level
-    // dependents on the number of entries in the parent level. Also, the number
-    // of entries in the current level depends on the number of tables in the
-    // current level and the current offset(done by `find_num_entries()`).
-    let mut num_entries = 0;
-    let mut num_tables = 1; // top level table
+    let mut num_entries_at_parent_level = 0;
+    let mut num_tables_at_current_level = 1; // top level table
     let mut total_num_tables = 0;
+
+    // Rust does not support creating ranges [high..=low], so we use
+    // [low..=high].rev() instead.
     for level in ((lowest_page_level as u64)..=(highest_page_level as u64)).rev() {
+        // Add the number of tables required at the current level to the total
+        // pages. This has already been computed in the previous iteration.
+        total_num_tables += num_tables_at_current_level;
+
         let start_offset = start_va.get_index(level.into());
         let end_offset = end_va.get_index(level.into());
 
-        num_entries = find_num_entries(start_offset, end_offset, num_entries);
+        // Prepare for the next level: Calculating the number of tables required
+        // at the next level (e.g., PDP) depends on the number of entries
+        // present at the current level (e.g., PML4). Calculating the number of
+        // entries at the current level (PML4) in turn depends on the number of
+        // entries at the parent level (PML5 — this is the third parameter).
+        // Why? See below.
 
-        total_num_tables += num_tables;
-        num_tables = num_entries;
+        //  |  parent level |  current level |  next level
+        //  |               |                |
+        //  │               │  ┌─────┐       │
+        //  │               │  │     │       │
+        //  │               │  ├─────┤       │
+        //  │               │  │     │       │
+        //  │               │  ├─────┤       │
+        //  │               └─►│PML4E│       │
+        //  │               │  ├─────┤       │
+        //  │               │  │PML4E|       │
+        //  │          ┌──────►└─────┘       │
+        //  │          │    │  ┌─────┐       │  ┌─────┐
+        //  │          │    │  │PML4E│       │  │     │
+        //  │          │    │  ├─────┤       │  ├─────┤
+        //  │          │    │  │PML4E│       │  │     │
+        //  │          │    │  ├─────┤       │  ├─────┤
+        //  │          │    └─►│PML4E│       │  │PDPE │
+        //  │          │    │  ├─────┤       │  ├─────┤
+        //  │          │    │  │PML4E|       |  │PDPE |
+        //  │          │ ┌────►└─────┘   ┌─────►└─────┘
+        //  │  ┌─────┐ │ │  │  ┌─────┐   │   │  ┌─────┐
+        //  │  │PML5E│─┘ │  │  │PML4E|───┘   │  │PDPE |
+        //  │  ├─────┤   │  │  ├─────┤       │  ├─────┤
+        //  │  │PML5E│───┘  └─►│PML4E│───┐   │  │PDPE │
+        //  │  ├─────┤         ├─────┤   │   │  ├─────┤
+        //  └─►│PML5E├───┐     │     │   │   └─►│PDPE │───┐
+        //     ├─────┤   │     ├─────┤   │      ├─────┤   │
+        //     │     │   │     │     │   │      │     │   │
+        //     └─────┘   └────►└─────┘   └─────►└─────┘   └───►
+        let num_entries_at_current_level = find_num_entries(start_offset, end_offset, num_entries_at_parent_level);
+
+        // These are truely consumed in the next iteration.
+        num_tables_at_current_level = num_entries_at_current_level;
+        num_entries_at_parent_level = num_entries_at_current_level;
     }
 
     Ok(total_num_tables)
