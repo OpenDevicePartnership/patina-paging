@@ -1,66 +1,11 @@
 use crate::{
     aarch64::{
-        paging::AArch64PageTable,
-        structs::{PageLevel, VirtualAddress, FRAME_SIZE_4KB, MAX_VA},
+        paging::{num_page_tables_required, AArch64PageTable},
+        structs::{FRAME_SIZE_4KB, MAX_VA},
     },
     tests::aarch64_test_page_allocator::TestPageAllocator,
-    MemoryAttributes, PageTable, PagingType, PtError, PtResult,
+    MemoryAttributes, PageTable, PagingType, PtError,
 };
-
-fn find_num_entries(start_offset: u64, end_offset: u64, num_parent_level_entries: u64) -> u64 {
-    let mut num_entries = 0;
-    if num_parent_level_entries > 1 {
-        // entries spanning multiple pages
-        num_entries += 512 - start_offset; // number of upper entries in first page
-        num_entries += (num_parent_level_entries - 2) * 512; // number of entries in between pages
-        num_entries += end_offset + 1; // number of lower entries in the last page
-    } else {
-        // entries do not span multiple pages(end_offset is guaranteed to be higher than start offset)
-        num_entries = end_offset - start_offset + 1; // number of entries in the page
-    }
-
-    num_entries
-}
-
-fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) -> PtResult<u64> {
-    let address = VirtualAddress::new(address);
-    if size == 0 || !address.is_4kb_aligned() {
-        return Err(PtError::UnalignedAddress);
-    }
-
-    // Check the memory range is aligned
-    if !(address + size).is_4kb_aligned() {
-        return Err(PtError::UnalignedAddress);
-    }
-
-    let start_va = address;
-    let end_va = address + size - 1;
-
-    // For the given paging type identify the highest and lowest page levels.
-    // This is used during page building to stop the recursion.
-    let (highest_page_level, lowest_page_level) = match paging_type {
-        PagingType::AArch64PageTable4KB => (PageLevel::Lvl0, PageLevel::Lvl3),
-        _ => return Err(PtError::InvalidParameter),
-    };
-
-    // The key to calculate the number of tables required for the current level
-    // dependents on the number of entries in the parent level. Also, the number
-    // of entries in the current level depends on the number of tables in the
-    // current level and the current offset(done by `find_num_entries()`).
-    let mut num_entries = 0;
-    let mut num_tables = 1; // top level table
-    let mut total_num_tables = 0;
-    for level in ((lowest_page_level as u64)..=(highest_page_level as u64)).rev() {
-        let start_offset = start_va.get_index(level.into());
-        let end_offset = end_va.get_index(level.into());
-
-        num_entries = find_num_entries(start_offset, end_offset, num_entries);
-        total_num_tables += num_tables;
-        num_tables = num_entries;
-    }
-
-    Ok(total_num_tables)
-}
 
 #[test]
 fn test_find_num_page_tables() {
