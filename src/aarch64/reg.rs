@@ -1,14 +1,15 @@
+use core::arch::{asm, global_asm};
 
 global_asm!(include_str!("replace_table_entry.asm"));
 
 // Use efiapi for the consistent calling convention.
 extern "efiapi" {
-    pub fn ArmReplaceLiveTranslationEntry(entry_ptr: u64, val: u64, addr: u64) -> u64;
+    pub fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
 }
 
-pub fn get_phys_addr_bits(&self) -> u64 {
-    // read the AA64MMFR0_EL1 register to get the physical address bits
-    // Bits 0..3 of the AA64MFR0_EL1 system register encode the size of the
+pub fn get_phys_addr_bits() -> u64 {
+    // read the id_aa64mmfr0_el1 register to get the physical address bits
+    // Bits 0..3 of the id_aa64mmfr0_el1 system register encode the size of the
     // physical address space support on this CPU:
     // 0 == 32 bits, 1 == 36 bits, etc etc
     // 7 and up are reserved
@@ -19,7 +20,7 @@ pub fn get_phys_addr_bits(&self) -> u64 {
 
     unsafe {
         asm!(
-          "mrs {}, AA64MMFR0_EL1",
+          "mrs {}, id_aa64mmfr0_el1",
           out(reg) pa_bits
         );
     }
@@ -36,7 +37,7 @@ pub fn get_phys_addr_bits(&self) -> u64 {
     (pa_bits << 2) + 32
 }
 
-pub fn get_current_el(&self) -> u64 {
+pub fn get_current_el() -> u64 {
     let mut current_el: u64;
     unsafe {
         asm!(
@@ -53,8 +54,8 @@ pub fn get_current_el(&self) -> u64 {
     }
 }
 
-pub fn set_tcr(&self, tcr: u64) {
-    let current_el = self.get_current_el();
+pub fn set_tcr(tcr: u64) {
+    let current_el = get_current_el();
     unsafe {
         if current_el == 2 {
             asm!(
@@ -73,8 +74,8 @@ pub fn set_tcr(&self, tcr: u64) {
     }
 }
 
-pub fn set_ttbr0(&self, ttbr0: u64) {
-    let current_el = self.get_current_el();
+pub fn set_ttbr0(ttbr0: u64) {
+    let current_el = get_current_el();
     unsafe {
         if current_el == 2 {
             asm!(
@@ -93,8 +94,8 @@ pub fn set_ttbr0(&self, ttbr0: u64) {
     }
 }
 
-pub fn set_mair(&self, mair: u64) {
-    let current_el = self.get_current_el();
+pub fn set_mair(mair: u64) {
+    let current_el = get_current_el();
     unsafe {
         if current_el == 2 {
             asm!(
@@ -113,7 +114,7 @@ pub fn set_mair(&self, mair: u64) {
     }
 }
 
-pub fn is_mmu_enabled(&self) -> bool {
+pub fn is_mmu_enabled() -> bool {
     let sctlr: u64;
     unsafe {
         asm!(
@@ -125,8 +126,8 @@ pub fn is_mmu_enabled(&self) -> bool {
     sctlr & 0x1 == 1
 }
 
-pub fn enable_mmu(&self) {
-    let current_el = self.get_current_el();
+pub fn enable_mmu() {
+    let current_el = get_current_el();
     unsafe {
         if current_el == 2 {
             asm!(
@@ -155,8 +156,8 @@ pub fn enable_mmu(&self) {
     }
 }
 
-pub fn set_stack_alignment_check(&self, enable: bool) {
-    let current_el = self.get_current_el();
+pub fn set_stack_alignment_check(enable: bool) {
+    let current_el = get_current_el();
     unsafe {
         if current_el == 2 {
             if enable {
@@ -198,8 +199,8 @@ pub fn set_stack_alignment_check(&self, enable: bool) {
     }
 }
 
-pub fn enable_instruction_cache(&self) {
-    let current_el = self.get_current_el();
+pub fn enable_instruction_cache() {
+    let current_el = get_current_el();
     unsafe {
         if current_el == 2 {
             asm!(
@@ -223,8 +224,8 @@ pub fn enable_instruction_cache(&self) {
     }
 }
 
-pub fn enable_data_cache(&self) {
-    let current_el = self.get_current_el();
+pub fn enable_data_cache() {
+    let current_el = get_current_el();
     unsafe {
         if current_el == 2 {
             asm!(
@@ -248,58 +249,39 @@ pub fn enable_data_cache(&self) {
     }
 }
 
-pub fn replace_table_entry (&self, table: u64, index: u64, entry: u64) {
-    let current_el = self.get_current_el();
+pub fn update_translation_table_entry (translation_table_entry: u64, mva: u64) {
+    let current_el = get_current_el();
+    let ls_mva = mva << 12;
     unsafe {
+        let mut sctlr: u64;
+        asm!("dsb     nshst", options(nostack));
         if current_el == 2 {
             asm!(
-              "msr ttbr0_el2, {}",
-              in(reg) table,
-              "dsb sy",
-              "isb sy",
-              options(nostack)
+                "tlbi vae2, {}",
+                "mrs {}, sctlr_el2",
+                in(reg) ls_mva,
+                out(reg) sctlr,
+                options(nostack)
             );
         } else if current_el == 1 {
             asm!(
-            "msr ttbr0_el1, {}",
-            in(reg) table,
-            "dsb sy",
-            "isb sy",
-            options(nostack)
+                "tlbi vaae1, {}",
+                "mrs {}, sctlr_el1",
+                in(reg) ls_mva,
+                out(reg) sctlr,
+                options(nostack)
             );
         } else {
             panic!("Invalid current EL {}", current_el);
         }
-        asm!("dsb sy", options(nostack));
-        asm!("isb sy", options(nostack));
-    }
-}
-
-pub fn update_translation_table_entry (&self, translation_table_entry: u64, mva: u64) {
-    // TODO: this is a placeholder for now
-    let current_el = self.get_current_el();
-    unsafe {
-        if current_el == 2 {
+        if sctlr & 1 == 0 {
             asm!(
-              "dsb     nshst",
-              "mrs x2, sctlr_el2",
-              "tlbi vae2, x1",
-              "tbnz    x2, SCTLR_ELx_M_BIT_POS, 5f",
-              "dsb nsh",
-              "isb sy",
-              options(nostack)
+                "dc ivac, {}",
+                in(reg) translation_table_entry,
+                options(nostack)
             );
-        } else if current_el == 1 {
-            asm!(
-            "mrs x2, sctlr_el1",
-            "tlbi vaae1, x1",
-            "dsb nsh",
-            "isb sy",
-            options(nostack)
-            );
-        } else {
-            panic!("Invalid current EL {}", current_el);
         }
-        asm!("isb sy", options(nostack));
+        asm!("dsb nsh", options(nostack));
+        asm!("isb", options(nostack));
     }
 }

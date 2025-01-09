@@ -157,6 +157,10 @@ impl VMSAv864TableDescriptor {
             valid_desc,  // 1 bit -  Valid descriptor
         )
     }
+
+    pub fn get_u64(&self) -> u64 {
+        self.0
+    }
 }
 
 // Below is the implementation of the block descriptor for AArch64 systems.
@@ -366,6 +370,10 @@ impl VMSAv864PageDescriptor {
             attribute_index, // 3 bits -  AttrIndx 0 = Device memory, 1 = non-cacheable memory, 2 = write-through, 3 = write-back, 4 = write-back.
             descriptor_type, // 2 bits -  1 = Block entry, 3 = Page entry or level 3 block entry, Others = Faulty entry
         )
+    }
+
+    pub fn get_u64(&self) -> u64 {
+        self.0
     }
 }
 

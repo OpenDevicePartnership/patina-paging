@@ -115,6 +115,30 @@ impl AArch64PageTableEntry {
         }
     }
 
+    pub fn update_shadow_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> u64 {
+        match self.level {
+            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
+                let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
+                let mut shadow_entry = entry.clone();
+                match shadow_entry.update_fields(attributes, pa) {
+                    Ok(_) => {}
+                    Err(_) => panic!("Failed to update shadow table entry"),
+                }
+                shadow_entry.get_u64()
+            }
+            PageLevel::Lvl3 => {
+                let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
+                let mut shadow_entry = entry.clone();
+                match shadow_entry.update_fields(attributes, pa) {
+                    Ok(_) => {}
+                    Err(_) => panic!("Failed to update shadow page entry"),
+                }
+                shadow_entry.get_u64()
+            }
+            _ => panic!("Invalid page level"),
+        }
+    }
+
     pub fn is_valid(&self) -> bool {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {

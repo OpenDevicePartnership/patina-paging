@@ -1,6 +1,7 @@
 use super::{
     pagetablestore::AArch64PageTableStore,
     structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
+    reg,
 };
 use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
 use core::{arch::asm, ptr};
@@ -103,18 +104,16 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             for mut entry in table {
                 if self._is_this_page_table_active() {
                     // Need to do the heavy duty break-before-make sequence
+                    let val = entry.update_shadow_fields(attributes, va.into());
                     unsafe {
-                        ArmReplaceLiveTranslationEntry (entry.into(), attributes, va.into())?;
+                        reg::replace_live_xlat_entry (entry.get_canonical_page_table_base().into(), val, va.into());
                     }
                 }
                 else {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, va.into())?;
-                    unsafe {
-                        update_translation_table_entry(entry.into(), va.into());
-                    }
+                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), va.into());
                 }
-
 
                 // get max va addressable by current entry
                 va = va.get_next_va(level);
@@ -128,16 +127,15 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
                 if self._is_this_page_table_active() {
                     // Need to do the heavy duty break-before-make sequence
+                    let val = entry.update_shadow_fields(attributes, va.into());
                     unsafe {
-                        ArmReplaceLiveTranslationEntry (entry.into(), attributes, pa)?;
+                        reg::replace_live_xlat_entry (entry.get_canonical_page_table_base().into(), val, pa.into());
                     }
                 }
                 else {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, pa)?;
-                    unsafe {
-                        update_translation_table_entry(entry.into(), pa);
-                    }
+                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), pa.into());
                 }
             }
             let next_base = entry.get_canonical_page_table_base();
@@ -237,16 +235,15 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
                 if self._is_this_page_table_active() {
                     // Need to do the heavy duty break-before-make sequence
+                    let val = entry.update_shadow_fields(attributes, va.into());
                     unsafe {
-                        ArmReplaceLiveTranslationEntry (entry.into(), *prev_attributes, va.into())?;
+                        reg::replace_live_xlat_entry (entry.get_canonical_page_table_base().into(), val, va.into());
                     }
                 }
                 else {
                     // Just update the entry and flush TLB
-                    entry.update_fields(*prev_attributes, va.into())?;
-                    unsafe {
-                        update_translation_table_entry(entry.into(), va.into());
-                    }
+                    entry.update_fields(attributes, va.into())?;
+                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), va.into());
                 }
 
                 // get max va addressable by current entry
@@ -499,7 +496,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     fn install_page_table(&self) -> PtResult<()> {
         // This step will need to configure the MMU and then activate it on the newly created table.
 
-        let pa_bits = self.get_phys_addr_bits();
+        let pa_bits = reg::get_phys_addr_bits();
         //
         // Limit the virtual address space to what we can actually use: core
         // mandates a 1:1 mapping, so no point in making the virtual address
@@ -508,13 +505,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         // use of 4 KB pages.
         //
         let max_address_bits = core::cmp::min(pa_bits, MAX_VA_BITS);
-        let max_address = (1 << max_address_bits) - 1 as u64;
+        let max_address = (1 << max_address_bits) - 1;
 
         let t0sz = 64 - max_address_bits;
 
         let mut tcr: u64;
 
-        if self.get_current_el() == 2 {
+        if reg::get_current_el() == 2 {
             // Note: Bits 23 and 31 are reserved(RES1) bits in TCR_EL2
             tcr = t0sz | (1 << 31) | (1 << 23);
 
@@ -534,22 +531,22 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             } else {
                 panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
             }
-        } else if self.get_current_el() == 1 {
+        } else if reg::get_current_el() == 1 {
             // Due to Cortex-A57 erratum #822227 we must set TG1[1] == 1, regardless of EPD1.
             tcr = t0sz | 1 << 30 | 1 << 23;
 
             // Set the Physical Address Size using MaxAddress
-            if max_address < 4 * 1024 * 1024 * 1024 {
+            if max_address < SIZE_4GB {
                 tcr |= 0 << 32;
-            } else if max_address < 64 * 1024 * 1024 * 1024 {
+            } else if max_address < SIZE_64GB {
                 tcr |= 1 << 32;
-            } else if max_address < 1024 * 1024 * 1024 * 1024 {
+            } else if max_address < SIZE_1TB {
                 tcr |= 2 << 32;
-            } else if max_address < 4 * 1024 * 1024 * 1024 * 1024 {
+            } else if max_address < SIZE_4TB {
                 tcr |= 3 << 32;
-            } else if max_address < 16 * 1024 * 1024 * 1024 * 1024 {
+            } else if max_address < SIZE_16TB {
                 tcr |= 4 << 32;
-            } else if max_address < 256 * 1024 * 1024 * 1024 * 1024 {
+            } else if max_address < SIZE_1TB {
                 tcr |= 5 << 32;
             } else {
                 panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
@@ -570,10 +567,9 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         tcr |= 3 << 12 | 1 << 10 | 1 << 8;
 
         // Set TCR
-        self.set_tcr(tcr);
+        reg::set_tcr(tcr);
 
-        // if (!ArmMmuEnabled ()) {
-        if self.is_mmu_enabled() {
+        if reg::is_mmu_enabled() {
             // Make sure we are not inadvertently hitting in the caches
             // when populating the page tables.
             // TODO: InvalidateDataCacheRange
@@ -584,18 +580,18 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
         // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
         // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
-        self.set_mair(0b000 << 0 | 0b001 << 8 | 0b010 << 16 | 0b011 << 24);
+        reg::set_mair(0b000 << 0 | 0b001 << 8 | 0b010 << 16 | 0b011 << 24);
 
         // Set TTBR0
-        self.set_ttbr0(self.base.into());
+        reg::set_ttbr0(self.base.into());
 
-        if !self.is_mmu_enabled() {
-            self.set_stack_alignment_check(false);
-            self.set_stack_alignment_check(true);
-            self.enable_instruction_cache();
-            self.enable_data_cache();
+        if !reg::is_mmu_enabled() {
+            reg::set_stack_alignment_check(false);
+            reg::set_stack_alignment_check(true);
+            reg::enable_instruction_cache();
+            reg::enable_data_cache();
 
-            self.enable_mmu();
+            reg::enable_mmu();
         }
 
         Ok(())
