@@ -49,15 +49,15 @@ pub struct PageTableEntry {
 impl PageTableEntry {
     /// update all the fields and next table base address
     pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
-        if !self.present() {
-            let mut next_level_table_base: u64 = pa.into();
+        // if !self.present() {
+        let mut next_level_table_base: u64 = pa.into();
 
-            next_level_table_base &= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK;
-            next_level_table_base >>= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT;
+        next_level_table_base &= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK;
+        next_level_table_base >>= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT;
 
-            self.set_page_table_base_address(next_level_table_base);
-            self.set_present(true);
-        }
+        self.set_page_table_base_address(next_level_table_base);
+        self.set_present(true);
+        // }
 
         // update the memory attributes irrespective of new or old page table
         self.set_attributes(attributes);
@@ -289,6 +289,14 @@ impl VirtualAddress {
 
     pub fn min(lhs: VirtualAddress, rhs: VirtualAddress) -> VirtualAddress {
         VirtualAddress(core::cmp::min(lhs.0, rhs.0))
+    }
+
+    /// This will return the range length between self and end (inclusive)
+    pub fn length_through(&self, end: VirtualAddress) -> u64 {
+        match end.0.checked_sub(self.0) {
+            None => panic!("Underflow occurred! {:x} {:x}", self.0, end.0),
+            Some(result) => result + 1,
+        }
     }
 }
 

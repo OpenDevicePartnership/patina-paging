@@ -4,7 +4,7 @@
 /// - x64 4KB 4 level paging
 ///
 use super::{
-    pagetablestore::X64PageTableStore,
+    pagetablestore::{X64PageTableEntry, X64PageTableStore},
     reg::{invalidate_tlb, write_cr3},
     structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_PML4_VA, MAX_PML5_VA, PAGE_SIZE},
 };
@@ -156,8 +156,8 @@ impl<A: PageAllocator> X64PageTable<A> {
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
 
         for mut entry in table {
-            // TODO: avoid leaking pages when mapping large page here small page was.
-            if level.supports_pa_entry()
+            if !entry.present()
+                && level.supports_pa_entry()
                 && va.is_level_aligned(level)
                 && u64::from(end_va) - u64::from(va) + 1 >= level.entry_va_size()
             {
@@ -200,7 +200,7 @@ impl<A: PageAllocator> X64PageTable<A> {
     }
 
     fn unmap_memory_region_internal(
-        &self,
+        &mut self,
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
@@ -209,8 +209,14 @@ impl<A: PageAllocator> X64PageTable<A> {
         let mut va = start_va;
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        for entry in table {
-            // TODO: handle partial unmap of large page here.
+        for mut entry in table {
+            // Check if this is a large page in need of splitting.
+            if entry.points_to_pa()
+                && (!va.is_level_aligned(level) || va.length_through(end_va) < level.entry_va_size())
+            {
+                self.split_large_page(va, &mut entry)?;
+            }
+
             if entry.present() {
                 if entry.points_to_pa() {
                     entry.set_present(false);
@@ -243,7 +249,7 @@ impl<A: PageAllocator> X64PageTable<A> {
     }
 
     fn remap_memory_region_internal(
-        &self,
+        &mut self,
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
@@ -254,12 +260,26 @@ impl<A: PageAllocator> X64PageTable<A> {
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
 
+        log::info!(
+            "remap_memory_region_internal: start_va: {}, end_va: {}, level: {:?}, base: {}, attributes: {:?}",
+            start_va,
+            end_va,
+            level,
+            base,
+            attributes
+        );
         for mut entry in table {
             if !entry.present() {
                 return Err(PtError::NoMapping);
             }
 
-            // TODO: Splitting :(
+            // Check if this is a large page in need of splitting.
+            if entry.points_to_pa()
+                && (!va.is_level_aligned(level) || va.length_through(end_va) < level.entry_va_size())
+            {
+                self.split_large_page(va, &mut entry)?;
+            }
+
             if entry.points_to_pa() {
                 entry.update_fields(attributes, va.into(), true)?;
             } else {
@@ -344,6 +364,23 @@ impl<A: PageAllocator> X64PageTable<A> {
         Ok(*prev_attributes)
     }
 
+    /// Splits a large page into the next page level pages. This done by
+    /// creating a new page table for the full range and then swapping the PA
+    /// and mapping to the new page table.
+    fn split_large_page(&mut self, va: VirtualAddress, entry: &mut X64PageTableEntry) -> PtResult<()> {
+        let level = entry.get_level();
+        let end_va = va + level.entry_va_size() - 1;
+        let attributes = entry.get_attributes();
+
+        if level == self.lowest_page_level || !entry.points_to_pa() {
+            return Err(PtError::InvalidParameter);
+        }
+
+        let pa = self.allocate_page()?;
+        self.map_memory_region_internal(va, end_va, (level as u64 - 1).into(), pa, attributes)?;
+        entry.update_fields(MemoryAttributes::empty(), pa, false)
+    }
+
     fn dump_page_tables_internal(
         &self,
         start_va: VirtualAddress,
@@ -354,31 +391,10 @@ impl<A: PageAllocator> X64PageTable<A> {
         let mut va = start_va;
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for entry in table {
-                // start of the next level va. It will be same as current va
-                let next_level_start_va = va;
-
-                // get max va addressable by current entry
-                let curr_va_ceil = va.round_up(level);
-
-                // end of next level va. It will be minimum of next va and end va
-                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-                let l: u64 = level.into();
-                let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
-                log::info!("{}|{:48}{}", level, range, entry.dump_entry());
-
-                va = va.get_next_va(level);
-            }
-            return;
-        }
-
         for entry in table {
-            if !entry.present() {
+            if !entry.present() && level != self.lowest_page_level {
                 return;
             }
-            let next_base = entry.get_canonical_page_table_base();
 
             // split the va range appropriately for the next level pages
 
@@ -395,12 +411,15 @@ impl<A: PageAllocator> X64PageTable<A> {
             let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
             log::info!("{}|{:48}{}", level, range, entry.dump_entry());
 
-            self.dump_page_tables_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-            );
+            if entry.present() && !entry.points_to_pa() {
+                let next_base = entry.get_canonical_page_table_base();
+                self.dump_page_tables_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                );
+            }
 
             va = va.get_next_va(level);
         }
@@ -529,9 +548,9 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
 
         log::info!("{}[{} {}]{}", "-".repeat(45), start_va, end_va, "-".repeat(48));
         log::info!("                                                      6362        52 51                                   12 11 9 8 7 6 5 4 3 2 1 0 ");
-        log::info!("                                                      |N|           |                                        |   |M|M|I| |P|P|U|R| |");
-        log::info!("                                                      |X| Available |     Page-Map Level-4 Base Address      |AVL|B|B|G|A|C|W|/|/|P|");
-        log::info!("                                                      | |           |                                        |   |Z|Z|N| |D|T|S|W| |");
+        log::info!("                                                      |N|           |                                        |   |M|P|I| |P|P|U|R| |");
+        log::info!("                                                      |X| Available |     Page-Map Level-4 Base Address      |AVL|B|G|G|A|C|W|/|/|P|");
+        log::info!("                                                      | |           |                                        |   |Z|S|N| |D|T|S|W| |");
         log::info!("{}", "-".repeat(132));
         // uses current cr3 base
         self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base);

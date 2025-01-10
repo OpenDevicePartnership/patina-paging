@@ -176,6 +176,10 @@ impl X64PageTableEntry {
             _ => false,
         }
     }
+
+    pub fn get_level(&self) -> PageLevel {
+        self.level
+    }
 }
 
 const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
