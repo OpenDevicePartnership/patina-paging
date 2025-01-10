@@ -154,41 +154,44 @@ impl<A: PageAllocator> X64PageTable<A> {
         let mut va = start_va;
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for mut entry in table {
-                entry.update_fields(attributes, va.into())?;
-
-                // get max va addressable by current entry
-                va = va.get_next_va(level);
-            }
-            return Ok(());
-        }
 
         for mut entry in table {
-            if !entry.present() {
-                let pa = self.allocate_page()?;
-                entry.update_fields(MemoryAttributes::empty(), pa)?;
+            // TODO: avoid leaking pages when mapping large page here small page was.
+            if level.supports_pa_entry()
+                && va.is_level_aligned(level)
+                && u64::from(end_va) - u64::from(va) + 1 >= level.entry_va_size()
+            {
+                // This entry is large enough to be a whole entry for this supporting level,
+                // so we can map the whole range in one go.
+                entry.update_fields(attributes, va.into(), true)?;
+            } else {
+                assert!(level != self.lowest_page_level);
+                if !entry.present() {
+                    let pa = self.allocate_page()?;
+                    // non-leaf pages should always have the most permissive memory attributes.
+                    entry.update_fields(MemoryAttributes::empty(), pa, false)?;
+                }
+                let next_base = entry.get_canonical_page_table_base();
+
+                // split the va range appropriately for the next level pages
+
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
+
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                self.map_memory_region_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                    attributes,
+                )?;
             }
-            let next_base = entry.get_canonical_page_table_base();
-
-            // split the va range appropriately for the next level pages
-
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
-
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
-
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-            self.map_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-                attributes,
-            )?;
 
             va = va.get_next_va(level);
         }
@@ -206,41 +209,33 @@ impl<A: PageAllocator> X64PageTable<A> {
         let mut va = start_va;
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for entry in table {
-                if !entry.present() {
-                    continue;
-                }
-
-                entry.set_present(false);
-            }
-            return Ok(());
-        }
-
         for entry in table {
-            if !entry.present() {
-                continue;
+            // TODO: handle partial unmap of large page here.
+            if entry.present() {
+                if entry.points_to_pa() {
+                    entry.set_present(false);
+                } else {
+                    let next_base = entry.get_canonical_page_table_base();
+
+                    // split the va range appropriately for the next level pages
+
+                    // start of the next level va. It will be same as current va
+                    let next_level_start_va = va;
+
+                    // get max va addressable by current entry
+                    let curr_va_ceil = va.round_up(level);
+
+                    // end of next level va. It will be minimum of next va and end va
+                    let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                    self.unmap_memory_region_internal(
+                        next_level_start_va,
+                        next_level_end_va,
+                        (level as u64 - 1).into(),
+                        next_base,
+                    )?;
+                }
             }
-            let next_base = entry.get_canonical_page_table_base();
-
-            // split the va range appropriately for the next level pages
-
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
-
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
-
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-            self.unmap_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-            )?;
-
             va = va.get_next_va(level);
         }
 
@@ -258,45 +253,37 @@ impl<A: PageAllocator> X64PageTable<A> {
         let mut va = start_va;
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for mut entry in table {
-                if !entry.present() {
-                    return Err(PtError::NoMapping);
-                }
 
-                entry.update_fields(attributes, va.into())?;
-
-                // get max va addressable by current entry
-                va = va.get_next_va(level);
-            }
-            return Ok(());
-        }
-
-        for entry in table {
+        for mut entry in table {
             if !entry.present() {
                 return Err(PtError::NoMapping);
             }
 
-            let next_base = entry.get_canonical_page_table_base();
+            // TODO: Splitting :(
+            if entry.points_to_pa() {
+                entry.update_fields(attributes, va.into(), true)?;
+            } else {
+                let next_base = entry.get_canonical_page_table_base();
 
-            // split the va range appropriately for the next level pages
+                // split the va range appropriately for the next level pages
 
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
 
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
 
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
 
-            self.remap_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-                attributes,
-            )?;
+                self.remap_memory_region_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                    attributes,
+                )?;
+            }
 
             va = va.get_next_va(level);
         }
@@ -576,6 +563,63 @@ fn find_num_entries(start_offset: u64, end_offset: u64, num_entries_at_parent_le
     num_entries
 }
 
+/// Finds the number of pages that are saved using large pages for the given address
+/// range and paging levels compared for using the lowest level.
+fn find_large_page_savings(address: u64, size: u64, level: PageLevel, lowest_page_level: PageLevel) -> u64 {
+    // The number of large pages in a given address start & length is deterministic
+    // based on the alignment of the address to the individual large pages size.
+    // Recurse down through levels finding the optimal page size to use.
+
+    if (level == lowest_page_level) || (size == 0) {
+        return 0;
+    }
+
+    if !level.supports_pa_entry() {
+        return find_large_page_savings(address, size, level - 1, lowest_page_level);
+    }
+
+    let mut savings = 0;
+    let alignment = level.entry_va_size();
+    let aligned_address = (address + alignment - 1) & !(alignment - 1);
+
+    // If there are no large pages that can be used for the given address range,
+    // then continue with the next level.
+    if aligned_address + alignment > address + size {
+        return find_large_page_savings(address, size, level - 1, lowest_page_level);
+    }
+
+    // Split of the unaligned beginning and end and recursive to the next level
+    // to find the savings with smaller page sizes.
+
+    savings += find_large_page_savings(address, aligned_address - address, level - 1, lowest_page_level);
+
+    let aligned_end = (address + size) & !(alignment - 1);
+    let remainder = (address + size) - aligned_end;
+
+    savings += find_large_page_savings(aligned_end, remainder, level - 1, lowest_page_level);
+
+    // The savings is the number of sub-pages that would be saved by each large page
+    // which is 1 for the current level and then 512 for each level below which.
+    // e.g. a large page at the third level would save 1 + 512
+    log::info!(
+        "aligned_address: {:#x}, aligned_end: {:#x} from address: {:#x} size: {:#x}",
+        aligned_address,
+        aligned_end,
+        address,
+        size
+    );
+    let num_large_pages = (aligned_end - aligned_address) / alignment;
+    let page_entries: u64 = 512;
+    let remaining_levels = level as u64 - lowest_page_level as u64;
+    log::info!("level: {} num_large_pages: {},  remaining_levels: {}", level, num_large_pages, remaining_levels,);
+    savings += num_large_pages;
+    if remaining_levels > 1 {
+        savings += num_large_pages * page_entries.pow(remaining_levels as u32 - 1);
+    }
+
+    savings
+}
+
 pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) -> PtResult<u64> {
     let address = VirtualAddress::new(address);
     if size == 0 || !address.is_4kb_aligned() {
@@ -654,6 +698,12 @@ pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: Pag
         num_tables_at_current_level = num_entries_at_current_level;
         num_entries_at_parent_level = num_entries_at_current_level;
     }
+
+    // The above calculates only the lowest pages, now calculate saving through large
+    // pages.
+    let savings = find_large_page_savings(address.into(), size, highest_page_level, lowest_page_level);
+    log::info!("total: {} savings {}", total_num_tables, savings);
+    total_num_tables -= savings;
 
     Ok(total_num_tables)
 }

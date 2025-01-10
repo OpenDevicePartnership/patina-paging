@@ -94,9 +94,21 @@ pub struct X64PageTableEntry {
 }
 
 impl X64PageTableEntry {
-    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(
+        &mut self,
+        attributes: MemoryAttributes,
+        pa: PhysicalAddress,
+        leaf_entry: bool,
+    ) -> PtResult<()> {
         match self.level {
             PageLevel::Pa => panic!("unexpected call to update fields for pa paging level"),
+            PageLevel::Pd | PageLevel::Pdp => {
+                let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
+                entry.update_fields(attributes, pa)?;
+                let page_size = leaf_entry && !attributes.contains(MemoryAttributes::ReadProtect);
+                entry.set_page_size(page_size);
+                Ok(())
+            }
             _ => {
                 let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
                 entry.update_fields(attributes, pa)

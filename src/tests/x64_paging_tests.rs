@@ -32,14 +32,7 @@ fn set_logger() {
 
 #[test]
 fn test_find_num_page_tables() {
-    let max_pages: u64 = 10;
-
-    let page_allocator = TestPageAllocator::new(max_pages, PagingType::Paging4Level);
-    let pt = X64PageTable::new(page_allocator.clone(), PagingType::Paging4Level);
-
-    assert!(pt.is_ok());
-
-    // Mapping one page of physical address require 5 page tables(PML5/PML4/PDPE/PDP/PT)
+    // Mapping one page of physical address require 4 page tables(PML4/PDP/PD/PT)
     let address = 0x0;
     let size = FRAME_SIZE_4KB; // 4k
     let res = num_page_tables_required(address, size, PagingType::Paging4Level);
@@ -47,37 +40,62 @@ fn test_find_num_page_tables() {
     let table_count = res.unwrap();
     assert_eq!(table_count, 4);
 
-    // Mapping one page of physical address require 5 page tables(PML5/PML4/PDPE/PDP/PT)
+    // Mapping 511 pages of physical address require 4 page tables(PML4/PDP/PD/PT)
     let address = FRAME_SIZE_4KB;
-    let size = FRAME_SIZE_4KB << 1;
+    let size = 511 * FRAME_SIZE_4KB;
     let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
     assert_eq!(table_count, 4);
 
-    // Mapping 512 pages of physical address require 5 page tables(PML5/PML4/PDPE/PDP/PT)
+    // Mapping 512 pages of physical address require 3 page tables because of 2mb pages.(PML4/PDP/PD)
     let address = 0x0;
     let size = 512 * FRAME_SIZE_4KB;
     let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
+    assert_eq!(table_count, 3);
+
+    // Mapping 513 pages of physical address require 4 page tables because it will be 1 2mb mapping and 1 4kb.
+    // (PML5(1)/PML4(1)/PDPE(1)/PDP(1)/PT(1))
+    let address = 0x0;
+    let size = 513 * FRAME_SIZE_4KB;
+    let res = num_page_tables_required(address, size, PagingType::Paging4Level);
+    assert!(res.is_ok());
+    let table_count = res.unwrap();
     assert_eq!(table_count, 4);
 
-    // Mapping 513 pages of physical address require 6 page tables(PML5(1)/PML4(1)/PDPE(1)/PDP(1)/PT(2))
+    // Mapping 1gb of physical address require 2 page tables because of 1Gb pages.(PML4/PDP)
     let address = 0x0;
-    let size = 512 * FRAME_SIZE_4KB + FRAME_SIZE_4KB;
+    let size = 512 * 512 * FRAME_SIZE_4KB;
+    let res = num_page_tables_required(address, size, PagingType::Paging4Level);
+    assert!(res.is_ok());
+    let table_count = res.unwrap();
+    assert_eq!(table_count, 2);
+
+    // Mapping 1 1GbPage + 1 2mb page + 1 4kb page require 4 page tables.(PML4/PDP/PD/PT)
+    let address = 0x0;
+    let size = (512 * 512 * FRAME_SIZE_4KB) + (512 * FRAME_SIZE_4KB) + FRAME_SIZE_4KB;
+    let res = num_page_tables_required(address, size, PagingType::Paging4Level);
+    assert!(res.is_ok());
+    let table_count = res.unwrap();
+    assert_eq!(table_count, 4);
+
+    // Mapping 2mb starting at 2mb/2 should take 5 pages. (PML4/PDP/PD(1)/PT(2))
+    let address = 256 * FRAME_SIZE_4KB;
+    let size = 512 * FRAME_SIZE_4KB;
     let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
     assert_eq!(table_count, 5);
 
-    // Mapping 512 + 512 pages of physical address require 6 page tables(PML5(1)/PML4(1)/PDPE(1)/PDP(1)/PT(2))
-    let address = 0x0;
-    let size = 512 * FRAME_SIZE_4KB + 512 * FRAME_SIZE_4KB;
+    // Mapping 10Gb starting at 4kb should take 6 pages. (PML4/PDP/PD(2)/PT(2))
+    let address = FRAME_SIZE_4KB;
+    let size = 10 * 512 * 512 * FRAME_SIZE_4KB;
     let res = num_page_tables_required(address, size, PagingType::Paging4Level);
     assert!(res.is_ok());
     let table_count = res.unwrap();
-    assert_eq!(table_count, 5);
+    assert_eq!(table_count, 6);
 }
 
 // Memory map tests
@@ -146,6 +164,7 @@ fn test_map_memory_address_0_to_ffff_ffff() {
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
+            log::info!("allocated: {} expected: {}", page_allocator.pages_allocated(), num_pages);
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
             page_allocator.validate_pages(address, size, attributes);

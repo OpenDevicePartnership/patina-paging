@@ -155,7 +155,7 @@ impl PageTableEntry {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum PageLevel {
     Pml5 = 5,
     Pml4 = 4,
@@ -163,6 +163,33 @@ pub enum PageLevel {
     Pd = 2,
     Pt = 1,
     Pa = 0,
+}
+
+impl PageLevel {
+    pub fn start_bit(&self) -> u64 {
+        // TODO: fix these to use intrinsics
+        match self {
+            PageLevel::Pml5 => PML5_START_BIT,
+            PageLevel::Pml4 => PML4_START_BIT,
+            PageLevel::Pdp => PDP_START_BIT,
+            PageLevel::Pd => PD_START_BIT,
+            PageLevel::Pt => PT_START_BIT,
+            PageLevel::Pa => panic!("Start bit is not defined for PA!"),
+        }
+    }
+
+    pub fn entry_va_size(&self) -> u64 {
+        1 << self.start_bit()
+    }
+
+    pub fn supports_pa_entry(&self) -> bool {
+        match self {
+            PageLevel::Pt => true,
+            // TODO: Allow crate level disablement.
+            PageLevel::Pd | PageLevel::Pdp => true,
+            _ => false,
+        }
+    }
 }
 
 impl From<PageLevel> for u64 {
@@ -222,13 +249,8 @@ impl VirtualAddress {
     pub fn round_up(&self, level: PageLevel) -> VirtualAddress {
         let va = self.0;
         match level {
-            // TODO: fix these to use intrinsics
-            PageLevel::Pml5 => Self((((va >> PML5_START_BIT) + 1) << PML5_START_BIT) - 1),
-            PageLevel::Pml4 => Self((((va >> PML4_START_BIT) + 1) << PML4_START_BIT) - 1),
-            PageLevel::Pdp => Self((((va >> PDP_START_BIT) + 1) << PDP_START_BIT) - 1),
-            PageLevel::Pd => Self((((va >> PD_START_BIT) + 1) << PD_START_BIT) - 1),
-            PageLevel::Pt => Self((((va >> PT_START_BIT) + 1) << PT_START_BIT) - 1),
             PageLevel::Pa => Self(va),
+            _ => Self((((va >> level.start_bit()) + 1) << level.start_bit()) - 1),
         }
     }
 
@@ -250,14 +272,14 @@ impl VirtualAddress {
     pub fn get_index(&self, level: PageLevel) -> u64 {
         let va = self.0;
         match level {
-            // TODO: fix these to use intrinsics
-            PageLevel::Pml5 => (va >> PML5_START_BIT) & PAGE_INDEX_MASK,
-            PageLevel::Pml4 => (va >> PML4_START_BIT) & PAGE_INDEX_MASK,
-            PageLevel::Pdp => (va >> PDP_START_BIT) & PAGE_INDEX_MASK,
-            PageLevel::Pd => (va >> PD_START_BIT) & PAGE_INDEX_MASK,
-            PageLevel::Pt => (va >> PT_START_BIT) & PAGE_INDEX_MASK,
             PageLevel::Pa => panic!("get_index is not expected to be called"),
+            _ => (va >> level.start_bit()) & PAGE_INDEX_MASK,
         }
+    }
+
+    pub fn is_level_aligned(&self, level: PageLevel) -> bool {
+        let va = self.0;
+        va & (level.entry_va_size() - 1) == 0
     }
 
     pub fn is_4kb_aligned(&self) -> bool {
