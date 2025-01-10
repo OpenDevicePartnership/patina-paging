@@ -260,14 +260,6 @@ impl<A: PageAllocator> X64PageTable<A> {
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
 
-        log::info!(
-            "remap_memory_region_internal: start_va: {}, end_va: {}, level: {:?}, base: {}, attributes: {:?}",
-            start_va,
-            end_va,
-            level,
-            base,
-            attributes
-        );
         for mut entry in table {
             if !entry.present() {
                 return Err(PtError::NoMapping);
@@ -369,6 +361,10 @@ impl<A: PageAllocator> X64PageTable<A> {
     /// and mapping to the new page table.
     fn split_large_page(&mut self, va: VirtualAddress, entry: &mut X64PageTableEntry) -> PtResult<()> {
         let level = entry.get_level();
+        let address: u64 = va.into();
+
+        // Round down to the nearest page boundary at the current level.
+        let va = (address & !(level.entry_va_size() - 1)).into();
         let end_va = va + level.entry_va_size() - 1;
         let attributes = entry.get_attributes();
 
