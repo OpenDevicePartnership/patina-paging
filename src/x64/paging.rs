@@ -161,6 +161,9 @@ impl<A: PageAllocator> X64PageTable<A> {
                 && va.is_level_aligned(level)
                 && u64::from(end_va) - u64::from(va) + 1 >= level.entry_va_size()
             {
+                if level == self.lowest_page_level {
+                    log::info!("Created Large Page Mapping at {}: {} - {}", level, va, end_va);
+                }
                 // This entry is large enough to be a whole entry for this supporting level,
                 // so we can map the whole range in one go.
                 entry.update_fields(attributes, va.into(), true)?;
@@ -361,11 +364,19 @@ impl<A: PageAllocator> X64PageTable<A> {
     /// and mapping to the new page table.
     fn split_large_page(&mut self, va: VirtualAddress, entry: &mut X64PageTableEntry) -> PtResult<()> {
         let level = entry.get_level();
-        let address: u64 = va.into();
+        debug_assert!(level != self.lowest_page_level && entry.points_to_pa());
 
         // Round down to the nearest page boundary at the current level.
-        let va = (address & !(level.entry_va_size() - 1)).into();
-        let end_va = va + level.entry_va_size() - 1;
+        let large_page_start: u64 = va.into();
+        let large_page_start = large_page_start & !(level.entry_va_size() - 1);
+        let large_page_end: u64 = large_page_start + level.entry_va_size() - 1;
+
+        log::info!(
+            "Splitting large page: {} - {}",
+            VirtualAddress::new(large_page_start),
+            VirtualAddress::new(large_page_end)
+        );
+
         let attributes = entry.get_attributes();
 
         if level == self.lowest_page_level || !entry.points_to_pa() {
@@ -373,7 +384,14 @@ impl<A: PageAllocator> X64PageTable<A> {
         }
 
         let pa = self.allocate_page()?;
-        self.map_memory_region_internal(va, end_va, (level as u64 - 1).into(), pa, attributes)?;
+        self.map_memory_region_internal(
+            large_page_start.into(),
+            large_page_end.into(),
+            (level as u64 - 1).into(),
+            pa,
+            attributes,
+        )?;
+
         entry.update_fields(MemoryAttributes::empty(), pa, false)
     }
 
@@ -467,6 +485,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
 
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
+        log::info!("map_memory_region: {} size: {}", address, size);
 
         self.validate_address_range(address, size)?;
 
@@ -482,6 +501,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     }
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
+        log::info!("unmap_memory_region: {} size: {}", address, size);
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -497,6 +517,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     }
 
     fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
+        log::info!("remap_memory_region: {} size: {}", address, size);
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;

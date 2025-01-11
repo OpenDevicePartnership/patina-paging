@@ -1122,7 +1122,7 @@ fn test_dump_page_tables() {
 }
 
 #[test]
-fn test_large_page_splitting_remap() {
+fn test_large_page_splitting() {
     struct TestRange {
         address: u64,
         size: u64,
@@ -1137,7 +1137,7 @@ fn test_large_page_splitting_remap() {
     struct TestConfig {
         paging_type: PagingType,
         mapped_range: TestRange,
-        remap_range: TestRange,
+        split_range: TestRange,
         page_increase: u64,
     }
 
@@ -1145,58 +1145,90 @@ fn test_large_page_splitting_remap() {
         TestConfig {
             paging_type: PagingType::Paging4Level,
             mapped_range: TestRange { address: 0, size: 0x200000 },
-            remap_range: TestRange { address: 0, size: 0x1000 },
+            split_range: TestRange { address: 0, size: 0x1000 },
             page_increase: 1, // 1 2MB page split into 4KB pages, adds 1 PT.
         },
         TestConfig {
             paging_type: PagingType::Paging5Level,
             mapped_range: TestRange { address: 0, size: 0x200000 },
-            remap_range: TestRange { address: 0, size: 0x1000 },
+            split_range: TestRange { address: 0, size: 0x1000 },
             page_increase: 1, // 1 2MB page split into 4KB pages, adds 1 PT.
         },
         TestConfig {
             paging_type: PagingType::Paging4Level,
+            mapped_range: TestRange { address: 0, size: 0x600000 },
+            split_range: TestRange { address: 0x100000, size: 0x400000 },
+            page_increase: 2, // 3 2MB pages split into 1 2MB with 4KB on either side, adds 2 PT.
+        },
+        TestConfig {
+            paging_type: PagingType::Paging4Level,
             mapped_range: TestRange { address: 0, size: 0x40000000 },
-            remap_range: TestRange { address: 0, size: 0x1000 },
+            split_range: TestRange { address: 0, size: 0x1000 },
             page_increase: 2, // 1 1GB page split into 4KB + 2MB pages, adds 1PD + 1 PT.
         },
         TestConfig {
             paging_type: PagingType::Paging4Level,
             mapped_range: TestRange { address: 0, size: 0x40000000 },
-            remap_range: TestRange { address: 0x1FF000, size: 0x2000 },
+            split_range: TestRange { address: 0, size: 0x200000 },
+            page_increase: 1, // 1 1GB page split into 2MB pages, adds 1PD.
+        },
+        TestConfig {
+            paging_type: PagingType::Paging4Level,
+            mapped_range: TestRange { address: 0, size: 0x40000000 },
+            split_range: TestRange { address: 0x1FF000, size: 0x2000 },
             page_increase: 3, // 1 1GB page split into 4KB + 2MB pages along 2 2MB pages, adds 1PD + 2 PT.
         },
     ];
 
+    enum TestAction {
+        Unmap,
+        Remap,
+    }
+
+    let orig_attributes = MemoryAttributes::empty();
+    let remap_attributes = MemoryAttributes::ExecuteProtect;
+
+    // Test the splitting when remapping.
     for test_config in test_configs {
-        let TestConfig { paging_type, mapped_range, remap_range, page_increase } = test_config;
+        let TestConfig { paging_type, mapped_range, split_range, page_increase } = test_config;
+        for action in [TestAction::Unmap, TestAction::Remap] {
+            let num_pages = num_page_tables_required(mapped_range.address, mapped_range.size, paging_type).unwrap();
 
-        let num_pages = num_page_tables_required(mapped_range.address, mapped_range.size, paging_type).unwrap();
+            let page_allocator = TestPageAllocator::new(num_pages + page_increase, paging_type);
+            let pt = X64PageTable::new(page_allocator.clone(), paging_type);
 
-        let page_allocator = TestPageAllocator::new(num_pages + page_increase, paging_type);
-        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+            assert!(pt.is_ok());
+            let mut pt = pt.unwrap();
 
-        assert!(pt.is_ok());
-        let mut pt = pt.unwrap();
-
-        let orig_attributes = MemoryAttributes::empty();
-        let res = pt.map_memory_region(mapped_range.address, mapped_range.size, orig_attributes);
-        assert!(res.is_ok());
-        assert_eq!(page_allocator.pages_allocated(), num_pages);
-
-        let new_attributes = MemoryAttributes::ExecuteProtect;
-        let res = pt.remap_memory_region(remap_range.address, remap_range.size, new_attributes);
-        log::info!("Remap result: {:?}", res);
-        assert!(res.is_ok());
-        assert_eq!(page_allocator.pages_allocated(), num_pages + page_increase);
-
-        for page in mapped_range.as_range().step_by(0x1000) {
-            let check_attributes =
-                if remap_range.as_range().contains(&page) { new_attributes } else { orig_attributes };
-
-            let res = pt.query_memory_region(page, FRAME_SIZE_4KB);
+            let res = pt.map_memory_region(mapped_range.address, mapped_range.size, orig_attributes);
             assert!(res.is_ok());
-            assert_eq!(res.unwrap(), check_attributes);
+            assert_eq!(page_allocator.pages_allocated(), num_pages);
+
+            let res = match action {
+                TestAction::Unmap => pt.unmap_memory_region(split_range.address, split_range.size),
+                TestAction::Remap => pt.remap_memory_region(split_range.address, split_range.size, remap_attributes),
+            };
+            assert!(res.is_ok());
+            assert_eq!(page_allocator.pages_allocated(), num_pages + page_increase);
+
+            for page in mapped_range.as_range().step_by(0x1000) {
+                let res = pt.query_memory_region(page, FRAME_SIZE_4KB);
+                match action {
+                    TestAction::Unmap => {
+                        if split_range.as_range().contains(&page) {
+                            assert!(res.is_err())
+                        } else {
+                            assert!(res.is_ok())
+                        }
+                    }
+                    TestAction::Remap => {
+                        let check_attributes =
+                            if split_range.as_range().contains(&page) { remap_attributes } else { orig_attributes };
+                        assert!(res.is_ok());
+                        assert_eq!(res.unwrap(), check_attributes);
+                    }
+                }
+            }
         }
     }
 }
