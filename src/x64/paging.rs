@@ -161,9 +161,6 @@ impl<A: PageAllocator> X64PageTable<A> {
                 && va.is_level_aligned(level)
                 && va.length_through(end_va) >= level.entry_va_size()
             {
-                if level != self.lowest_page_level {
-                    log::info!("Created Large Page Mapping at {}: {} - {}", level, va, end_va);
-                }
                 // This entry is large enough to be a whole entry for this supporting level,
                 // so we can map the whole range in one go.
                 entry.update_fields(attributes, va.into(), true)?;
@@ -371,18 +368,11 @@ impl<A: PageAllocator> X64PageTable<A> {
         let large_page_start = large_page_start & !(level.entry_va_size() - 1);
         let large_page_end: u64 = large_page_start + level.entry_va_size() - 1;
 
-        log::info!(
-            "Splitting large page: {} - {}",
-            VirtualAddress::new(large_page_start),
-            VirtualAddress::new(large_page_end)
-        );
-
-        let attributes = entry.get_attributes();
-
         if level == self.lowest_page_level || !entry.points_to_pa() {
             return Err(PtError::InvalidParameter);
         }
 
+        let attributes = entry.get_attributes();
         let pa = self.allocate_page()?;
         self.map_memory_region_internal(
             large_page_start.into(),
@@ -485,7 +475,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
 
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
-        log::info!("map_memory_region: {} size: {}", address, size);
 
         self.validate_address_range(address, size)?;
 
@@ -501,7 +490,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     }
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
-        log::info!("unmap_memory_region: {} size: {}", address, size);
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -517,7 +505,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     }
 
     fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
-        log::info!("remap_memory_region: {} size: {}", address, size);
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -637,17 +624,10 @@ fn find_large_page_savings(address: u64, size: u64, level: PageLevel, lowest_pag
     // The savings is the number of sub-pages that would be saved by each large page
     // which is 1 for the current level and then 512 for each level below which.
     // e.g. a large page at the third level would save 1 + 512
-    log::info!(
-        "aligned_address: {:#x}, aligned_end: {:#x} from address: {:#x} size: {:#x}",
-        aligned_address,
-        aligned_end,
-        address,
-        size
-    );
     let num_large_pages = (aligned_end - aligned_address) / alignment;
     let page_entries: u64 = 512;
     let remaining_levels = level as u64 - lowest_page_level as u64;
-    log::info!("level: {} num_large_pages: {},  remaining_levels: {}", level, num_large_pages, remaining_levels,);
+
     savings += num_large_pages;
     if remaining_levels > 1 {
         savings += num_large_pages * page_entries.pow(remaining_levels as u32 - 1);
@@ -738,7 +718,6 @@ pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: Pag
     // The above calculates only the lowest pages, now calculate saving through large
     // pages.
     let savings = find_large_page_savings(address.into(), size, highest_page_level, lowest_page_level);
-    log::info!("total: {} savings {}", total_num_tables, savings);
     total_num_tables -= savings;
 
     Ok(total_num_tables)
