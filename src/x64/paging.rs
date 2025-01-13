@@ -159,7 +159,7 @@ impl<A: PageAllocator> X64PageTable<A> {
             if !entry.present()
                 && level.supports_pa_entry()
                 && va.is_level_aligned(level)
-                && u64::from(end_va) - u64::from(va) + 1 >= level.entry_va_size()
+                && va.length_through(end_va) >= level.entry_va_size()
             {
                 if level != self.lowest_page_level {
                     log::info!("Created Large Page Mapping at {}: {} - {}", level, va, end_va);

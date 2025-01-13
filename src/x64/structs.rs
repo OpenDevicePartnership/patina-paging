@@ -4,6 +4,7 @@ use bitfield_struct::bitfield;
 use core::{
     fmt::{self, Display, Formatter},
     ops::{Add, Sub},
+    ptr::write_volatile,
 };
 
 pub const PAGE_SIZE: u64 = 0x1000; // 4KB
@@ -153,6 +154,13 @@ impl PageTableEntry {
             present                  // 1 bit -  0 = Not present in memory, 1 = Present in memory
         )
     }
+
+    /// Performs an overwrite of the table entry. This ensures that all fields
+    /// are written to memory ato once to avoid partial PTE edits causing unexpected
+    /// behavior with speculative execution or when operating on the current mapping.
+    pub fn swap(&mut self, other: &Self) {
+        unsafe { write_volatile(&mut self.0, other.0) };
+    }
 }
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -185,7 +193,7 @@ impl PageLevel {
     pub fn supports_pa_entry(&self) -> bool {
         match self {
             PageLevel::Pt => true,
-            // TODO: Allow crate level disablement.
+            // 2MB & 1GB pages could be disabled by a crate feature in the future.
             PageLevel::Pd | PageLevel::Pdp => true,
             _ => false,
         }
