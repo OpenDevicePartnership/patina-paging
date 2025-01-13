@@ -50,7 +50,6 @@ pub struct PageTableEntry {
 impl PageTableEntry {
     /// update all the fields and next table base address
     pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
-        // if !self.present() {
         let mut next_level_table_base: u64 = pa.into();
 
         next_level_table_base &= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK;
@@ -58,7 +57,6 @@ impl PageTableEntry {
 
         self.set_page_table_base_address(next_level_table_base);
         self.set_present(true);
-        // }
 
         // update the memory attributes irrespective of new or old page table
         self.set_attributes(attributes);
@@ -156,7 +154,7 @@ impl PageTableEntry {
     }
 
     /// Performs an overwrite of the table entry. This ensures that all fields
-    /// are written to memory ato once to avoid partial PTE edits causing unexpected
+    /// are written to memory at once to avoid partial PTE edits causing unexpected
     /// behavior with speculative execution or when operating on the current mapping.
     pub fn swap(&mut self, other: &Self) {
         unsafe { write_volatile(&mut self.0, other.0) };
