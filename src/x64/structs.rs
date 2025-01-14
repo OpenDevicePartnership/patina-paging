@@ -36,7 +36,7 @@ pub struct PageTableEntry {
     pub cache_disabled: bool,         // 1 bit -  0 = Cached, 1=Non-Cached
     pub accessed: bool,               // 1 bit -  0 = Not accessed, 1 = Accessed (set by CPU)
     pub dirty: bool,                  // 1 bit -  0 = Not Dirty, 1 = written by processor on access to page
-    pub page_size: bool,              // 1 bit
+    pub page_size: bool,              // 1 bit -  1 = 2MB page for PD, 1GB page for PDP, Must be 0 for others.
     pub global: bool,                 // 1 bit -  0 = Not global page, 1 = global page TLB not cleared on CR3 write
     #[bits(3)]
     pub available: u8,                // 3 bits -  Available for use by system software
