@@ -1,5 +1,5 @@
 use crate::page_allocator::PageAllocator;
-use crate::x64::structs::{PageLevel, PageMapEntry, PageTableEntry4KB, VirtualAddress, PAGE_SIZE};
+use crate::x64::structs::{PageLevel, PageTableEntry, VirtualAddress, PAGE_SIZE};
 use crate::{MemoryAttributes, PagingType};
 use crate::{PtError, PtResult};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -22,8 +22,8 @@ impl TestPageAllocator {
         // For the given paging type identify the highest and lowest page levels.
         // This is used during page building to stop the recursion.
         let (highest_page_level, lowest_page_level) = match paging_type {
-            PagingType::Paging4KB5Level => (PageLevel::Pml5, PageLevel::Pt),
-            PagingType::Paging4KB4Level => (PageLevel::Pml4, PageLevel::Pt),
+            PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
+            PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
             PagingType::AArch64PageTable4KB => (PageLevel::Pml4, PageLevel::Pt),
         };
 
@@ -86,6 +86,7 @@ impl TestPageAllocator {
     //       Memory
     //
     pub fn validate_pages(&self, address: u64, size: u64, attributes: MemoryAttributes) {
+        log::info!("Validating pages from {:#x} to {:#x}", address, address + size);
         let address = VirtualAddress::new(address);
         let start_va = address;
         let end_va = address + size - 1;
@@ -114,22 +115,20 @@ impl TestPageAllocator {
         let page = self.get_page(*page_index).unwrap();
         let mut va = start_va;
         for index in start_index..=end_index {
+            let leaf: bool;
             unsafe {
                 // hex_dump(page.add(index as usize) as *const u8, 8);
-                if level == self.lowest_page_level {
-                    // For PT entries we actually store the va
-                    self.validate_page_entry(page.add(index as usize), va.into(), level, attributes);
-                } else {
-                    // For non PT entries we actually store the page base physical address from memory
-                    self.validate_page_entry(
-                        page.add(index as usize),
-                        self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 1)) as u64,
-                        level,
-                        attributes,
-                    );
+                leaf = self.validate_page_entry(
+                    page.add(index as usize),
+                    va.into(),
+                    self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 1)) as u64,
+                    level,
+                    attributes,
+                );
 
-                    // We only consume further pages from PageAllocator memory
-                    // for page tables higher than PT type
+                // We only consume further pages from PageAllocator memory
+                // for page tables higher than PT type
+                if !leaf {
                     *page_index += 1;
                 }
             }
@@ -138,13 +137,12 @@ impl TestPageAllocator {
             let curr_va_ceiling = va.round_up(level);
             let next_level_end_va = VirtualAddress::min(curr_va_ceiling, end_va);
 
-            self.validate_pages_internal(
-                next_level_start_va,
-                next_level_end_va,
-                ((level as u64) - 1).into(),
-                page_index,
-                attributes,
-            );
+            let next_level = match leaf {
+                true => PageLevel::Pa,
+                false => level - 1,
+            };
+
+            self.validate_pages_internal(next_level_start_va, next_level_end_va, next_level, page_index, attributes);
 
             va = va.get_next_va(level);
         }
@@ -153,35 +151,45 @@ impl TestPageAllocator {
     fn validate_page_entry(
         &self,
         entry_ptr: *const u64,
-        expected_page_base: u64,
+        virtual_address: u64,
+        next_page_table_address: u64,
         level: PageLevel,
         expected_attributes: MemoryAttributes,
-    ) {
+    ) -> bool {
         unsafe {
             let table_base = *entry_ptr;
 
-            match level {
-                PageLevel::Pml5 | PageLevel::Pml4 | PageLevel::Pdp | PageLevel::Pd => {
-                    let page_base: u64 = PageMapEntry::from_bits(table_base).get_canonical_page_table_base().into();
-                    let attributes = PageMapEntry::from_bits(table_base).get_attributes();
-                    assert_eq!(page_base, expected_page_base);
-                    assert_eq!(attributes, MemoryAttributes::empty()); // we don't set any attributes on higher level page table entries
-                }
-                PageLevel::Pt => {
-                    let page_base: u64 =
-                        PageTableEntry4KB::from_bits(table_base).get_canonical_page_table_base().into();
-                    let attributes = PageTableEntry4KB::from_bits(table_base).get_attributes();
-                    assert_eq!(page_base, expected_page_base);
-                    assert_eq!(attributes, expected_attributes);
-                }
-                _ => panic!("validate_page_entry is not expected to be called with pa"),
+            if level == PageLevel::Pa {
+                panic!("validate_page_entry is not expected to be called with pa");
+            }
+
+            let pte = PageTableEntry::from_bits(table_base);
+            let page_base: u64 = pte.get_canonical_page_table_base().into();
+            let attributes = pte.get_attributes();
+            let leaf = match level {
+                PageLevel::Pt => true,
+                PageLevel::Pd | PageLevel::Pdp => pte.page_size(),
+                _ => false,
             };
 
-            // Compare the actual page base address populated in the entry with
-            // the expected page base address
+            log::info!(
+                "Level: {:?} PageBase: {:#x}, virtual_address: {:#x} next_pt {:x} leaf: {}",
+                level,
+                page_base,
+                virtual_address,
+                next_page_table_address,
+                leaf
+            );
 
-            // assert_eq!(page_base, expected_page_base);
-            // assert_eq!(attributes, expected_attributes);
+            if leaf {
+                assert_eq!(page_base, virtual_address);
+                assert_eq!(attributes, expected_attributes);
+            } else {
+                assert_eq!(page_base, next_page_table_address);
+                assert_eq!(attributes, MemoryAttributes::empty()); // we don't set any attributes on higher level page table entries
+            }
+
+            leaf
         }
     }
 
