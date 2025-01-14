@@ -104,7 +104,7 @@ impl X64PageTableEntry {
             PageLevel::Pa => panic!("unexpected call to update fields for pa paging level"),
             PageLevel::Pd | PageLevel::Pdp => {
                 let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
-                let mut copy = entry.clone();
+                let mut copy = *entry;
                 copy.update_fields(attributes, pa)?;
                 let page_size = leaf_entry && !attributes.contains(MemoryAttributes::ReadProtect);
                 copy.set_page_size(page_size);
@@ -112,7 +112,7 @@ impl X64PageTableEntry {
             }
             _ => {
                 let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
-                let mut copy = entry.clone();
+                let mut copy = *entry;
                 copy.update_fields(attributes, pa)?;
                 entry.swap(&copy);
             }
@@ -135,7 +135,7 @@ impl X64PageTableEntry {
             PageLevel::Pa => panic!("unexpected call to set present bit for pa paging level"),
             _ => {
                 let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
-                let mut copy = entry.clone();
+                let mut copy = *entry;
                 copy.set_present(value);
                 entry.swap(&copy);
             }

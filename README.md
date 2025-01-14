@@ -154,7 +154,7 @@ pub trait PageAllocator {
 
     let page_allocator = ...;
 
-    let pt = X64PageTable::new(page_allocator, PagingType::Paging4KB4Level)?;
+    let pt = X64PageTable::new(page_allocator, PagingType::PagingLevel)?;
 
     let attributes = MemoryAttributes::ReadOnly;
     let res = pt.map_memory_region(address, size, attributes);
