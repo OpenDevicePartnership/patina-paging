@@ -1,0 +1,5 @@
+[registries]
+UefiRust = { index = "sparse+https://pkgs.dev.azure.com/microsoft/MsUEFI/_packaging/UefiRust/Cargo/index/" }
+
+[source.crates-io]
+replace-with = "UefiRust"
