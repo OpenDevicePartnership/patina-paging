@@ -142,7 +142,7 @@ pub trait PageAllocator {
     /// * `size` - on x64 this will be 4KB page size.
     ///
     /// ## Returns
-    /// * `PtResult<u64>` - Physcial address of the allocated page.
+    /// * `PtResult<u64>` - Physical address of the allocated page.
     fn allocate_page(&mut self, align: u64, size: u64) -> PtResult<u64>;
 }
 ```

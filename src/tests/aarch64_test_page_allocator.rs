@@ -10,7 +10,7 @@ use std::rc::Rc;
 // tables
 #[derive(Clone)]
 pub struct TestPageAllocator {
-    rimpl: Rc<RefCell<TestPageAllocatorImpl>>,
+    ref_impl: Rc<RefCell<TestPageAllocatorImpl>>,
     paging_type: PagingType,
 
     highest_page_level: PageLevel,
@@ -27,7 +27,7 @@ impl TestPageAllocator {
         };
 
         Self {
-            rimpl: Rc::new(RefCell::new(TestPageAllocatorImpl::new(num_pages))),
+            ref_impl: Rc::new(RefCell::new(TestPageAllocatorImpl::new(num_pages))),
             paging_type,
             highest_page_level,
             lowest_page_level,
@@ -35,7 +35,7 @@ impl TestPageAllocator {
     }
 
     pub fn pages_allocated(&self) -> u64 {
-        self.rimpl.borrow().page_index
+        self.ref_impl.borrow().page_index
     }
 
     // This method is called after building the page tables. It validates the
@@ -190,17 +190,17 @@ impl TestPageAllocator {
     }
 
     fn get_memory_base(&self) -> *const u8 {
-        self.rimpl.borrow().get_memory_base()
+        self.ref_impl.borrow().get_memory_base()
     }
 
     fn get_page(&self, index: u64) -> PtResult<*const u64> {
-        self.rimpl.borrow().get_page(index)
+        self.ref_impl.borrow().get_page(index)
     }
 }
 
 impl PageAllocator for TestPageAllocator {
     fn allocate_page(&mut self, align: u64, size: u64, _is_root: bool) -> PtResult<u64> {
-        self.rimpl.borrow_mut().allocate_page(align, size)
+        self.ref_impl.borrow_mut().allocate_page(align, size)
     }
 }
 
