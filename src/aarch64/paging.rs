@@ -6,8 +6,13 @@ use super::{
 use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
 use core::{arch::asm, ptr};
 use uefi_sdk::base::{SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB};
+use mu_pi::protocols::cpu_arch::CpuFlushType;
 
 const MAX_VA_BITS: u64 = 48;
+
+extern "C" {
+    static replace_live_xlat_entry_size: u32;
+}
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
@@ -25,7 +30,15 @@ pub struct AArch64PageTable<A: PageAllocator> {
 impl<A: PageAllocator> AArch64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the root page table
+        let function_pointer = reg::replace_live_xlat_entry as *const () as u64;
+        if !reg::is_mmu_enabled() {
+            reg::cache_range_operation(function_pointer, unsafe {replace_live_xlat_entry_size} as u64, CpuFlushType::EfiCpuFlushTypeWriteBack);
+        }
+
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
+        if !reg::is_mmu_enabled() {
+            reg::cache_range_operation(base, PAGE_SIZE, CpuFlushType::EFiCpuFlushTypeInvalidate);
+        }
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
@@ -74,6 +87,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
         let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
+        if !reg::is_mmu_enabled() {
+            reg::cache_range_operation(base, PAGE_SIZE, CpuFlushType::EFiCpuFlushTypeInvalidate);
+        }
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
@@ -508,6 +524,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let max_address = (1 << max_address_bits) - 1;
 
         let t0sz = 64 - max_address_bits;
+        let root_table_cnt = get_root_table_count(t0sz);
 
         let mut tcr: u64;
 
@@ -569,24 +586,22 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         // Set TCR
         reg::set_tcr(tcr);
 
-        if reg::is_mmu_enabled() {
+        if !reg::is_mmu_enabled() {
             // Make sure we are not inadvertently hitting in the caches
             // when populating the page tables.
-            // TODO: InvalidateDataCacheRange
-            
+            reg::cache_range_operation(self.base.into(), root_table_cnt * 8, CpuFlushType::EFiCpuFlushTypeInvalidate);
         }
 
         // EFI_MEMORY_UC ==> MAIR_ATTR_DEVICE_MEMORY
         // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
         // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
         // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
-        reg::set_mair(0b000 << 0 | 0b001 << 8 | 0b010 << 16 | 0b011 << 24);
-
+        reg::set_mair(0 << 0 | 0x44 << 8 | 0xBB << 16 | 0xFF << 24);
         // Set TTBR0
         reg::set_ttbr0(self.base.into());
 
         if !reg::is_mmu_enabled() {
-            reg::set_stack_alignment_check(false);
+            reg::set_alignment_check(false);
             reg::set_stack_alignment_check(true);
             reg::enable_instruction_cache();
             reg::enable_data_cache();
@@ -695,4 +710,8 @@ pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: Pag
     }
 
     Ok(total_num_tables)
+}
+
+fn get_root_table_count(t0sz: u64) -> u64 {
+    512 >> (t0sz - 16) % 9
 }
