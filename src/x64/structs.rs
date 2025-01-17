@@ -4,9 +4,11 @@ use bitfield_struct::bitfield;
 use core::{
     fmt::{self, Display, Formatter},
     ops::{Add, Sub},
+    ptr::write_volatile,
 };
 
 pub const PAGE_SIZE: u64 = 0x1000; // 4KB
+
 const PAGE_INDEX_MASK: u64 = 0x1FF;
 
 pub(crate) const MAX_PML5_VA: u64 = 0x01ff_ffff_ffff_ffff;
@@ -20,128 +22,13 @@ const PT_START_BIT: u64 = 12;
 
 pub(crate) const CR3_PAGE_BASE_ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000; // 40 bit - lower 12 bits for alignment
 
-const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
-const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000; // 40 bit - lower 12 bits for alignment
-
-#[rustfmt::skip]
-#[bitfield(u64)]
-pub struct PageMapEntry {
-    pub present: bool,                // 1 bit -  0 = Not present in memory, 1 = Present in memory
-    pub read_write: bool,             // 1 bit -  0 = Read-Only, 1= Read/Write
-    pub user_supervisor: bool,        // 1 bit -  0 = Supervisor, 1=User
-    pub write_through: bool,          // 1 bit -  0 = Write-Back caching, 1=Write-Through caching
-    pub cache_disabled: bool,         // 1 bit -  0 = Cached, 1=Non-Cached
-    pub accessed: bool,               // 1 bit -  0 = Not accessed, 1 = Accessed (set by CPU)
-    pub reserved: bool,               // 1 bit -  Reserved
-    #[bits(2)]
-    pub must_be_zero: u8,             // 2 bits -  Must Be Zero
-    #[bits(3)]
-    pub available: u8,                // 3 bits -  Available for use by system software
-    #[bits(40)]
-    pub page_table_base_address: u64, // 40 bits -  Page Table Base Address
-    #[bits(11)]
-    pub available_high: u16,          // 11 bits -  Available for use by system software
-    pub nx: bool,                     // 1 bit -  No Execute bit
-}
-
-impl PageMapEntry {
-    /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
-        if !self.present() {
-            let mut next_level_table_base: u64 = pa.into();
-
-            next_level_table_base &= PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_MASK;
-            next_level_table_base >>= PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;
-
-            self.set_page_table_base_address(next_level_table_base);
-            self.set_present(true);
-        }
-
-        // update the memory attributes irrespective of new or old page table
-        self.set_attributes(attributes);
-        Ok(())
-    }
-
-    /// return the 40 bits table base address converted to canonical address
-    pub fn get_canonical_page_table_base(&self) -> PhysicalAddress {
-        let mut page_table_base_address = self.page_table_base_address();
-
-        page_table_base_address <<= PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;
-
-        PhysicalAddress(page_table_base_address)
-    }
-
-    /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> MemoryAttributes {
-        let mut attributes = MemoryAttributes::empty();
-
-        if !self.present() {
-            attributes |= MemoryAttributes::ReadProtect;
-        }
-
-        if !self.read_write() {
-            attributes |= MemoryAttributes::ReadOnly;
-        }
-
-        if self.nx() {
-            attributes |= MemoryAttributes::ExecuteProtect;
-        }
-
-        attributes
-    }
-
-    /// set all the memory attributes for the current entry
-    fn set_attributes(&mut self, _attributes: MemoryAttributes) {
-        self.set_read_write(true);
-        self.set_user_supervisor(true);
-        self.set_write_through(false);
-        self.set_cache_disabled(false);
-        self.set_must_be_zero(0);
-        self.set_available(0);
-        self.set_available_high(0);
-        self.set_nx(false);
-    }
-
-    pub fn dump_entry(&self) -> String {
-        let nx = self.nx() as u64;
-        let available_high = self.available_high() as u64;
-        let page_table_base_address = self.page_table_base_address();
-        let available = self.available() as u64;
-        let must_be_zero = self.must_be_zero() as u64;
-        let reserved = self.reserved() as u64;
-        let accessed = self.accessed() as u64;
-        let cache_disabled = self.cache_disabled() as u64;
-        let write_through = self.write_through() as u64;
-        let user_supervisor = self.user_supervisor() as u64;
-        let read_write = self.read_write() as u64;
-        let present = self.present() as u64;
-
-        format!(
-            "|{:01b}|{:011b}|{:040b}|{:03b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|",
-            nx,                      // 1 bit -  No Execute bit
-            available_high & 0x7FF,  // 11 bits -  Available for use by system software
-            page_table_base_address, // 40 bits -  Page Table Base Address
-            available & 0x7,         // 3 bits -  Available for use by system software
-            must_be_zero & 0x1,      // 1 bits -  Must Be Zero
-            must_be_zero & 0x1,      // 1 bits -  Must Be Zero
-            reserved,                // 1 bit -  Reserved
-            accessed,                // 1 bit -  0 = Not accessed, 1 = Accessed (set by CPU)
-            cache_disabled,          // 1 bit -  0 = Cached, 1=Non-Cached
-            write_through,           // 1 bit -  0 = Write-Back caching, 1=Write-Through caching
-            user_supervisor,         // 1 bit -  0 = Supervisor, 1=User
-            read_write,              // 1 bit -  0 = Read-Only, 1= Read/Write
-            present,                 // 1 bit -  0 = Not present in memory, 1 = Present in memory
-        )
-    }
-}
-
 pub(crate) const FRAME_SIZE_4KB: u64 = 0x1000; // 4KB
 pub(crate) const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
 pub(crate) const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000; // 40 bit - lower 12 bits for alignment
 
 #[rustfmt::skip]
 #[bitfield(u64)]
-pub struct PageTableEntry4KB {
+pub struct PageTableEntry {
     pub present: bool,                // 1 bit -  0 = Not present in memory, 1 = Present in memory
     pub read_write: bool,             // 1 bit -  0 = Read-Only, 1= Read/Write
     pub user_supervisor: bool,        // 1 bit -  0 = Supervisor, 1=User
@@ -149,7 +36,7 @@ pub struct PageTableEntry4KB {
     pub cache_disabled: bool,         // 1 bit -  0 = Cached, 1=Non-Cached
     pub accessed: bool,               // 1 bit -  0 = Not accessed, 1 = Accessed (set by CPU)
     pub dirty: bool,                  // 1 bit -  0 = Not Dirty, 1 = written by processor on access to page
-    pub pat: bool,                    // 1 bit
+    pub page_size: bool,              // 1 bit -  1 = 2MB page for PD, 1GB page for PDP, Must be 0 for others.
     pub global: bool,                 // 1 bit -  0 = Not global page, 1 = global page TLB not cleared on CR3 write
     #[bits(3)]
     pub available: u8,                // 3 bits -  Available for use by system software
@@ -160,18 +47,16 @@ pub struct PageTableEntry4KB {
     pub nx: bool,                     // 1 bit -  0 = Execute Code, 1 = No Code Execution
 }
 
-impl PageTableEntry4KB {
+impl PageTableEntry {
     /// update all the fields and next table base address
     pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
-        if !self.present() {
-            let mut next_level_table_base: u64 = pa.into();
+        let mut next_level_table_base: u64 = pa.into();
 
-            next_level_table_base &= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK;
-            next_level_table_base >>= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT;
+        next_level_table_base &= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK;
+        next_level_table_base >>= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT;
 
-            self.set_page_table_base_address(next_level_table_base);
-            self.set_present(true);
-        }
+        self.set_page_table_base_address(next_level_table_base);
+        self.set_present(true);
 
         // update the memory attributes irrespective of new or old page table
         self.set_attributes(attributes);
@@ -214,7 +99,7 @@ impl PageTableEntry4KB {
         self.set_user_supervisor(true);
         self.set_write_through(false);
         self.set_cache_disabled(false);
-        self.set_pat(false);
+        self.set_page_size(false);
         self.set_global(false);
         self.set_available(0);
         self.set_available_high(0);
@@ -241,7 +126,7 @@ impl PageTableEntry4KB {
         let page_table_base_address = self.page_table_base_address();
         let available = self.available() as u64;
         let global = self.global() as u64;
-        let pat = self.pat() as u64;
+        let pat = self.page_size() as u64;
         let dirty = self.dirty() as u64;
         let accessed = self.accessed() as u64;
         let cache_disabled = self.cache_disabled() as u64;
@@ -267,9 +152,16 @@ impl PageTableEntry4KB {
             present                  // 1 bit -  0 = Not present in memory, 1 = Present in memory
         )
     }
+
+    /// Performs an overwrite of the table entry. This ensures that all fields
+    /// are written to memory at once to avoid partial PTE edits causing unexpected
+    /// behavior with speculative execution or when operating on the current mapping.
+    pub fn swap(&mut self, other: &Self) {
+        unsafe { write_volatile(&mut self.0, other.0) };
+    }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum PageLevel {
     Pml5 = 5,
     Pml4 = 4,
@@ -277,6 +169,33 @@ pub enum PageLevel {
     Pd = 2,
     Pt = 1,
     Pa = 0,
+}
+
+impl PageLevel {
+    pub fn start_bit(&self) -> u64 {
+        // TODO: fix these to use intrinsics
+        match self {
+            PageLevel::Pml5 => PML5_START_BIT,
+            PageLevel::Pml4 => PML4_START_BIT,
+            PageLevel::Pdp => PDP_START_BIT,
+            PageLevel::Pd => PD_START_BIT,
+            PageLevel::Pt => PT_START_BIT,
+            PageLevel::Pa => panic!("Start bit is not defined for PA!"),
+        }
+    }
+
+    pub fn entry_va_size(&self) -> u64 {
+        1 << self.start_bit()
+    }
+
+    pub fn supports_pa_entry(&self) -> bool {
+        match self {
+            PageLevel::Pt => true,
+            // 2MB & 1GB pages could be disabled by a crate feature in the future.
+            PageLevel::Pd | PageLevel::Pdp => true,
+            _ => false,
+        }
+    }
 }
 
 impl From<PageLevel> for u64 {
@@ -336,13 +255,8 @@ impl VirtualAddress {
     pub fn round_up(&self, level: PageLevel) -> VirtualAddress {
         let va = self.0;
         match level {
-            // TODO: fix these to use intrinsics
-            PageLevel::Pml5 => Self((((va >> PML5_START_BIT) + 1) << PML5_START_BIT) - 1),
-            PageLevel::Pml4 => Self((((va >> PML4_START_BIT) + 1) << PML4_START_BIT) - 1),
-            PageLevel::Pdp => Self((((va >> PDP_START_BIT) + 1) << PDP_START_BIT) - 1),
-            PageLevel::Pd => Self((((va >> PD_START_BIT) + 1) << PD_START_BIT) - 1),
-            PageLevel::Pt => Self((((va >> PT_START_BIT) + 1) << PT_START_BIT) - 1),
             PageLevel::Pa => Self(va),
+            _ => Self((((va >> level.start_bit()) + 1) << level.start_bit()) - 1),
         }
     }
 
@@ -364,14 +278,14 @@ impl VirtualAddress {
     pub fn get_index(&self, level: PageLevel) -> u64 {
         let va = self.0;
         match level {
-            // TODO: fix these to use intrinsics
-            PageLevel::Pml5 => (va >> PML5_START_BIT) & PAGE_INDEX_MASK,
-            PageLevel::Pml4 => (va >> PML4_START_BIT) & PAGE_INDEX_MASK,
-            PageLevel::Pdp => (va >> PDP_START_BIT) & PAGE_INDEX_MASK,
-            PageLevel::Pd => (va >> PD_START_BIT) & PAGE_INDEX_MASK,
-            PageLevel::Pt => (va >> PT_START_BIT) & PAGE_INDEX_MASK,
             PageLevel::Pa => panic!("get_index is not expected to be called"),
+            _ => (va >> level.start_bit()) & PAGE_INDEX_MASK,
         }
+    }
+
+    pub fn is_level_aligned(&self, level: PageLevel) -> bool {
+        let va = self.0;
+        va & (level.entry_va_size() - 1) == 0
     }
 
     pub fn is_4kb_aligned(&self) -> bool {
@@ -381,6 +295,14 @@ impl VirtualAddress {
 
     pub fn min(lhs: VirtualAddress, rhs: VirtualAddress) -> VirtualAddress {
         VirtualAddress(core::cmp::min(lhs.0, rhs.0))
+    }
+
+    /// This will return the range length between self and end (inclusive)
+    pub fn length_through(&self, end: VirtualAddress) -> u64 {
+        match end.0.checked_sub(self.0) {
+            None => panic!("Underflow occurred! {:x} {:x}", self.0, end.0),
+            Some(result) => result + 1,
+        }
     }
 }
 
