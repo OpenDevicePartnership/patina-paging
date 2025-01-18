@@ -1,0 +1,30 @@
+# @file cspell.yml
+#
+# CSpell configuration file
+#
+##
+# Copyright (c) Microsoft Corporation
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+version: "0.2"
+language: en
+dictionaries:
+  - "companies"
+  - "softwareTerms"
+  - "rust"
+ignorePaths:
+  - "**/target/**"
+  - "**/book/**"
+  - "**/*.asm"
+  - "Makefile.toml"
+minWordLength: 5
+caseSensitive: false
+allowCompoundWords: true
+words:
+  - aarch
+  - mtrr
+  - uncacheable
+  - sctlr
+  - xffff
+  - structs
+  - kbyte
