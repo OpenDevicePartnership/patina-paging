@@ -710,7 +710,7 @@ pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: Pag
         //     └─────┘   └────►└─────┘   └─────►└─────┘   └───►
         let num_entries_at_current_level = find_num_entries(start_offset, end_offset, num_entries_at_parent_level);
 
-        // These are truely consumed in the next iteration.
+        // These are truly consumed in the next iteration.
         num_tables_at_current_level = num_entries_at_current_level;
         num_entries_at_parent_level = num_entries_at_current_level;
     }
