@@ -141,23 +141,23 @@ pub fn enable_mmu() {
     unsafe {
         if current_el == 2 {
             asm!(
-              "mrs x0, sctlr_el2",
-              "orr x0, x0, #0x1",
-              "tlbi alle2",
-              "dsb nsh",
-              "isb",
-              "msr sctlr_el2, x0",
-              options(nostack)
+                "mrs x0, sctlr_el2",
+                "orr x0, x0, #0x1",
+                "tlbi alle2",
+                "dsb nsh",
+                "isb",
+                "msr sctlr_el2, x0",
+                options(nostack)
             );
         } else if current_el == 1 {
             asm!(
-            "mrs x0, sctlr_el1",
-            "orr x0, x0, #0x1",
-            "tlbi vmalle1",
-            "dsb nsh",
-            "isb",
-            "msr sctlr_el1, x0",
-            options(nostack)
+                "mrs x0, sctlr_el1",
+                "orr x0, x0, #0x1",
+                "tlbi vmalle1",
+                "dsb nsh",
+                "isb",
+                "msr sctlr_el1, x0",
+                options(nostack)
             );
         } else {
             panic!("Invalid current EL {}", current_el);
@@ -172,35 +172,15 @@ pub fn set_stack_alignment_check(enable: bool) {
     unsafe {
         if current_el == 2 {
             if enable {
-                asm!(
-                  "mrs x0, sctlr_el2",
-                  "orr x0, x0, #8",
-                  "msr sctlr_el2, x0",
-                  options(nostack)
-                );
+                asm!("mrs x0, sctlr_el2", "orr x0, x0, #8", "msr sctlr_el2, x0", options(nostack));
             } else {
-                asm!(
-                  "mrs x0, sctlr_el2",
-                  "bic x0, x0, #8",
-                  "msr sctlr_el2, x0",
-                  options(nostack)
-                );
+                asm!("mrs x0, sctlr_el2", "bic x0, x0, #8", "msr sctlr_el2, x0", options(nostack));
             }
         } else if current_el == 1 {
             if enable {
-                asm!(
-                  "mrs x0, sctlr_el1",
-                  "orr x0, x0, #8",
-                  "msr sctlr_el1, x0",
-                  options(nostack)
-                );
+                asm!("mrs x0, sctlr_el1", "orr x0, x0, #8", "msr sctlr_el1, x0", options(nostack));
             } else {
-                asm!(
-                  "mrs x0, sctlr_el1",
-                  "bic x0, x0, #8",
-                  "msr sctlr_el1, x0",
-                  options(nostack)
-                );
+                asm!("mrs x0, sctlr_el1", "bic x0, x0, #8", "msr sctlr_el1, x0", options(nostack));
             }
         } else {
             panic!("Invalid current EL {}", current_el);
@@ -216,35 +196,15 @@ pub fn set_alignment_check(enable: bool) {
     unsafe {
         if current_el == 2 {
             if enable {
-                asm!(
-                  "mrs x0, sctlr_el2",
-                  "orr x0, x0, #2",
-                  "msr sctlr_el2, x0",
-                  options(nostack)
-                );
+                asm!("mrs x0, sctlr_el2", "orr x0, x0, #2", "msr sctlr_el2, x0", options(nostack));
             } else {
-                asm!(
-                  "mrs x0, sctlr_el2",
-                  "bic x0, x0, #2",
-                  "msr sctlr_el2, x0",
-                  options(nostack)
-                );
+                asm!("mrs x0, sctlr_el2", "bic x0, x0, #2", "msr sctlr_el2, x0", options(nostack));
             }
         } else if current_el == 1 {
             if enable {
-                asm!(
-                  "mrs x0, sctlr_el1",
-                  "orr x0, x0, #2",
-                  "msr sctlr_el1, x0",
-                  options(nostack)
-                );
+                asm!("mrs x0, sctlr_el1", "orr x0, x0, #2", "msr sctlr_el1, x0", options(nostack));
             } else {
-                asm!(
-                  "mrs x0, sctlr_el1",
-                  "bic x0, x0, #2",
-                  "msr sctlr_el1, x0",
-                  options(nostack)
-                );
+                asm!("mrs x0, sctlr_el1", "bic x0, x0, #2", "msr sctlr_el1, x0", options(nostack));
             }
         } else {
             panic!("Invalid current EL {}", current_el);
@@ -259,19 +219,9 @@ pub fn enable_instruction_cache() {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
         if current_el == 2 {
-            asm!(
-              "mrs x0, sctlr_el2",
-              "orr x0, x0, #0x1000",
-              "msr sctlr_el2, x0",
-              options(nostack)
-            );
+            asm!("mrs x0, sctlr_el2", "orr x0, x0, #0x1000", "msr sctlr_el2, x0", options(nostack));
         } else if current_el == 1 {
-            asm!(
-            "mrs x0, sctlr_el1",
-            "orr x0, x0, #0x1000",
-            "msr sctlr_el1, x0",
-            options(nostack)
-            );
+            asm!("mrs x0, sctlr_el1", "orr x0, x0, #0x1000", "msr sctlr_el1, x0", options(nostack));
         } else {
             panic!("Invalid current EL {}", current_el);
         }
@@ -285,19 +235,9 @@ pub fn enable_data_cache() {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
         if current_el == 2 {
-            asm!(
-              "mrs x0, sctlr_el2",
-              "orr x0, x0, #0x4",
-              "msr sctlr_el2, x0",
-              options(nostack)
-            );
+            asm!("mrs x0, sctlr_el2", "orr x0, x0, #0x4", "msr sctlr_el2, x0", options(nostack));
         } else if current_el == 1 {
-            asm!(
-            "mrs x0, sctlr_el1",
-            "orr x0, x0, #0x4",
-            "msr sctlr_el1, x0",
-            options(nostack)
-            );
+            asm!("mrs x0, sctlr_el1", "orr x0, x0, #0x4", "msr sctlr_el1, x0", options(nostack));
         } else {
             panic!("Invalid current EL {}", current_el);
         }
@@ -306,7 +246,7 @@ pub fn enable_data_cache() {
     }
 }
 
-pub fn update_translation_table_entry (translation_table_entry: u64, mva: u64) {
+pub fn update_translation_table_entry(translation_table_entry: u64, mva: u64) {
     let current_el = get_current_el();
     let ls_mva = mva << 12;
     #[cfg(all(not(test), target_arch = "aarch64"))]
@@ -354,9 +294,7 @@ pub fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
         match op {
             CpuFlushType::EfiCpuFlushTypeWriteBack => clean_data_entry_by_mva(aligned_addr),
             CpuFlushType::EFiCpuFlushTypeInvalidate => invalidate_data_cache_entry_by_mva(aligned_addr),
-            CpuFlushType::EfiCpuFlushTypeWriteBackInvalidate => {
-                clean_and_invalidate_data_entry_by_mva(aligned_addr)
-            }
+            CpuFlushType::EfiCpuFlushTypeWriteBackInvalidate => clean_and_invalidate_data_entry_by_mva(aligned_addr),
         }
 
         aligned_addr += cacheline_alignment;
@@ -387,7 +325,6 @@ fn data_cache_line_len() -> u64 {
         64_u64
     }
 }
-
 
 fn clean_data_entry_by_mva(_mva: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]

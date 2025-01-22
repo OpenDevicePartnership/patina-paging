@@ -1,12 +1,12 @@
 use super::{
     pagetablestore::AArch64PageTableStore,
-    structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
     reg,
+    structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
 };
 use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
 use core::{arch::asm, ptr};
-use uefi_sdk::base::{SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB};
 use mu_pi::protocols::cpu_arch::CpuFlushType;
+use uefi_sdk::base::{SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB};
 
 const MAX_VA_BITS: u64 = 48;
 
@@ -32,7 +32,11 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         // Allocate the root page table
         let function_pointer = reg::replace_live_xlat_entry as *const () as u64;
         if !reg::is_mmu_enabled() {
-            reg::cache_range_operation(function_pointer, unsafe {replace_live_xlat_entry_size} as u64, CpuFlushType::EfiCpuFlushTypeWriteBack);
+            reg::cache_range_operation(
+                function_pointer,
+                unsafe { replace_live_xlat_entry_size } as u64,
+                CpuFlushType::EfiCpuFlushTypeWriteBack,
+            );
         }
 
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
@@ -122,10 +126,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     // Need to do the heavy duty break-before-make sequence
                     let val = entry.update_shadow_fields(attributes, va.into());
                     unsafe {
-                        reg::replace_live_xlat_entry (entry.get_canonical_page_table_base().into(), val, va.into());
+                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), val, va.into());
                     }
-                }
-                else {
+                } else {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, va.into())?;
                     reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), va.into());
@@ -145,10 +148,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     // Need to do the heavy duty break-before-make sequence
                     let val = entry.update_shadow_fields(attributes, va.into());
                     unsafe {
-                        reg::replace_live_xlat_entry (entry.get_canonical_page_table_base().into(), val, pa.into());
+                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), val, pa.into());
                     }
-                }
-                else {
+                } else {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, pa)?;
                     reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), pa.into());
@@ -253,10 +255,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     // Need to do the heavy duty break-before-make sequence
                     let val = entry.update_shadow_fields(attributes, va.into());
                     unsafe {
-                        reg::replace_live_xlat_entry (entry.get_canonical_page_table_base().into(), val, va.into());
+                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), val, va.into());
                     }
-                }
-                else {
+                } else {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, va.into())?;
                     reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), va.into());
