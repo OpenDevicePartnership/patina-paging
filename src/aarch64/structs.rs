@@ -192,7 +192,7 @@ pub struct VMSAv864PageDescriptor {
     pub reserved0: u8,            // 2 bits -  Not used
     pub guarded_page: bool,       // 1 bit  -  GP
     pub dirty_bit_modifier: bool, // 1 bit  -  DBM
-    pub contig: bool,             // 1 bit  -  Contiguous
+    pub contiguous: bool,         // 1 bit  -  Contiguous
     pub pxn: bool,                // 1 bit  -  PXN Execution permissions
     pub uxn: bool,                // 1 bit  -  UXN Execution permissions
     #[bits(4)]
@@ -340,7 +340,7 @@ impl VMSAv864PageDescriptor {
         let reserved0 = self.reserved0() as u64;
         let guarded_page = self.guarded_page() as u64;
         let dirty_bit_modifier = self.dirty_bit_modifier() as u64;
-        let contig = self.contig() as u64;
+        let contiguous = self.contiguous() as u64;
         let pxn = self.pxn() as u64;
         let uxn = self.uxn() as u64;
         let reserved1 = self.reserved1() as u64;
@@ -353,7 +353,7 @@ impl VMSAv864PageDescriptor {
             reserved1,       // 3 bits -  Reserved for software use
             uxn,             // 1 bit  -  UXN Execution permissions
             pxn,             // 1 bit  -  PXN Execution permissions
-            contig,          // 1 bit  -  Contiguous
+            contiguous,          // 1 bit  -  Contiguous
             dirty_bit_modifier, // 1 bit  -  DBM
             guarded_page,    // 1 bit  -  GP
             reserved0,       // 2 bits -  Not used

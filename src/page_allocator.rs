@@ -12,6 +12,6 @@ pub trait PageAllocator {
     ///   make certain adjustments required for the root page on some systems
     ///
     /// ## Returns
-    /// * `PtResult<u64>` - Physcial address of the allocated page.
+    /// * `PtResult<u64>` - Physical address of the allocated page.
     fn allocate_page(&mut self, align: u64, size: u64, is_root: bool) -> PtResult<u64>;
 }
