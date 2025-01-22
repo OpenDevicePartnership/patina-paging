@@ -564,7 +564,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
                 tcr |= 3 << 32;
             } else if max_address < SIZE_16TB {
                 tcr |= 4 << 32;
-            } else if max_address < SIZE_1TB {
+            } else if max_address < SIZE_256TB {
                 tcr |= 5 << 32;
             } else {
                 panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
@@ -597,7 +597,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
         // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
         // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
-        reg::set_mair(0 << 0 | 0x44 << 8 | 0xBB << 16 | 0xFF << 24);
+        reg::set_mair(0x44 << 8 | 0xBB << 16 | 0xFF << 24);
         // Set TTBR0
         reg::set_ttbr0(self.base.into());
 
