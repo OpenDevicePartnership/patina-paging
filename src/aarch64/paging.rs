@@ -33,6 +33,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         // Allocate the root page table
         #[cfg(all(not(test), target_arch = "aarch64"))]
         if !reg::is_mmu_enabled() {
+            // This is guarded behind the mmu check because enabling mmu will also
+            // enable data and instruction cache. So, we don't need to manually do
+            // this if mmu is already enabled.
             let function_pointer = reg::replace_live_xlat_entry as *const () as u64;
             reg::cache_range_operation(
                 function_pointer,
