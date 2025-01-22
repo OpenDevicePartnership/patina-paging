@@ -157,6 +157,10 @@ impl VMSAv864TableDescriptor {
             valid_desc,  // 1 bit -  Valid descriptor
         )
     }
+
+    pub fn get_u64(&self) -> u64 {
+        self.0
+    }
 }
 
 // Below is the implementation of the block descriptor for AArch64 systems.
@@ -217,33 +221,22 @@ impl VMSAv864PageDescriptor {
         match attributes & MemoryAttributes::CacheAttributesMask {
             MemoryAttributes::Uncacheable => {
                 self.set_attribute_index(0);
-                self.set_ng(false);
-                self.set_ns(false);
+                self.set_shareable(0);
             }
             MemoryAttributes::WriteCombining => {
                 self.set_attribute_index(1);
-                self.set_ng(false);
-                self.set_ns(false);
+                self.set_shareable(0);
             }
             MemoryAttributes::WriteThrough => {
                 self.set_attribute_index(2);
-                self.set_ng(false);
-                self.set_ns(false);
+                self.set_shareable(3);
             }
             MemoryAttributes::Writeback => {
                 self.set_attribute_index(3);
-                self.set_ng(false);
-                self.set_ns(false);
-            }
-            MemoryAttributes::UncacheableExport => {
-                self.set_attribute_index(4);
-                self.set_ng(false);
-                self.set_ns(false);
+                self.set_shareable(3);
             }
             _ => {
-                self.set_attribute_index(0);
-                self.set_ng(true);
-                self.set_ns(false);
+                panic!("Invalid memory attributes: {:?}", attributes);
             }
         }
 
@@ -253,12 +246,23 @@ impl VMSAv864PageDescriptor {
             // TODO: need to check if the system in EL2 or EL1
             self.set_uxn(true);
             self.set_pxn(false);
+        } else if !attributes.contains(MemoryAttributes::ExecuteProtect) {
+            self.set_uxn(false);
+            self.set_pxn(false);
         }
 
         if attributes.contains(MemoryAttributes::ReadOnly) {
             self.set_access_permission(2);
+        } else {
+            self.set_access_permission(0);
         }
-        self.set_access_flag(true);
+
+        if attributes.contains(MemoryAttributes::ReadProtect) {
+            self.set_page_invalid();
+        } else {
+            self.set_descriptor_type(3);
+            self.set_access_flag(true);
+        }
     }
 
     /// return all the memory attributes for the current entry
@@ -273,7 +277,6 @@ impl VMSAv864PageDescriptor {
                 1 => attributes |= MemoryAttributes::WriteCombining,
                 2 => attributes |= MemoryAttributes::WriteThrough,
                 3 => attributes |= MemoryAttributes::Writeback,
-                4 => attributes |= MemoryAttributes::UncacheableExport,
                 _ => attributes |= MemoryAttributes::Uncacheable,
             }
 
@@ -366,6 +369,10 @@ impl VMSAv864PageDescriptor {
             attribute_index, // 3 bits -  AttrIndx 0 = Device memory, 1 = non-cacheable memory, 2 = write-through, 3 = write-back, 4 = write-back.
             descriptor_type, // 2 bits -  1 = Block entry, 3 = Page entry or level 3 block entry, Others = Faulty entry
         )
+    }
+
+    pub fn get_u64(&self) -> u64 {
+        self.0
     }
 }
 

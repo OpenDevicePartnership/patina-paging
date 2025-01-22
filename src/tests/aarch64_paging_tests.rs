@@ -82,13 +82,46 @@ fn test_map_memory_address_simple() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
 
         assert_eq!(page_allocator.pages_allocated(), num_pages);
 
         page_allocator.validate_pages(address, size, attributes);
+    }
+}
+
+#[test]
+fn test_map_memory_address_not_so_simple() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0, size: 0x400000 }];
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let num_pages = num_page_tables_required(address, size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+
+        let pt = AArch64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::Uncacheable;
+        let res = pt.map_memory_region(address, size, attributes);
+        assert!(res.is_ok());
+
+        assert_eq!(page_allocator.pages_allocated(), num_pages);
+
+        // This is expected behavior as the uncacheable attribute is does not support execute per the MMU implementation
+        page_allocator.validate_pages(address, size, attributes | MemoryAttributes::ExecuteProtect);
     }
 }
 
@@ -115,7 +148,7 @@ fn test_map_memory_address_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             if res.is_err() {
                 log::info!("addressW: {:x} size: {:x}", address, size);
@@ -160,7 +193,7 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -201,7 +234,7 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -235,7 +268,7 @@ fn test_map_memory_address_unaligned() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
@@ -266,7 +299,7 @@ fn test_map_memory_address_range_overflow() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
@@ -297,7 +330,7 @@ fn test_map_memory_address_invalid_range() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
@@ -326,7 +359,7 @@ fn test_map_memory_address_zero_size() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
@@ -361,7 +394,7 @@ fn test_unmap_memory_address_simple() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
         assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -394,7 +427,7 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -436,7 +469,7 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -476,7 +509,7 @@ fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -570,7 +603,7 @@ fn test_query_memory_address_simple() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
         assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -603,7 +636,7 @@ fn test_query_memory_address_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -643,7 +676,7 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
@@ -682,7 +715,7 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -757,12 +790,12 @@ fn test_remap_memory_address_simple() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
         assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-        let attributes = MemoryAttributes::ExecuteProtect;
+        let attributes = MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback;
         let res = pt.remap_memory_region(address, size, attributes);
         assert!(res.is_ok());
     }
@@ -791,12 +824,12 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-            let attributes = MemoryAttributes::ExecuteProtect;
+            let attributes = MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback;
             let res = pt.remap_memory_region(address, size, attributes);
             assert!(res.is_ok());
             size <<= 1;
@@ -834,11 +867,11 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
 
-            let attributes = MemoryAttributes::ExecuteProtect;
+            let attributes = MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback;
             let res = pt.remap_memory_region(address, size, attributes);
             assert!(res.is_ok());
             address += address_increment;
@@ -875,12 +908,12 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(pt.is_ok());
             let mut pt = pt.unwrap();
 
-            let attributes = MemoryAttributes::ReadOnly;
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
             let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-            let attributes = MemoryAttributes::ExecuteProtect;
+            let attributes = MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback;
             let res = pt.remap_memory_region(address, size, attributes);
             assert!(res.is_ok());
             address += address_increment;
@@ -909,7 +942,7 @@ fn test_remap_memory_address_unaligned() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ExecuteProtect;
+        let attributes = MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback;
         let res = pt.remap_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
@@ -938,7 +971,7 @@ fn test_remap_memory_address_zero_size() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ExecuteProtect;
+        let attributes = MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback;
         let res = pt.remap_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
@@ -971,7 +1004,7 @@ fn test_from_existing_page_table() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
         assert_eq!(page_allocator.pages_allocated(), num_pages);
@@ -1009,7 +1042,7 @@ fn test_dump_page_tables() {
         assert!(pt.is_ok());
         let mut pt = pt.unwrap();
 
-        let attributes = MemoryAttributes::ReadOnly;
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
 
