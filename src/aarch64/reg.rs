@@ -1,3 +1,4 @@
+use super::structs::PhysicalAddress;
 #[allow(unused_imports)]
 use core::arch::{asm, global_asm};
 
@@ -5,6 +6,7 @@ use core::arch::{asm, global_asm};
 global_asm!(include_str!("replace_table_entry.asm"));
 
 // Use efiapi for the consistent calling convention.
+#[cfg(all(not(test), target_arch = "aarch64"))]
 extern "efiapi" {
     pub fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
 }
@@ -345,5 +347,35 @@ fn clean_and_invalidate_data_entry_by_mva(_mva: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
         asm!("dc civac, {}", in(reg) _mva, options(nostack, preserves_flags));
+    }
+}
+
+// Helper function to check if this page table is active
+pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
+    // Check the TTBR0 register to see if this page table matches
+    // our base
+    let mut _ttbr0: u64 = 0;
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        asm!(
+            "mrs {}, ttbr0_el1",
+            out(reg) _ttbr0
+        );
+    }
+
+    if _ttbr0 != u64::from(page_table_base) {
+        false
+    } else {
+        // Check to see if MMU is enabled
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            let sctlr: u64;
+            asm!(
+                "mrs {}, sctlr_el1",
+                out(reg) sctlr
+            );
+            sctlr & 0x1 == 1
+        }
+        false
     }
 }

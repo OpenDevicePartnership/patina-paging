@@ -172,8 +172,6 @@ impl TestPageAllocator {
                         let page_base: u64 =
                             VMSAv864PageDescriptor::from_bits(table_base).get_canonical_page_table_base().into();
                         let attributes = VMSAv864PageDescriptor::from_bits(table_base).get_attributes();
-                        // Ignore memory cache bits
-                        let attributes = attributes & (!MemoryAttributes::CacheAttributesMask);
                         assert_eq!(page_base, expected_page_base);
                         assert_eq!(attributes, expected_attributes);
                     }

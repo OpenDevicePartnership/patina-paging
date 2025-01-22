@@ -4,12 +4,13 @@ use super::{
     structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
 };
 use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
-use core::{arch::asm, ptr};
+use core::ptr;
 use mu_pi::protocols::cpu_arch::CpuFlushType;
 use uefi_sdk::base::{SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB};
 
 const MAX_VA_BITS: u64 = 48;
 
+#[cfg(all(not(test), target_arch = "aarch64"))]
 extern "C" {
     static replace_live_xlat_entry_size: u32;
 }
@@ -30,8 +31,9 @@ pub struct AArch64PageTable<A: PageAllocator> {
 impl<A: PageAllocator> AArch64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the root page table
-        let function_pointer = reg::replace_live_xlat_entry as *const () as u64;
+        #[cfg(all(not(test), target_arch = "aarch64"))]
         if !reg::is_mmu_enabled() {
+            let function_pointer = reg::replace_live_xlat_entry as *const () as u64;
             reg::cache_range_operation(
                 function_pointer,
                 unsafe { replace_live_xlat_entry_size } as u64,
@@ -122,11 +124,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
         if level == self.lowest_page_level {
             for mut entry in table {
-                if self._is_this_page_table_active() {
+                if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let val = entry.update_shadow_fields(attributes, va.into());
+                    let _val = entry.update_shadow_fields(attributes, va.into());
+                    #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), val, va.into());
+                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
@@ -144,11 +147,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             if !entry.is_valid() {
                 let pa = self.allocate_page()?;
 
-                if self._is_this_page_table_active() {
+                if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let val = entry.update_shadow_fields(attributes, va.into());
+                    let _val = entry.update_shadow_fields(attributes, va.into());
+                    #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), val, pa.into());
+                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, pa.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
@@ -251,11 +255,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     return Err(PtError::NoMapping);
                 }
 
-                if self._is_this_page_table_active() {
+                if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let val = entry.update_shadow_fields(attributes, va.into());
+                    let _val = entry.update_shadow_fields(attributes, va.into());
+                    #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), val, va.into());
+                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
@@ -422,34 +427,6 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             );
 
             va = va.get_next_va(level);
-        }
-    }
-
-    // Private function to check if this page table is active
-    fn _is_this_page_table_active(&self) -> bool {
-        // Check the TTBR0 register to see if this page table matches
-        // our base
-        let ttbr0: u64;
-        unsafe {
-            asm!(
-              "mrs {}, ttbr0_el1",
-              out(reg) ttbr0
-            );
-        }
-
-        if ttbr0 != u64::from(self.base) {
-            false
-        } else {
-            // Check to see if MMU is enabled
-            let sctlr: u64;
-            unsafe {
-                asm!(
-                  "mrs {}, sctlr_el1",
-                  out(reg) sctlr
-                );
-            }
-
-            sctlr & 0x1 == 1
         }
     }
 
