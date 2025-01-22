@@ -1,3 +1,4 @@
+#[allow(unused_imports)]
 use core::arch::{asm, global_asm};
 
 #[cfg(all(not(test), target_arch = "aarch64"))]
@@ -42,36 +43,36 @@ pub fn get_phys_addr_bits() -> u64 {
 }
 
 pub fn get_current_el() -> u64 {
-    let mut current_el: u64 = 0;
+    let mut _current_el: u64 = 0;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
         asm!(
         "mrs {}, CurrentEL",
-        out(reg) current_el
+        out(reg) _current_el
         );
     }
 
-    match current_el {
+    match _current_el {
         0x0C => 3,
         0x08 => 2,
         0x04 => 1,
-        _ => panic!("Invalid current EL {}", current_el),
+        _ => panic!("Invalid current EL {}", _current_el),
     }
 }
 
-pub fn set_tcr(tcr: u64) {
-    let current_el = get_current_el();
+pub fn set_tcr(_tcr: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
         if current_el == 2 {
             asm!(
             "msr tcr_el2, {}",
-            in(reg) tcr
+            in(reg) _tcr
             );
         } else if current_el == 1 {
             asm!(
             "msr tcr_el1, {}",
-            in(reg) tcr
+            in(reg) _tcr
             );
         } else {
             panic!("Invalid current EL {}", current_el);
@@ -80,19 +81,19 @@ pub fn set_tcr(tcr: u64) {
     }
 }
 
-pub fn set_ttbr0(ttbr0: u64) {
-    let current_el = get_current_el();
+pub fn set_ttbr0(_ttbr0: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
         if current_el == 2 {
             asm!(
               "msr ttbr0_el2, {}",
-              in(reg) ttbr0
+              in(reg) _ttbr0
             );
         } else if current_el == 1 {
             asm!(
             "msr ttbr0_el1, {}",
-            in(reg) ttbr0
+            in(reg) _ttbr0
             );
         } else {
             panic!("Invalid current EL {}", current_el);
@@ -101,19 +102,19 @@ pub fn set_ttbr0(ttbr0: u64) {
     }
 }
 
-pub fn set_mair(mair: u64) {
-    let current_el = get_current_el();
+pub fn set_mair(_mair: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
         if current_el == 2 {
             asm!(
               "msr mair_el2, {}",
-              in(reg) mair
+              in(reg) _mair
             );
         } else if current_el == 1 {
             asm!(
             "msr mair_el1, {}",
-            in(reg) mair
+            in(reg) _mair
             );
         } else {
             panic!("Invalid current EL {}", current_el);
@@ -123,22 +124,22 @@ pub fn set_mair(mair: u64) {
 }
 
 pub fn is_mmu_enabled() -> bool {
-    let mut sctlr: u64 = 0;
+    let mut _sctlr: u64 = 0;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
         asm!(
           "mrs {}, sctlr_el1",
-          out(reg) sctlr
+          out(reg) _sctlr
         );
     }
 
-    sctlr & 0x1 == 1
+    _sctlr & 0x1 == 1
 }
 
 pub fn enable_mmu() {
-    let current_el = get_current_el();
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
         if current_el == 2 {
             asm!(
                 "mrs x0, sctlr_el2",
@@ -166,18 +167,18 @@ pub fn enable_mmu() {
     }
 }
 
-pub fn set_stack_alignment_check(enable: bool) {
-    let current_el = get_current_el();
+pub fn set_stack_alignment_check(_enable: bool) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
         if current_el == 2 {
-            if enable {
+            if _enable {
                 asm!("mrs x0, sctlr_el2", "orr x0, x0, #8", "msr sctlr_el2, x0", options(nostack));
             } else {
                 asm!("mrs x0, sctlr_el2", "bic x0, x0, #8", "msr sctlr_el2, x0", options(nostack));
             }
         } else if current_el == 1 {
-            if enable {
+            if _enable {
                 asm!("mrs x0, sctlr_el1", "orr x0, x0, #8", "msr sctlr_el1, x0", options(nostack));
             } else {
                 asm!("mrs x0, sctlr_el1", "bic x0, x0, #8", "msr sctlr_el1, x0", options(nostack));
@@ -190,18 +191,18 @@ pub fn set_stack_alignment_check(enable: bool) {
     }
 }
 
-pub fn set_alignment_check(enable: bool) {
-    let current_el = get_current_el();
+pub fn set_alignment_check(_enable: bool) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
         if current_el == 2 {
-            if enable {
+            if _enable {
                 asm!("mrs x0, sctlr_el2", "orr x0, x0, #2", "msr sctlr_el2, x0", options(nostack));
             } else {
                 asm!("mrs x0, sctlr_el2", "bic x0, x0, #2", "msr sctlr_el2, x0", options(nostack));
             }
         } else if current_el == 1 {
-            if enable {
+            if _enable {
                 asm!("mrs x0, sctlr_el1", "orr x0, x0, #2", "msr sctlr_el1, x0", options(nostack));
             } else {
                 asm!("mrs x0, sctlr_el1", "bic x0, x0, #2", "msr sctlr_el1, x0", options(nostack));
@@ -215,9 +216,9 @@ pub fn set_alignment_check(enable: bool) {
 }
 
 pub fn enable_instruction_cache() {
-    let current_el = get_current_el();
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
         if current_el == 2 {
             asm!("mrs x0, sctlr_el2", "orr x0, x0, #0x1000", "msr sctlr_el2, x0", options(nostack));
         } else if current_el == 1 {
@@ -231,9 +232,9 @@ pub fn enable_instruction_cache() {
 }
 
 pub fn enable_data_cache() {
-    let current_el = get_current_el();
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
         if current_el == 2 {
             asm!("mrs x0, sctlr_el2", "orr x0, x0, #0x4", "msr sctlr_el2, x0", options(nostack));
         } else if current_el == 1 {
@@ -246,11 +247,11 @@ pub fn enable_data_cache() {
     }
 }
 
-pub fn update_translation_table_entry(translation_table_entry: u64, mva: u64) {
-    let current_el = get_current_el();
-    let ls_mva = mva << 12;
+pub fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
+        let current_el = get_current_el();
+        let ls_mva = _mva << 12;
         let mut sctlr: u64;
         asm!("dsb     nshst", options(nostack));
         if current_el == 2 {
@@ -275,7 +276,7 @@ pub fn update_translation_table_entry(translation_table_entry: u64, mva: u64) {
         if sctlr & 1 == 0 {
             asm!(
                 "dc ivac, {}",
-                in(reg) translation_table_entry,
+                in(reg) _translation_table_entry,
                 options(nostack)
             );
         }

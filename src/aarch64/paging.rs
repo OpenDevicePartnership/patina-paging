@@ -714,5 +714,5 @@ pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: Pag
 }
 
 fn get_root_table_count(t0sz: u64) -> u64 {
-    512 >> (t0sz - 16) % 9
+    512 >> ((t0sz - 16) % 9)
 }
