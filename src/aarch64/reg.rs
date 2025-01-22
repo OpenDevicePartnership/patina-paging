@@ -374,7 +374,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
                 "mrs {}, sctlr_el1",
                 out(reg) sctlr
             );
-            sctlr & 0x1 == 1
+            return sctlr & 0x1 == 1;
         }
         false
     }
