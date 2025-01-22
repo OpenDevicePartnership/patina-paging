@@ -123,7 +123,7 @@ pub fn set_mair(mair: u64) {
 }
 
 pub fn is_mmu_enabled() -> bool {
-    let sctlr: u64 = 0;
+    let mut sctlr: u64 = 0;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
         asm!(
