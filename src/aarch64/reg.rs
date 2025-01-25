@@ -129,10 +129,20 @@ pub fn is_mmu_enabled() -> bool {
     let mut _sctlr: u64 = 0;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        asm!(
-          "mrs {}, sctlr_el1",
-          out(reg) _sctlr
-        );
+        let current_el = get_current_el();
+        if current_el == 2 {
+            asm!(
+              "mrs {}, sctlr_el2",
+              out(reg) _sctlr
+            );
+        } else if current_el == 1 {
+            asm!(
+              "mrs {}, sctlr_el1",
+              out(reg) _sctlr
+            );
+        } else {
+            panic!("Invalid current EL {}", current_el);
+        }
     }
 
     _sctlr & 0x1 == 1
@@ -355,12 +365,22 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
     // Check the TTBR0 register to see if this page table matches
     // our base
     let mut _ttbr0: u64 = 0;
+    let _current_el = get_current_el();
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        asm!(
-            "mrs {}, ttbr0_el1",
-            out(reg) _ttbr0
-        );
+        if _current_el == 2 {
+            asm!(
+                "mrs {}, ttbr0_el2",
+                out(reg) _ttbr0
+            );
+        } else if _current_el == 1 {
+            asm!(
+                "mrs {}, ttbr0_el1",
+                out(reg) _ttbr0
+            );
+        } else {
+            panic!("Invalid current EL {}", _current_el);
+        }
     }
 
     if _ttbr0 != u64::from(page_table_base) {
@@ -370,10 +390,19 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
         #[cfg(all(not(test), target_arch = "aarch64"))]
         unsafe {
             let sctlr: u64;
-            asm!(
-                "mrs {}, sctlr_el1",
-                out(reg) sctlr
-            );
+            if _current_el == 2 {
+                asm!(
+                    "mrs {}, sctlr_el2",
+                    out(reg) sctlr
+                );
+            } else if _current_el == 1 {
+                asm!(
+                    "mrs {}, sctlr_el1",
+                    out(reg) sctlr
+                );
+            } else {
+                panic!("Invalid current EL {}", _current_el);
+            }
             return sctlr & 0x1 == 1;
         }
         false
