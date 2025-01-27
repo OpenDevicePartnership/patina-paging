@@ -45,7 +45,8 @@ pub fn get_phys_addr_bits() -> u64 {
 }
 
 pub fn get_current_el() -> u64 {
-    let mut _current_el: u64 = 0;
+    // Default to EL2
+    let mut _current_el: u64 = 8;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
         asm!(
@@ -129,10 +130,11 @@ pub fn is_mmu_enabled() -> bool {
     let mut _sctlr: u64 = 0;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        asm!(
-          "mrs {}, sctlr_el1",
-          out(reg) _sctlr
-        );
+        match get_current_el() {
+            2 => asm!("mrs {}, sctlr_el2", out(reg) _sctlr),
+            1 => asm!("mrs {}, sctlr_el1", out(reg) _sctlr),
+            invalid_el => panic!("Invalid current EL {}", invalid_el),
+        }
     }
 
     _sctlr & 0x1 == 1
@@ -355,12 +357,14 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
     // Check the TTBR0 register to see if this page table matches
     // our base
     let mut _ttbr0: u64 = 0;
+    let _current_el = get_current_el();
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        asm!(
-            "mrs {}, ttbr0_el1",
-            out(reg) _ttbr0
-        );
+        match _current_el {
+            2 => asm!("mrs {}, ttbr0_el2", out(reg) _ttbr0),
+            1 => asm!("mrs {}, ttbr0_el1", out(reg) _ttbr0),
+            invalid_el => panic!("Invalid current EL {}", invalid_el),
+        }
     }
 
     if _ttbr0 != u64::from(page_table_base) {
@@ -370,10 +374,11 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
         #[cfg(all(not(test), target_arch = "aarch64"))]
         unsafe {
             let sctlr: u64;
-            asm!(
-                "mrs {}, sctlr_el1",
-                out(reg) sctlr
-            );
+            match _current_el {
+                2 => asm!("mrs {}, sctlr_el2", out(reg) sctlr),
+                1 => asm!("mrs {}, sctlr_el1", out(reg) sctlr),
+                invalid_el => panic!("Invalid current EL {}", invalid_el),
+            }
             return sctlr & 0x1 == 1;
         }
         false
