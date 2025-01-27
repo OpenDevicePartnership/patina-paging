@@ -45,7 +45,8 @@ pub fn get_phys_addr_bits() -> u64 {
 }
 
 pub fn get_current_el() -> u64 {
-    let mut _current_el: u64 = 0;
+    // Default to EL2
+    let mut _current_el: u64 = 8;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
         asm!(
