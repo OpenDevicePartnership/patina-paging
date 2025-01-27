@@ -129,19 +129,10 @@ pub fn is_mmu_enabled() -> bool {
     let mut _sctlr: u64 = 0;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            asm!(
-              "mrs {}, sctlr_el2",
-              out(reg) _sctlr
-            );
-        } else if current_el == 1 {
-            asm!(
-              "mrs {}, sctlr_el1",
-              out(reg) _sctlr
-            );
-        } else {
-            panic!("Invalid current EL {}", current_el);
+        match get_current_el() {
+            2 => asm!("mrs {}, sctlr_el2", out(reg) _sctlr),
+            1 => asm!("mrs {}, sctlr_el1", out(reg) _sctlr),
+            _ => panic!("Invalid current EL {}", current_el),
         }
     }
 
@@ -368,18 +359,10 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
     let _current_el = get_current_el();
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        if _current_el == 2 {
-            asm!(
-                "mrs {}, ttbr0_el2",
-                out(reg) _ttbr0
-            );
-        } else if _current_el == 1 {
-            asm!(
-                "mrs {}, ttbr0_el1",
-                out(reg) _ttbr0
-            );
-        } else {
-            panic!("Invalid current EL {}", _current_el);
+        match _current_el {
+            2 => asm!("mrs {}, ttbr0_el2", out(reg) _ttbr0),
+            1 => asm!("mrs {}, ttbr0_el1", out(reg) _ttbr0),
+            _ => panic!("Invalid current EL {}", _current_el),
         }
     }
 
@@ -390,18 +373,10 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
         #[cfg(all(not(test), target_arch = "aarch64"))]
         unsafe {
             let sctlr: u64;
-            if _current_el == 2 {
-                asm!(
-                    "mrs {}, sctlr_el2",
-                    out(reg) sctlr
-                );
-            } else if _current_el == 1 {
-                asm!(
-                    "mrs {}, sctlr_el1",
-                    out(reg) sctlr
-                );
-            } else {
-                panic!("Invalid current EL {}", _current_el);
+            match _current_el {
+                2 => asm!("mrs {}, sctlr_el2", out(reg) sctlr),
+                1 => asm!("mrs {}, sctlr_el1", out(reg) sctlr),
+                _ => panic!("Invalid current EL {}", _current_el),
             }
             return sctlr & 0x1 == 1;
         }
