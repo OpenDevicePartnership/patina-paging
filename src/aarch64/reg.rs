@@ -363,7 +363,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
         match _current_el {
             2 => asm!("mrs {}, ttbr0_el2", out(reg) _ttbr0),
             1 => asm!("mrs {}, ttbr0_el1", out(reg) _ttbr0),
-            invalid_el  => panic!("Invalid current EL {}", invalid_el),
+            invalid_el => panic!("Invalid current EL {}", invalid_el),
         }
     }
 
