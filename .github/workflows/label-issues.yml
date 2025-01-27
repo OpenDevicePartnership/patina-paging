@@ -29,4 +29,4 @@ jobs:
       contents: read
       pull-requests: write
 
-    uses: pop-project/uefi-dxe-core/.github/workflows/Labeler.yml@main
+    uses: OpenDevicePartnership/uefi-dxe-core/.github/workflows/Labeler.yml@main

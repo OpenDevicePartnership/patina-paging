@@ -16,7 +16,7 @@ on:
 jobs:
   release:
     name: Release
-    uses: pop-project/uefi-dxe-core/.github/workflows/ReleaseWorkflow.yml@main
+    uses: OpenDevicePartnership/uefi-dxe-core/.github/workflows/ReleaseWorkflow.yml@main
     secrets: inherit
     permissions:
       contents: write
