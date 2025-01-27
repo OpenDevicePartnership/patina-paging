@@ -133,7 +133,7 @@ pub fn is_mmu_enabled() -> bool {
         match get_current_el() {
             2 => asm!("mrs {}, sctlr_el2", out(reg) _sctlr),
             1 => asm!("mrs {}, sctlr_el1", out(reg) _sctlr),
-            _ => panic!("Invalid current EL {}", current_el),
+            invalid_el => panic!("Invalid current EL {}", invalid_el),
         }
     }
 
@@ -363,7 +363,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
         match _current_el {
             2 => asm!("mrs {}, ttbr0_el2", out(reg) _ttbr0),
             1 => asm!("mrs {}, ttbr0_el1", out(reg) _ttbr0),
-            _ => panic!("Invalid current EL {}", _current_el),
+            invalid_el  => panic!("Invalid current EL {}", invalid_el),
         }
     }
 
@@ -377,7 +377,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
             match _current_el {
                 2 => asm!("mrs {}, sctlr_el2", out(reg) sctlr),
                 1 => asm!("mrs {}, sctlr_el1", out(reg) sctlr),
-                _ => panic!("Invalid current EL {}", _current_el),
+                invalid_el => panic!("Invalid current EL {}", invalid_el),
             }
             return sctlr & 0x1 == 1;
         }
