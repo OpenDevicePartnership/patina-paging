@@ -425,7 +425,7 @@ impl fmt::Display for PageLevel {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(Debug,PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
 pub struct VirtualAddress(u64);
 impl VirtualAddress {
     pub fn new(va: u64) -> Self {
@@ -523,7 +523,7 @@ impl Sub<u64> for VirtualAddress {
 
 const FRAME_SIZE_2MB: u64 = 0x200000; // 2MB
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct PhysicalAddress(u64);
 impl PhysicalAddress {
     pub fn new(va: u64) -> Self {
@@ -563,4 +563,13 @@ impl From<VirtualAddress> for PhysicalAddress {
     fn from(va: VirtualAddress) -> Self {
         Self(va.0)
     }
+}
+
+impl Add<PhysicalAddress> for PhysicalAddress {
+    type Output = Self;
+
+    fn add(self, rhs: PhysicalAddress) -> Self::Output {
+        PhysicalAddress(self.0.checked_add(rhs.0).expect("overflow ocurred"))
+    }
+
 }

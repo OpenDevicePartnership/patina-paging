@@ -49,6 +49,8 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             reg::cache_range_operation(base, PAGE_SIZE, CpuFlushType::EFiCpuFlushTypeInvalidate);
         }
 
+        log::info!("AArch64PageTable::new():{} {base:x?}", line!());
+
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
         // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
@@ -123,44 +125,56 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
-
+        log::info!("map_memory_region_internal:{} start_va: {start_va:x?} end_va: {end_va:x?} level: {level:?} base: {base:x?}, attributes: {attributes:?}", line!());
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
         if level == self.lowest_page_level {
             for mut entry in table {
                 if reg::is_this_page_table_active(self.base) {
+                    log::info!("map_memory_region_internal:{}", line!());
                     // Need to do the heavy duty break-before-make sequence
                     let _val = entry.update_shadow_fields(attributes, va.into());
+                    log::info!("map_memory_region_internal:{} entry {:x?} val {:x?} va {:x?}", line!(), entry.raw_address(), _val, va);
+                    log::info!("current val: {:x?}", unsafe {*(entry.raw_address() as *const u64)});
+                    log::info!("map_memory_region_internal:{}", line!());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, va.into());
+                        reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
+                    log::info!("map_memory_region_internal:{}", line!());
                 } else {
+                    log::info!("map_memory_region_internal:{}", line!());
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, va.into())?;
-                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), va.into());
+                    reg::update_translation_table_entry(entry.raw_address(), va.into());
+                    log::info!("map_memory_region_internal:{}", line!());
                 }
 
                 // get max va addressable by current entry
                 va = va.get_next_va(level);
             }
+            log::info!("map_memory_region_internal:{}", line!());
             return Ok(());
         }
-
+        log::info!("map_memory_region_internal:{}", line!());
         for mut entry in table {
             if !entry.is_valid() {
                 let pa = self.allocate_page()?;
 
                 if reg::is_this_page_table_active(self.base) {
+                    log::info!("map_memory_region_internal:{}", line!());
                     // Need to do the heavy duty break-before-make sequence
                     let _val = entry.update_shadow_fields(attributes, va.into());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, pa.into());
+                        reg::replace_live_xlat_entry(entry.raw_address(), _val, pa.into());
                     }
+                    log::info!("map_memory_region_internal:{}", line!());
                 } else {
+                    log::info!("map_memory_region_internal:{}", line!());
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, pa)?;
-                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), pa.into());
+                    reg::update_translation_table_entry(entry.raw_address(), pa.into());
+                    log::info!("map_memory_region_internal:{}", line!());
                 }
             }
             let next_base = entry.get_canonical_page_table_base();
@@ -186,7 +200,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
             va = va.get_next_va(level);
         }
-
+        log::info!("map_memory_region_internal:{}", line!());
         Ok(())
     }
 
@@ -257,18 +271,21 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 if !entry.is_valid() {
                     return Err(PtError::NoMapping);
                 }
-
                 if reg::is_this_page_table_active(self.base) {
+                    log::info!("remap_memory_region_internal:{}", line!());
                     // Need to do the heavy duty break-before-make sequence
                     let _val = entry.update_shadow_fields(attributes, va.into());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, va.into());
+                        reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
+                    log::info!("remap_memory_region_internal:{}", line!());
                 } else {
+                    log::info!("remap_memory_region_internal:{}", line!());
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, va.into())?;
-                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), va.into());
+                    reg::update_translation_table_entry(entry.raw_address(), va.into());
+                    log::info!("remap_memory_region_internal:{}", line!());
                 }
 
                 // get max va addressable by current entry
@@ -305,7 +322,6 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
             va = va.get_next_va(level);
         }
-
         Ok(())
     }
 
@@ -594,6 +610,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     }
 
     fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
+
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
