@@ -1,3 +1,5 @@
+use core::ptr::addr_of;
+
 use super::structs::{
     PageLevel, PhysicalAddress, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE,
 };
@@ -162,6 +164,20 @@ impl AArch64PageTableEntry {
             PageLevel::Lvl3 => {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
                 entry.get_canonical_page_table_base()
+            }
+            _ => panic!("Invalid page level"),
+        }
+    }
+
+    pub fn raw_address(&self) -> u64 {
+        match self.level {
+            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
+                let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
+                entry as *mut _ as u64
+            }
+            PageLevel::Lvl3 => {
+                let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
+                entry as *mut _ as u64
             }
             _ => panic!("Invalid page level"),
         }
