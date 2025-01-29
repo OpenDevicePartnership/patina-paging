@@ -132,12 +132,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     let _val = entry.update_shadow_fields(attributes, va.into());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, va.into());
+                        reg::replace_live_xlat_entry_v2(entry.raw_address(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, va.into())?;
-                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), va.into());
+                    reg::update_translation_table_entry(entry.raw_address(), va.into());
                 }
 
                 // get max va addressable by current entry
@@ -152,15 +152,15 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let _val = entry.update_shadow_fields(attributes, va.into());
+                    let _val = entry.update_shadow_fields(attributes, pa.into());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, pa.into());
+                        reg::replace_live_xlat_entry_v2(entry.raw_address(), _val, pa.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, pa)?;
-                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), pa.into());
+                    reg::update_translation_table_entry(entry.raw_address(), pa.into());
                 }
             }
             let next_base = entry.get_canonical_page_table_base();
@@ -263,12 +263,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     let _val = entry.update_shadow_fields(attributes, va.into());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry(entry.get_canonical_page_table_base().into(), _val, va.into());
+                        reg::replace_live_xlat_entry_v2(entry.raw_address(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, va.into())?;
-                    reg::update_translation_table_entry(entry.get_canonical_page_table_base().into(), va.into());
+                    reg::update_translation_table_entry(entry.raw_address(), va.into());
                 }
 
                 // get max va addressable by current entry
