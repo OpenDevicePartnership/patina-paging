@@ -132,7 +132,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     let _val = entry.update_shadow_fields(attributes, va.into());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry_v2(entry.raw_address(), _val, va.into());
+                        reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
@@ -155,7 +155,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     let _val = entry.update_shadow_fields(attributes, pa.into());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry_v2(entry.raw_address(), _val, pa.into());
+                        reg::replace_live_xlat_entry(entry.raw_address(), _val, pa.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
@@ -263,7 +263,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     let _val = entry.update_shadow_fields(attributes, va.into());
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
-                        reg::replace_live_xlat_entry_v2(entry.raw_address(), _val, va.into());
+                        reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
