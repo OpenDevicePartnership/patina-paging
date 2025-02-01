@@ -1,5 +1,3 @@
-use core::ptr::addr_of;
-
 use super::structs::{
     PageLevel, PhysicalAddress, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE,
 };

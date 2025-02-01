@@ -152,7 +152,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let _val = entry.update_shadow_fields(attributes, pa.into());
+                    let _val = entry.update_shadow_fields(attributes, pa);
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
                         reg::replace_live_xlat_entry(entry.raw_address(), _val, pa.into());
