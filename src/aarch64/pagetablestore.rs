@@ -167,6 +167,20 @@ impl AArch64PageTableEntry {
         }
     }
 
+    pub fn raw_address(&self) -> u64 {
+        match self.level {
+            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
+                let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
+                entry as *mut _ as u64
+            }
+            PageLevel::Lvl3 => {
+                let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
+                entry as *mut _ as u64
+            }
+            _ => panic!("Invalid page level"),
+        }
+    }
+
     pub fn get_attributes(&self) -> MemoryAttributes {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
