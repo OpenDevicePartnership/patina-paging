@@ -18,35 +18,38 @@ pub(crate) const FRAME_SIZE_4KB: u64 = 0x1000; // 4KB
 pub(crate) const PAGE_SIZE: u64 = 0x1000; // 4KB
 pub(crate) const INDEX_MASK: u64 = 0x1FF;
 
-const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_SHIFT: u64 = 12u64; // lower 12 bits for alignment
-const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_MASK: u64 = 0x000f_ffff_ffff_f000u64; // 40 bit - lower 12 bits for alignment
-
-const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_SHIFT: u64 = 2u64; // bit 51:50
-const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK: u64 = 0x0030_0000_0000_0000u64; // 2 bits - bit 51:50
+const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
 
 fn is_4kb_aligned(addr: u64) -> bool {
     (addr & (FRAME_SIZE_4KB - 1)) == 0
 }
 
-// Below is the implementation of the block descriptor for AArch64 systems.
-// The bitfields are defined following the VMSAv8-64, stage 1 translation
-// descriptor format.
+// Below is a common definition for the AArch64 VMXAv8-64 stage-1 decriptors. This uses
+// the common understanding of bits accross all levels/types to simplify translation
+// as well as to allow for recursive translation.
 #[rustfmt::skip]
 #[bitfield(u64)]
-pub struct VMSAv864TableDescriptor {
-    pub valid_desc: bool,          // 1 bit -  Valid descriptor
-    pub table_desc: bool,          // 1 bit -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
-    #[bits(6)]
-    pub ignored0: u8,              // 6 bits -  Not used.
+pub struct AArch64Descriptor {
+    pub valid: bool,              // 1 bit -  Valid descriptor
+    pub table_desc: bool,         // 1 bit -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
+    #[bits(3)]
+    pub attribute_index: u8,      // 3 bits -  Used for caching attributes
+    pub non_secure: bool,         // 1 bit  -  Non-secure
     #[bits(2)]
-    pub nlta_upper: u8,            // 2 bits -  NTLA for 4KB or 16KB granule
-    pub access_flag: bool,         // 1 bit  -  When hardware managed access flag is enabled
-    pub ignored1: bool,            // 1 bit  -  Not used.
-    #[bits(40)]
-    pub nlta_lower: u64,           // 40 bits - Address to the next level table descriptor, depending on the granule.
-    pub ignored2: bool,            // 1 bit  -  Not used with PnCH being 0.
-    #[bits(6)]
-    pub ignored3: u8,              // 6 bits -  Not used.
+    pub access_permission: u8,    // 2 bits -  Access permissions
+    #[bits(2)]
+    pub shareable: u8,            // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
+    pub access_flag: bool,        // 1 bit  -  Access flag
+    pub not_global: bool,         // 1 bit  -  Not global
+    #[bits(38)]
+    pub page_frame_number: u64,   // 38 bits - Page frame number
+    pub guarded_page: bool,       // 1 bit  -  Guarded page
+    pub dirty_bit_modifier: bool, // 1 bit  -  DBM
+    pub contiguous: bool,         // 1 bit  -  Contiguous
+    pub pxn: bool,                // 1 bit  -  Privileged execute never
+    pub uxn: bool,                // 1 bit  -  User execute never
+    #[bits(4)]
+    pub reserved0: u8,            // 4 bits -  Reserved for software use
     pub pxn_table: bool,           // 1 bit  -  Hierarchical permissions.
     pub uxn_table: bool,           // 1 bit  -  Hierarchical permissions.
     #[bits(2)]
@@ -54,15 +57,14 @@ pub struct VMSAv864TableDescriptor {
     pub ns_table: bool,            // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
 }
 
-impl VMSAv864TableDescriptor {
+impl AArch64Descriptor {
     pub fn is_valid_table(&self) -> bool {
-        self.valid_desc() && self.table_desc()
+        self.valid() && self.table_desc()
     }
 
     pub fn get_canonical_page_table_base(&self) -> PhysicalAddress {
-        let nlta_lower = self.nlta_lower() << PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_SHIFT;
-        let nlta_upper = (self.nlta_upper() as u64) << PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_SHIFT;
-        PhysicalAddress(nlta_lower | nlta_upper)
+        // This logic will need to be specialized if 16Kb or 64Kb granules are used.
+        (self.page_frame_number() << PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT).into()
     }
 
     /// update all the fields and table base address
@@ -73,15 +75,12 @@ impl VMSAv864TableDescriptor {
                 panic!("allocated page is not 4k aligned {:X}", next_level_table_base);
             }
 
-            let nlta_lower = (next_level_table_base & PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_MASK)
-                >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_LOWER_SHIFT;
-            let nlta_upper = ((next_level_table_base & PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_MASK)
-                >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_UPPER_SHIFT) as u8;
+            let pfn = next_level_table_base >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;
+            self.set_page_frame_number(pfn);
 
-            self.set_nlta_lower(nlta_lower);
-            self.set_nlta_upper(nlta_upper);
+            // TODO this needs to change for large pages.
             self.set_table_desc(true);
-            self.set_valid_desc(true);
+            self.set_valid(true);
         }
 
         // update the memory attributes irrespective of new or old page table
@@ -89,131 +88,6 @@ impl VMSAv864TableDescriptor {
 
         // TODO: need to flush the cache if operating on the active page table
         Ok(())
-    }
-
-    /// return all the memory attributes for the current entry
-    fn set_attributes(&mut self, _attributes: MemoryAttributes) {
-        // For table entries, we don't need to set the memory attributes
-        // Instead, we need to set the most permissive attributes to allow page
-        // entries to drive the attributes.
-        self.set_ap_table(0);
-        self.set_pxn_table(false);
-        self.set_uxn_table(false);
-    }
-
-    /// return all the memory attributes for the current entry
-    pub fn get_attributes(&mut self) -> MemoryAttributes {
-        let mut attributes = MemoryAttributes::empty();
-
-        if !self.is_valid_table() {
-            attributes |= MemoryAttributes::ReadProtect;
-        }
-
-        if (self.ap_table() == 0b10) | (self.ap_table() == 0b11) {
-            attributes |= MemoryAttributes::ReadOnly;
-        }
-
-        if self.uxn_table() | self.pxn_table() {
-            // TODO: need to check if the system in EL2 or EL1
-            attributes |= MemoryAttributes::ExecuteProtect;
-        }
-
-        attributes
-    }
-
-    pub fn set_table_invalid(&mut self) {
-        self.set_valid_desc(false);
-    }
-
-    pub fn dump_entry(&self) -> String {
-        let valid_desc = self.valid_desc() as u64;
-        let table_desc = self.table_desc() as u64;
-        let ignored0 = self.ignored0() as u64;
-        let nlta_upper = self.nlta_upper() as u64;
-        let access_flag = self.access_flag() as u64;
-        let ignored1 = self.ignored1() as u64;
-        let nlta_lower = self.nlta_lower();
-        let ignored2 = self.ignored2() as u64;
-        let ignored3 = self.ignored3() as u64;
-        let pxn_table = self.pxn_table() as u64;
-        let uxn_table = self.uxn_table() as u64;
-        let ap_table = self.ap_table() as u64;
-        let ns_table = self.ns_table() as u64;
-
-        format!(
-            "|{:01b}|{:02b}|{:01b}|{:01b}|{:06b}|{:01b}|{:040b}|{:01b}|{:01b}|{:02b}|{:06b}|{:01b}|{:01b}|",
-            ns_table,    // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
-            ap_table,    // 2 bits -  Hierarchical permissions.
-            uxn_table,   // 1 bit  -  Hierarchical permissions.
-            pxn_table,   // 1 bit  -  Hierarchical permissions.
-            ignored3,    // 6 bits -  Not used.
-            ignored2,    // 1 bit  -  Not used with PnCH being 0.
-            nlta_lower,  // 40 bits - Address to the next level table descriptor, depending on the granule.
-            ignored1,    // 1 bit  -  Not used.
-            access_flag, // 1 bit  -  When hardware managed access flag is enabled
-            nlta_upper,  // 2 bits -  NTLA for 4KB or 16KB granule
-            ignored0,    // 6 bits -  Not used.
-            table_desc,  // 1 bit -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
-            valid_desc,  // 1 bit -  Valid descriptor
-        )
-    }
-
-    pub fn get_u64(&self) -> u64 {
-        self.0
-    }
-}
-
-// Below is the implementation of the block descriptor for AArch64 systems.
-// The bitfields are defined following the VMSAv8-64, stage 1 translation
-// descriptor format.
-#[rustfmt::skip]
-#[bitfield(u64)]
-pub struct VMSAv864PageDescriptor {
-    #[bits(2)]
-    pub descriptor_type: u8,      // 2 bits -  1 = Block entry, 3 = Page entry or level 3 block entry, Others = Faulty entry
-    #[bits(3)]
-    pub attribute_index: u8,      // 3 bits -  AttrIndx 0 = Device memory, 1 = non-cacheable memory, 2 = write-through, 3 = write-back, 4 = write-back.
-    pub ns: bool,                 // 1 bit  -  NS
-    #[bits(2)]
-    pub access_permission: u8,    // 2 bits -  AP
-    #[bits(2)]
-    pub shareable: u8,            // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
-    pub access_flag: bool,        // 1 bit  -  Access flag
-    pub ng: bool,                 // 1 bit  -  Not global
-    #[bits(9)]
-    pub level3_index: u16,        // 9 bits -  Level 3 index, that points to a 4KB block
-    #[bits(9)]
-    pub level2_index: u16,        // 9 bits -  Level 2 index, that points to L3 table or a 2MB block
-    #[bits(9)]
-    pub level1_index: u16,        // 9 bits -  Level 1 index, that points to L2 table or a 1GB block
-    #[bits(9)]
-    pub level0_index: u16,        // 9 bits -  Level 0 index, that points to L1 table or a 512GB block
-    #[bits(2)]
-    pub reserved0: u8,            // 2 bits -  Not used
-    pub guarded_page: bool,       // 1 bit  -  GP
-    pub dirty_bit_modifier: bool, // 1 bit  -  DBM
-    pub contiguous: bool,         // 1 bit  -  Contiguous
-    pub pxn: bool,                // 1 bit  -  PXN Execution permissions
-    pub uxn: bool,                // 1 bit  -  UXN Execution permissions
-    #[bits(4)]
-    pub reserved1: u8,            // 3 bits -  Reserved for software use
-    #[bits(4)]
-    pub imp_def: u8,              // 4 bits -  Implementation defined
-    pub ignored: bool,            // 1 bit  -  Not used outside of Realm translation regimes
-}
-
-impl VMSAv864PageDescriptor {
-    pub fn is_valid_page(&self) -> bool {
-        self.descriptor_type() == 3
-    }
-
-    pub fn get_canonical_page_table_base(&self) -> PhysicalAddress {
-        let level3_index = (self.level3_index() as u64) << LEVEL3_START_BIT;
-        let level2_index = (self.level2_index() as u64) << LEVEL2_START_BIT;
-        let level1_index = (self.level1_index() as u64) << LEVEL1_START_BIT;
-        let level0_index = (self.level0_index() as u64) << LEVEL0_START_BIT;
-
-        PhysicalAddress(level3_index | level2_index | level1_index | level0_index)
     }
 
     fn set_attributes(&mut self, attributes: MemoryAttributes) {
@@ -240,9 +114,7 @@ impl VMSAv864PageDescriptor {
             }
         }
 
-        if attributes.contains(MemoryAttributes::ExecuteProtect)
-            || (attributes & MemoryAttributes::CacheAttributesMask == MemoryAttributes::Uncacheable)
-        {
+        if attributes.contains(MemoryAttributes::ExecuteProtect) {
             // TODO: need to check if the system in EL2 or EL1
             self.set_uxn(true);
             self.set_pxn(false);
@@ -258,18 +130,19 @@ impl VMSAv864PageDescriptor {
         }
 
         if attributes.contains(MemoryAttributes::ReadProtect) {
-            self.set_page_invalid();
+            self.set_valid(false);
         } else {
-            self.set_descriptor_type(3);
-            self.set_access_flag(true);
+            // TODO: this needs to be updated for large pages.
+            self.set_table_desc(true);
+            self.set_valid(true);
         }
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> MemoryAttributes {
+    pub fn get_attributes(&mut self) -> MemoryAttributes {
         let mut attributes = MemoryAttributes::empty();
 
-        if !self.is_valid_page() {
+        if !self.valid() {
             attributes = MemoryAttributes::ReadProtect;
         } else {
             match self.attribute_index() {
@@ -293,81 +166,48 @@ impl VMSAv864PageDescriptor {
         attributes
     }
 
-    /// update all the fields and table base address
-    pub fn update_fields(
-        &mut self,
-        attributes: MemoryAttributes,
-        page_table_base_address: PhysicalAddress,
-    ) -> PtResult<()> {
-        if !self.is_valid_page() {
-            let next_level_table_base = u64::from(page_table_base_address);
-
-            let lvl3_index: u16 = ((next_level_table_base >> LEVEL3_START_BIT) & INDEX_MASK) as u16;
-            self.set_level3_index(lvl3_index);
-            let lvl2_index: u16 = ((next_level_table_base >> LEVEL2_START_BIT) & INDEX_MASK) as u16;
-            self.set_level2_index(lvl2_index);
-            let lvl1_index: u16 = ((next_level_table_base >> LEVEL1_START_BIT) & INDEX_MASK) as u16;
-            self.set_level1_index(lvl1_index);
-            let lvl0_index: u16 = ((next_level_table_base >> LEVEL0_START_BIT) & INDEX_MASK) as u16;
-            self.set_level0_index(lvl0_index);
-
-            self.set_descriptor_type(3);
-        }
-
-        // update the memory attributes irrespective of new or old page table
-        self.set_attributes(attributes);
-
-        // TODO: need to flush the cache if operating on the active page table
-        Ok(())
-    }
-
-    pub fn set_page_invalid(&mut self) {
-        self.set_descriptor_type(0);
-    }
-
     pub fn dump_entry(&self) -> String {
-        let descriptor_type = self.descriptor_type() as u64;
-        let attribute_index = self.attribute_index() as u64;
-        let ns = self.ns() as u64;
+        let valid = self.valid() as u64;
+        let table_desc = self.table_desc() as u64;
+        let attribute_index = self.attribute_index();
+        let non_secure = self.non_secure() as u64;
         let access_permission = self.access_permission() as u64;
-        let shareable = self.shareable() as u64;
+        let shareable = self.shareable();
         let access_flag = self.access_flag() as u64;
-        let ng = self.ng() as u64;
-        let level3_index = self.level3_index() as u64;
-        let level2_index = self.level2_index() as u64;
-        let level1_index = self.level1_index() as u64;
-        let level0_index = self.level0_index() as u64;
-        let reserved0 = self.reserved0() as u64;
+        let not_global = self.not_global() as u64;
+        let page_frame_number = self.page_frame_number();
         let guarded_page = self.guarded_page() as u64;
         let dirty_bit_modifier = self.dirty_bit_modifier() as u64;
         let contiguous = self.contiguous() as u64;
         let pxn = self.pxn() as u64;
         let uxn = self.uxn() as u64;
-        let reserved1 = self.reserved1() as u64;
-        let imp_def = self.imp_def() as u64;
-        let ignored = self.ignored() as u64;
+        let reserved0 = self.reserved0();
+        let pxn_table = self.pxn_table() as u64;
+        let uxn_table = self.uxn_table() as u64;
+        let ap_table = self.ap_table();
+        let ns_table = self.ns_table() as u64;
+
         format!(
-            "|{:01b}|{:04b}|{:03b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:02b}|{:09b}|{:09b}|{:09b}|{:09b}|{:01b}|{:01b}|{:02b}|{:02b}|{:01b}|{:03b}|{:02b}|",
-            ignored,         // 1 bit  -  Not used outside of Realm translation regimes
-            imp_def,         // 4 bits -  Implementation defined
-            reserved1,       // 3 bits -  Reserved for software use
-            uxn,             // 1 bit  -  UXN Execution permissions
-            pxn,             // 1 bit  -  PXN Execution permissions
+            "|{:01b}|{:02b}|{:01b}|{:01b}|{:04b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:038b}|{:01b}|{:01b}|{:02b}|{:02b}|{:01b}|{:03b}|{:01b}|{:01b}|",
+            ns_table,            // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
+            ap_table,            // 2 bits -  Hierarchical permissions.
+            uxn_table,           // 1 bit  -  Hierarchical permissions.
+            pxn_table,           // 1 bit  -  Hierarchical permissions.
+            reserved0,           // 4 bits -  Reserved for software use
+            uxn,                 // 1 bit  -  User execute never
+            pxn,                 // 1 bit  -  Privileged execute never
             contiguous,          // 1 bit  -  Contiguous
-            dirty_bit_modifier, // 1 bit  -  DBM
-            guarded_page,    // 1 bit  -  GP
-            reserved0,       // 2 bits -  Not used
-            level0_index,    // 9 bits -  Level 0 index, that points to L1 table or a 512GB block
-            level1_index,    // 9 bits -  Level 1 index, that points to L2 table or a 1GB block
-            level2_index,    // 9 bits -  Level 2 index, that points to L3 table or a 2MB block
-            level3_index,    // 9 bits -  Level 3 index, that points to a 4KB block
-            ng,              // 1 bit  -  Not global
-            access_flag,     // 1 bit  -  Access flag
-            shareable,       // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
-            access_permission, // 2 bits -  AP
-            ns,              // 1 bit  -  NS
-            attribute_index, // 3 bits -  AttrIndx 0 = Device memory, 1 = non-cacheable memory, 2 = write-through, 3 = write-back, 4 = write-back.
-            descriptor_type, // 2 bits -  1 = Block entry, 3 = Page entry or level 3 block entry, Others = Faulty entry
+            dirty_bit_modifier,  // 1 bit  -  DBM
+            guarded_page,        // 1 bit  -  GP
+            page_frame_number,   // 38 bits - Page frame number
+            not_global,          // 1 bit  -  Not global
+            access_flag,         // 1 bit  -  Access flag
+            shareable,           // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
+            access_permission,   // 2 bits -  Access permissions
+            non_secure,          // 1 bit  -  Non-secure
+            attribute_index,    // 3 bits -  Used for caching attributes
+            table_desc,          // 1 bit  -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
+            valid,               // 1 bit  -  Valid descriptor
         )
     }
 

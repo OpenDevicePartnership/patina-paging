@@ -120,8 +120,7 @@ fn test_map_memory_address_not_so_simple() {
 
         assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-        // This is expected behavior as the uncacheable attribute is does not support execute per the MMU implementation
-        page_allocator.validate_pages(address, size, attributes | MemoryAttributes::ExecuteProtect);
+        page_allocator.validate_pages(address, size, attributes);
     }
 }
 
