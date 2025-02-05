@@ -437,7 +437,6 @@ impl VirtualAddress {
             PageLevel::Lvl1 => Self((((va >> LEVEL1_START_BIT) + 1) << LEVEL1_START_BIT) - 1),
             PageLevel::Lvl2 => Self((((va >> LEVEL2_START_BIT) + 1) << LEVEL2_START_BIT) - 1),
             PageLevel::Lvl3 => Self((((va >> LEVEL3_START_BIT) + 1) << LEVEL3_START_BIT) - 1),
-            _ => panic!("Invalid level: {:?}", level),
         }
     }
 
@@ -453,7 +452,6 @@ impl VirtualAddress {
             PageLevel::Lvl1 => (va >> LEVEL1_START_BIT) & INDEX_MASK,
             PageLevel::Lvl2 => (va >> LEVEL2_START_BIT) & INDEX_MASK,
             PageLevel::Lvl3 => (va >> LEVEL3_START_BIT) & INDEX_MASK,
-            _ => panic!("Invalid level: {:?}", level),
         }
     }
 

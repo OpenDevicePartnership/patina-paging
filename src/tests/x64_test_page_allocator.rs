@@ -14,7 +14,7 @@ pub struct TestPageAllocator {
     _paging_type: PagingType,
 
     highest_page_level: PageLevel,
-    lowest_page_level: PageLevel,
+    _lowest_page_level: PageLevel,
 }
 
 impl TestPageAllocator {
@@ -31,7 +31,7 @@ impl TestPageAllocator {
             ref_impl: Rc::new(RefCell::new(TestPageAllocatorImpl::new(num_pages))),
             _paging_type: paging_type,
             highest_page_level,
-            lowest_page_level,
+            _lowest_page_level: lowest_page_level,
         }
     }
 

@@ -173,7 +173,6 @@ impl TestPageAllocator {
                         assert_eq!(page_base, expected_page_base);
                         assert_eq!(attributes, expected_attributes);
                     }
-                    _ => panic!("Unsupported page level"),
                 };
             }
 
