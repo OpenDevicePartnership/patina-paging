@@ -146,8 +146,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             return Ok(());
         }
 
-        // Use standard attributes for everything that is not a leaf.
-        let table_attrib = MemoryAttributes::empty() | MemoryAttributes::Uncacheable;
+        // Use standard attributes for everything that is not a leaf. Use writeback
+        // cacheability to support coherent self-mapping.
+        let table_attrib = MemoryAttributes::empty() | MemoryAttributes::Writeback;
 
         for mut entry in table {
             if !entry.is_valid() {

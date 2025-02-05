@@ -166,7 +166,7 @@ impl TestPageAllocator {
                         assert_eq!(page_base, expected_page_base);
                         // we don't set any attributes on higher level page table entries, but
                         // this will be uncacheable from the empty cache attributes.
-                        assert_eq!(attributes, MemoryAttributes::empty() | MemoryAttributes::Uncacheable);
+                        assert_eq!(attributes, MemoryAttributes::empty() | MemoryAttributes::Writeback);
                     }
                     PageLevel::Lvl3 => {
                         let page_base: u64 =
