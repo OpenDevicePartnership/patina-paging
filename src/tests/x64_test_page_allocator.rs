@@ -106,10 +106,6 @@ impl TestPageAllocator {
         page_index: &mut u64,
         attributes: MemoryAttributes,
     ) {
-        if level == self.lowest_page_level - 1 {
-            return;
-        }
-
         let start_index = start_va.get_index(level);
         let end_index = end_va.get_index(level);
         let page = self.get_page(*page_index).unwrap();
@@ -137,12 +133,16 @@ impl TestPageAllocator {
             let curr_va_ceiling = va.round_up(level);
             let next_level_end_va = VirtualAddress::min(curr_va_ceiling, end_va);
 
-            let next_level = match leaf {
-                true => PageLevel::Pa,
-                false => level - 1,
-            };
-
-            self.validate_pages_internal(next_level_start_va, next_level_end_va, next_level, page_index, attributes);
+            if !leaf {
+                let next_level = level - 1;
+                self.validate_pages_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    next_level,
+                    page_index,
+                    attributes,
+                );
+            }
 
             va = va.get_next_va(level);
         }
@@ -158,11 +158,6 @@ impl TestPageAllocator {
     ) -> bool {
         unsafe {
             let table_base = *entry_ptr;
-
-            if level == PageLevel::Pa {
-                panic!("validate_page_entry is not expected to be called with pa");
-            }
-
             let pte = PageTableEntry::from_bits(table_base);
             let page_base: u64 = pte.get_canonical_page_table_base().into();
             let attributes = pte.get_attributes();

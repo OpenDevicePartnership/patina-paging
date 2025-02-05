@@ -168,7 +168,6 @@ pub enum PageLevel {
     Pdp = 3,
     Pd = 2,
     Pt = 1,
-    Pa = 0,
 }
 
 impl PageLevel {
@@ -180,7 +179,6 @@ impl PageLevel {
             PageLevel::Pdp => PDP_START_BIT,
             PageLevel::Pd => PD_START_BIT,
             PageLevel::Pt => PT_START_BIT,
-            PageLevel::Pa => panic!("Start bit is not defined for PA!"),
         }
     }
 
@@ -212,7 +210,6 @@ impl From<u64> for PageLevel {
             3 => PageLevel::Pdp,
             2 => PageLevel::Pd,
             1 => PageLevel::Pt,
-            0 => PageLevel::Pa,
             _ => panic!("Invalid value for PageLevel: {}", value),
         }
     }
@@ -234,7 +231,6 @@ impl fmt::Display for PageLevel {
             PageLevel::Pdp => "PDP",
             PageLevel::Pd => "PD",
             PageLevel::Pt => "PT",
-            PageLevel::Pa => "PA",
         };
         write!(f, "{:5}", level_name)
     }
@@ -254,10 +250,7 @@ impl VirtualAddress {
     /// round_up(va, PD) = 000000|0000000000|000000000|000000000|000000011|111111111|111111111111
     pub fn round_up(&self, level: PageLevel) -> VirtualAddress {
         let va = self.0;
-        match level {
-            PageLevel::Pa => Self(va),
-            _ => Self((((va >> level.start_bit()) + 1) << level.start_bit()) - 1),
-        }
+        Self((((va >> level.start_bit()) + 1) << level.start_bit()) - 1)
     }
 
     /// This will return the next va addressable by the current entry
@@ -277,10 +270,7 @@ impl VirtualAddress {
     /// get_index(va, PD)   = 000000011  <------------------------------'
     pub fn get_index(&self, level: PageLevel) -> u64 {
         let va = self.0;
-        match level {
-            PageLevel::Pa => panic!("get_index is not expected to be called"),
-            _ => (va >> level.start_bit()) & PAGE_INDEX_MASK,
-        }
+        (va >> level.start_bit()) & PAGE_INDEX_MASK
     }
 
     pub fn is_level_aligned(&self, level: PageLevel) -> bool {
