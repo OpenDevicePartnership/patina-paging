@@ -111,7 +111,6 @@ impl AArch64PageTableEntry {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
                 entry.update_fields(attributes, pa)
             }
-            _ => panic!("Invalid page level"),
         }
     }
 
@@ -135,7 +134,6 @@ impl AArch64PageTableEntry {
                 }
                 shadow_entry.get_u64()
             }
-            _ => panic!("Invalid page level"),
         }
     }
 
@@ -149,7 +147,6 @@ impl AArch64PageTableEntry {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
                 entry.is_valid_page()
             }
-            _ => panic!("Invalid page level"),
         }
     }
 
@@ -163,7 +160,6 @@ impl AArch64PageTableEntry {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
                 entry.get_canonical_page_table_base()
             }
-            _ => panic!("Invalid page level"),
         }
     }
 
@@ -177,7 +173,6 @@ impl AArch64PageTableEntry {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
                 entry as *mut _ as u64
             }
-            _ => panic!("Invalid page level"),
         }
     }
 
@@ -191,7 +186,6 @@ impl AArch64PageTableEntry {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
                 entry.get_attributes()
             }
-            _ => panic!("Invalid page level"),
         }
     }
 
@@ -205,8 +199,6 @@ impl AArch64PageTableEntry {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
                 entry.set_page_invalid()
             }
-            // not expected to reach here
-            _ => panic!("Invalid page level"),
         }
     }
 
@@ -220,7 +212,6 @@ impl AArch64PageTableEntry {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
                 entry.dump_entry()
             }
-            _ => panic!("Invalid page level"),
         }
     }
 }

@@ -382,7 +382,6 @@ pub enum PageLevel {
     Lvl1 = 3,
     Lvl2 = 2,
     Lvl3 = 1,
-    NA = 0,
 }
 
 impl From<PageLevel> for u64 {
@@ -398,7 +397,6 @@ impl From<u64> for PageLevel {
             3 => PageLevel::Lvl1,
             2 => PageLevel::Lvl2,
             1 => PageLevel::Lvl3,
-            0 => PageLevel::NA,
             _ => panic!("Invalid page level: {}", value),
         }
     }
@@ -419,7 +417,6 @@ impl fmt::Display for PageLevel {
             PageLevel::Lvl1 => "LVL1",
             PageLevel::Lvl2 => "LVL2",
             PageLevel::Lvl3 => "LVL3",
-            PageLevel::NA => "NA",
         };
         write!(f, "{:5}", level_name)
     }
@@ -440,7 +437,6 @@ impl VirtualAddress {
             PageLevel::Lvl1 => Self((((va >> LEVEL1_START_BIT) + 1) << LEVEL1_START_BIT) - 1),
             PageLevel::Lvl2 => Self((((va >> LEVEL2_START_BIT) + 1) << LEVEL2_START_BIT) - 1),
             PageLevel::Lvl3 => Self((((va >> LEVEL3_START_BIT) + 1) << LEVEL3_START_BIT) - 1),
-            _ => panic!("Invalid level: {:?}", level),
         }
     }
 
@@ -456,7 +452,6 @@ impl VirtualAddress {
             PageLevel::Lvl1 => (va >> LEVEL1_START_BIT) & INDEX_MASK,
             PageLevel::Lvl2 => (va >> LEVEL2_START_BIT) & INDEX_MASK,
             PageLevel::Lvl3 => (va >> LEVEL3_START_BIT) & INDEX_MASK,
-            _ => panic!("Invalid level: {:?}", level),
         }
     }
 

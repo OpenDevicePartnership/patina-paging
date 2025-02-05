@@ -104,10 +104,6 @@ impl TestPageAllocator {
         page_index: &mut u64,
         attributes: MemoryAttributes,
     ) {
-        if level == self.lowest_page_level - 1 {
-            return;
-        }
-
         let start_index = start_va.get_index(level);
         let end_index = end_va.get_index(level);
         let page = self.get_page(*page_index).unwrap();
@@ -137,13 +133,15 @@ impl TestPageAllocator {
             let curr_va_ceiling = va.round_up(level);
             let next_level_end_va = VirtualAddress::min(curr_va_ceiling, end_va);
 
-            self.validate_pages_internal(
-                next_level_start_va,
-                next_level_end_va,
-                ((level as u64) - 1).into(),
-                page_index,
-                attributes,
-            );
+            if level != self.lowest_page_level {
+                self.validate_pages_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    ((level as u64) - 1).into(),
+                    page_index,
+                    attributes,
+                );
+            }
 
             va = va.get_next_va(level);
         }
@@ -175,7 +173,6 @@ impl TestPageAllocator {
                         assert_eq!(page_base, expected_page_base);
                         assert_eq!(attributes, expected_attributes);
                     }
-                    _ => panic!("Unsupported page level"),
                 };
             }
 

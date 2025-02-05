@@ -101,7 +101,6 @@ impl X64PageTableEntry {
         leaf_entry: bool,
     ) -> PtResult<()> {
         match self.level {
-            PageLevel::Pa => panic!("unexpected call to update fields for pa paging level"),
             PageLevel::Pd | PageLevel::Pdp => {
                 let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
                 let mut copy = *entry;
@@ -121,55 +120,30 @@ impl X64PageTableEntry {
     }
 
     pub fn present(&self) -> bool {
-        match self.level {
-            PageLevel::Pa => panic!("unexpected call to get present bit for pa paging level"),
-            _ => {
-                let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
-                entry.present()
-            }
-        }
+        let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
+        entry.present()
     }
 
     pub fn set_present(&self, value: bool) {
-        match self.level {
-            PageLevel::Pa => panic!("unexpected call to set present bit for pa paging level"),
-            _ => {
-                let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
-                let mut copy = *entry;
-                copy.set_present(value);
-                entry.swap(&copy);
-            }
-        }
+        let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
+        let mut copy = *entry;
+        copy.set_present(value);
+        entry.swap(&copy);
     }
 
     pub fn get_canonical_page_table_base(&self) -> PhysicalAddress {
-        match self.level {
-            PageLevel::Pa => panic!("unexpected call to get canonical page table base for pa"),
-            _ => {
-                let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
-                entry.get_canonical_page_table_base()
-            }
-        }
+        let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
+        entry.get_canonical_page_table_base()
     }
 
     pub fn get_attributes(&self) -> MemoryAttributes {
-        match self.level {
-            PageLevel::Pa => panic!("unexpected call to get attributes for pa paging level"),
-            _ => {
-                let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
-                entry.get_attributes()
-            }
-        }
+        let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
+        entry.get_attributes()
     }
 
     pub fn dump_entry(&self) -> String {
-        match self.level {
-            PageLevel::Pa => panic!("unexpected call to get attributes for pa paging level"),
-            _ => {
-                let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
-                entry.dump_entry()
-            }
-        }
+        let entry = unsafe { get_entry::<PageTableEntry>(self.page_base, self.index) };
+        entry.dump_entry()
     }
 
     pub fn points_to_pa(&self) -> bool {
