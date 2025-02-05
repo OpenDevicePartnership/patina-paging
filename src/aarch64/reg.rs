@@ -381,6 +381,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
             }
             return sctlr & 0x1 == 1;
         }
+        #[allow(unreachable_code)]
         false
     }
 }

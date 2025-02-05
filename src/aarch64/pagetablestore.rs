@@ -57,7 +57,7 @@ impl Iterator for AArch64PageTableStoreIter {
             Some(AArch64PageTableEntry {
                 page_base: self.base,
                 index,
-                level: self.level,
+                _level: self.level,
                 _paging_type: self.paging_type,
             })
         } else {
@@ -94,86 +94,54 @@ impl IntoIterator for AArch64PageTableStore {
 pub struct AArch64PageTableEntry {
     page_base: PhysicalAddress,
     index: u64,
-    level: PageLevel,
+    _level: PageLevel,
     _paging_type: PagingType,
 }
 
 impl AArch64PageTableEntry {
     pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
-        match self.level {
-            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 | PageLevel::Lvl3 => {
-                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-                entry.update_fields(attributes, pa)
-            }
-        }
+        let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+        entry.update_fields(attributes, pa)
     }
 
     pub fn update_shadow_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> u64 {
-        match self.level {
-            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 | PageLevel::Lvl3 => {
-                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-                let mut shadow_entry = *entry;
-                match shadow_entry.update_fields(attributes, pa) {
-                    Ok(_) => {}
-                    Err(_) => panic!("Failed to update shadow table entry"),
-                }
-                shadow_entry.get_u64()
-            }
+        let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+        let mut shadow_entry = *entry;
+        match shadow_entry.update_fields(attributes, pa) {
+            Ok(_) => {}
+            Err(_) => panic!("Failed to update shadow table entry"),
         }
+        shadow_entry.get_u64()
     }
 
     pub fn is_valid(&self) -> bool {
-        match self.level {
-            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 | PageLevel::Lvl3 => {
-                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-                entry.valid()
-            }
-        }
+        let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+        entry.valid()
     }
 
     pub fn get_canonical_page_table_base(&self) -> PhysicalAddress {
-        match self.level {
-            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 | PageLevel::Lvl3 => {
-                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-                entry.get_canonical_page_table_base()
-            }
-        }
+        let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+        entry.get_canonical_page_table_base()
     }
 
     pub fn raw_address(&self) -> u64 {
-        match self.level {
-            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 | PageLevel::Lvl3 => {
-                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-                entry as *mut _ as u64
-            }
-        }
+        let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+        entry as *mut _ as u64
     }
 
     pub fn get_attributes(&self) -> MemoryAttributes {
-        match self.level {
-            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 | PageLevel::Lvl3 => {
-                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-                entry.get_attributes()
-            }
-        }
+        let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+        entry.get_attributes()
     }
 
     pub fn set_invalid(&self) {
-        match self.level {
-            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 | PageLevel::Lvl3 => {
-                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-                entry.set_valid(false);
-            }
-        }
+        let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+        entry.set_valid(false);
     }
 
     pub fn dump_entry(&self) -> String {
-        match self.level {
-            PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 | PageLevel::Lvl3 => {
-                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-                entry.dump_entry()
-            }
-        }
+        let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+        entry.dump_entry()
     }
 }
 
