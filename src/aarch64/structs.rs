@@ -24,7 +24,7 @@ fn is_4kb_aligned(addr: u64) -> bool {
     (addr & (FRAME_SIZE_4KB - 1)) == 0
 }
 
-// Below is a common definition for the AArch64 VMXAv8-64 stage-1 decriptors. This uses
+// Below is a common definition for the AArch64 VMSAv8-64 stage-1 decriptors. This uses
 // the common understanding of bits accross all levels/types to simplify translation
 // as well as to allow for recursive translation.
 #[rustfmt::skip]
@@ -135,6 +135,7 @@ impl AArch64Descriptor {
             // TODO: this needs to be updated for large pages.
             self.set_table_desc(true);
             self.set_valid(true);
+            self.set_access_flag(true);
         }
     }
 
