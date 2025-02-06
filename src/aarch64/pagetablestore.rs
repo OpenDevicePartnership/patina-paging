@@ -119,7 +119,7 @@ impl AArch64PageTableEntry {
         match self.level {
             PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
                 let entry = unsafe { get_entry::<VMSAv864TableDescriptor>(self.page_base, self.index) };
-                let mut shadow_entry = *entry;
+                let mut shadow_entry = entry.clone();
                 match shadow_entry.update_fields(attributes, pa) {
                     Ok(_) => {}
                     Err(_) => panic!("Failed to update shadow table entry"),
@@ -128,7 +128,7 @@ impl AArch64PageTableEntry {
             }
             PageLevel::Lvl3 => {
                 let entry = unsafe { get_entry::<VMSAv864PageDescriptor>(self.page_base, self.index) };
-                let mut shadow_entry = *entry;
+                let mut shadow_entry = entry.clone();
                 match shadow_entry.update_fields(attributes, pa) {
                     Ok(_) => {}
                     Err(_) => panic!("Failed to update shadow page entry"),

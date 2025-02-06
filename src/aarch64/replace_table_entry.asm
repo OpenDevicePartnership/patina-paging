@@ -27,17 +27,18 @@ replace_live_xlat_entry:
   isb
 
   # write invalid entry
+  dsb   sy
   str   xzr, [x0]
-  dsb   nshst
+  dsb   sy
 
   # flush translations for the target address from the TLBs
   lsr   x2, x2, #12
   tlbi  vae2, x2
-  dsb   nsh
+  dsb   sy
 
   # write updated entry
   str   x1, [x0]
-  dsb   nshst
+  dsb   sy
   isb
 
   msr   daif, x4

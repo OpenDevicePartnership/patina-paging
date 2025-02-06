@@ -121,12 +121,19 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         level: PageLevel,
         base: PhysicalAddress,
         attributes: MemoryAttributes,
+        log_stuff: bool
     ) -> PtResult<()> {
         let mut va = start_va;
+        if log_stuff {
+            log::info!("map_memory_region_internal:{} {va:x?}-{start_va:x?}-{end_va:x?}-{level}-{base:x?}-{attributes:x?}", line!());
+        }
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
         if level == self.lowest_page_level {
             for mut entry in table {
+                if log_stuff {
+                    log::info!("map_memory_region_internal:{} {va:x?}-{start_va:x?}-{end_va:x?}-{level}-{base:x?}-{attributes:x?}", line!());
+                }
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
                     let _val = entry.update_shadow_fields(attributes, va.into());
@@ -142,14 +149,23 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
                 // get max va addressable by current entry
                 va = va.get_next_va(level);
+                if log_stuff {
+                    log::info!("map_memory_region_internal:{} next: {va:x?}", line!());
+                }
             }
             return Ok(());
         }
 
         for mut entry in table {
             if !entry.is_valid() {
-                let pa = self.allocate_page()?;
-
+                if start_va >= VirtualAddress::new(0x7500000000) && start_va <=VirtualAddress::new(0x8300000000) {
+                    log::info!("{} {start_va:x?}-{end_va:x?}-{attributes:x?}-{:x?}", line!(), entry.raw_address());
+                    log::info!("{} self: {:p}", line!(), self);
+                }
+                let pa = self.allocate_page().unwrap();
+                if start_va >= VirtualAddress::new(0x7500000000) && start_va <=VirtualAddress::new(0x8300000000) {
+                    log::info!("{} {start_va:x?}-{end_va:x?}-{attributes:x?}-{:x?}-{pa:x?}", line!(), entry.raw_address());
+                }
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
                     let _val = entry.update_shadow_fields(attributes, pa);
@@ -161,6 +177,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     // Just update the entry and flush TLB
                     entry.update_fields(attributes, pa)?;
                     reg::update_translation_table_entry(entry.raw_address(), pa.into());
+                }
+                if start_va >= VirtualAddress::new(0x7500000000) && start_va <=VirtualAddress::new(0x8300000000) {
+                    log::info!("{} {start_va:x?}-{end_va:x?}-{attributes:x?}-{:x?}-{pa:x?}", line!(), entry.raw_address());
                 }
             }
             let next_base = entry.get_canonical_page_table_base();
@@ -175,15 +194,22 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
             // end of next level va. It will be minimum of next va and end va
             let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
+            let mut log_stuff = false;
+            if next_level_start_va >= VirtualAddress::new(0x7552200000) && next_level_start_va <VirtualAddress::new(0x7552600000) {
+                log::info!("{} {:x?}-{next_level_start_va:x?}-{next_level_end_va:x?}", line!(), entry.raw_address());
+                log_stuff = true;
+            }
             self.map_memory_region_internal(
                 next_level_start_va,
                 next_level_end_va,
                 (level as u64 - 1).into(),
                 next_base,
                 attributes,
+                log_stuff
             )?;
-
+            if next_level_start_va >= VirtualAddress::new(0x7552200000) && next_level_start_va <VirtualAddress::new(0x7552600000) {
+                log::info!("{} {:x?}-{next_level_start_va:x?}-{next_level_end_va:x?}", line!(), entry.raw_address());
+            }
             va = va.get_next_va(level);
         }
 
@@ -476,7 +502,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes)
+        self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes, false)
     }
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
