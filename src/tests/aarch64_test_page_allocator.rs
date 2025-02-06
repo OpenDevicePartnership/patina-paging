@@ -1,4 +1,4 @@
-use crate::aarch64::structs::{PageLevel, VMSAv864PageDescriptor, VMSAv864TableDescriptor, VirtualAddress, PAGE_SIZE};
+use crate::aarch64::structs::{AArch64Descriptor, PageLevel, VirtualAddress, PAGE_SIZE};
 use crate::page_allocator::PageAllocator;
 use crate::{MemoryAttributes, PagingType};
 use crate::{PtError, PtResult};
@@ -161,15 +161,17 @@ impl TestPageAllocator {
                 match level {
                     PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
                         let page_base: u64 =
-                            VMSAv864TableDescriptor::from_bits(table_base).get_canonical_page_table_base().into();
-                        let attributes = VMSAv864TableDescriptor::from_bits(table_base).get_attributes();
+                            AArch64Descriptor::from_bits(table_base).get_canonical_page_table_base().into();
+                        let attributes = AArch64Descriptor::from_bits(table_base).get_attributes();
                         assert_eq!(page_base, expected_page_base);
-                        assert_eq!(attributes, MemoryAttributes::empty()); // we don't set any attributes on higher level page table entries
+                        // we don't set any attributes on higher level page table entries, but
+                        // this will be uncacheable from the empty cache attributes.
+                        assert_eq!(attributes, MemoryAttributes::empty() | MemoryAttributes::Writeback);
                     }
                     PageLevel::Lvl3 => {
                         let page_base: u64 =
-                            VMSAv864PageDescriptor::from_bits(table_base).get_canonical_page_table_base().into();
-                        let attributes = VMSAv864PageDescriptor::from_bits(table_base).get_attributes();
+                            AArch64Descriptor::from_bits(table_base).get_canonical_page_table_base().into();
+                        let attributes = AArch64Descriptor::from_bits(table_base).get_attributes();
                         assert_eq!(page_base, expected_page_base);
                         assert_eq!(attributes, expected_attributes);
                     }

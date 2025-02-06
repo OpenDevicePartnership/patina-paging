@@ -22,6 +22,7 @@ pub fn get_phys_addr_bits() -> u64 {
     //
     // The value is encoded as 2^(n+1) where n is the number of bits
     // supported. So 0b0000 == 2^32 == 4GB, 0b0001 == 2^36 == 8GB, etc
+    #[allow(unused_assignments)]
     let mut pa_bits: u64 = 0;
 
     #[cfg(all(not(test), target_arch = "aarch64"))]
@@ -381,6 +382,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
             }
             return sctlr & 0x1 == 1;
         }
+        #[allow(unreachable_code)]
         false
     }
 }

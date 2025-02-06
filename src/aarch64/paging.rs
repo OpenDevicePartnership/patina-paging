@@ -146,20 +146,24 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             return Ok(());
         }
 
+        // Use standard attributes for everything that is not a leaf. Use writeback
+        // cacheability to support coherent self-mapping.
+        let table_attrib = MemoryAttributes::empty() | MemoryAttributes::Writeback;
+
         for mut entry in table {
             if !entry.is_valid() {
                 let pa = self.allocate_page()?;
 
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let _val = entry.update_shadow_fields(attributes, pa);
+                    let _val = entry.update_shadow_fields(table_attrib, pa);
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
                         reg::replace_live_xlat_entry(entry.raw_address(), _val, pa.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
-                    entry.update_fields(attributes, pa)?;
+                    entry.update_fields(table_attrib, pa)?;
                     reg::update_translation_table_entry(entry.raw_address(), pa.into());
                 }
             }
