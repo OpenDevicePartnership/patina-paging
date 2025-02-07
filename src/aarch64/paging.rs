@@ -1,5 +1,5 @@
 use super::{
-    pagetablestore::AArch64PageTableStore,
+    pagetablestore::{AArch64PageTableEntry, AArch64PageTableStore},
     reg,
     structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
 };
@@ -9,6 +9,10 @@ use mu_pi::protocols::cpu_arch::CpuFlushType;
 use uefi_sdk::base::{SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB};
 
 const MAX_VA_BITS: u64 = 48;
+
+/// Default attributes for intermediate tables. These are ignored in normal
+/// operation, but should be valid for self-map usage.
+const TABLE_ATTRIBUTES: MemoryAttributes = MemoryAttributes::Writeback;
 
 #[cfg(all(not(test), target_arch = "aarch64"))]
 extern "C" {
@@ -125,68 +129,59 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let mut va = start_va;
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for mut entry in table {
+        for mut entry in table {
+            // TODO large paging.
+            if level == self.lowest_page_level {
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let _val = entry.update_shadow_fields(attributes, va.into());
+                    let _val = entry.update_shadow_fields(attributes, va.into(), false);
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
                         reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
-                    entry.update_fields(attributes, va.into())?;
+                    entry.update_fields(attributes, va.into(), false)?;
                     reg::update_translation_table_entry(entry.raw_address(), va.into());
                 }
+            } else {
+                if !entry.is_valid() {
+                    let pa = self.allocate_page()?;
+
+                    if reg::is_this_page_table_active(self.base) {
+                        // Need to do the heavy duty break-before-make sequence
+                        let _val = entry.update_shadow_fields(TABLE_ATTRIBUTES, pa, false);
+                        #[cfg(all(not(test), target_arch = "aarch64"))]
+                        unsafe {
+                            reg::replace_live_xlat_entry(entry.raw_address(), _val, pa.into());
+                        }
+                    } else {
+                        // Just update the entry and flush TLB
+                        entry.update_fields(TABLE_ATTRIBUTES, pa, false)?;
+                        reg::update_translation_table_entry(entry.raw_address(), pa.into());
+                    }
+                }
+                let next_base = entry.get_canonical_page_table_base();
+
+                // split the va range appropriately for the next level pages
+
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
 
                 // get max va addressable by current entry
-                va = va.get_next_va(level);
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                self.map_memory_region_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                    attributes,
+                )?;
             }
-            return Ok(());
-        }
-
-        // Use standard attributes for everything that is not a leaf. Use writeback
-        // cacheability to support coherent self-mapping.
-        let table_attrib = MemoryAttributes::empty() | MemoryAttributes::Writeback;
-
-        for mut entry in table {
-            if !entry.is_valid() {
-                let pa = self.allocate_page()?;
-
-                if reg::is_this_page_table_active(self.base) {
-                    // Need to do the heavy duty break-before-make sequence
-                    let _val = entry.update_shadow_fields(table_attrib, pa);
-                    #[cfg(all(not(test), target_arch = "aarch64"))]
-                    unsafe {
-                        reg::replace_live_xlat_entry(entry.raw_address(), _val, pa.into());
-                    }
-                } else {
-                    // Just update the entry and flush TLB
-                    entry.update_fields(table_attrib, pa)?;
-                    reg::update_translation_table_entry(entry.raw_address(), pa.into());
-                }
-            }
-            let next_base = entry.get_canonical_page_table_base();
-
-            // split the va range appropriately for the next level pages
-
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
-
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
-
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-            self.map_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-                attributes,
-            )?;
 
             va = va.get_next_va(level);
         }
@@ -195,7 +190,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     }
 
     fn unmap_memory_region_internal(
-        &self,
+        &mut self,
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
@@ -204,40 +199,40 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let mut va = start_va;
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for entry in table {
-                if !entry.is_valid() {
-                    continue;
-                }
-
-                entry.set_invalid();
-            }
-            return Ok(());
-        }
-
-        for entry in table {
+        for mut entry in table {
             if !entry.is_valid() {
                 continue;
             }
-            let next_base = entry.get_canonical_page_table_base();
 
-            // split the va range appropriately for the next level pages
+            // Check if this is a large page in need of splitting.
+            if entry.is_block_entry()
+                && (!va.is_level_aligned(level) || va.length_through(end_va) < level.entry_va_size())
+            {
+                self.split_large_page(va, &mut entry)?;
+            }
 
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
+            if entry.is_block_entry() {
+                entry.set_invalid();
+            } else {
+                // split the va range appropriately for the next level pages
+                let next_base = entry.get_canonical_page_table_base();
 
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
 
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
 
-            self.unmap_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-            )?;
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                self.unmap_memory_region_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                )?;
+            }
 
             va = va.get_next_va(level);
         }
@@ -246,7 +241,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     }
 
     fn remap_memory_region_internal(
-        &self,
+        &mut self,
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
@@ -256,56 +251,51 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let mut va = start_va;
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for mut entry in table {
-                if !entry.is_valid() {
-                    return Err(PtError::NoMapping);
-                }
+        for mut entry in table {
+            if !entry.is_valid() {
+                return Err(PtError::NoMapping);
+            }
 
+            // Check if this is a large page in need of splitting.
+            if entry.is_block_entry()
+                && (!va.is_level_aligned(level) || va.length_through(end_va) < level.entry_va_size())
+            {
+                self.split_large_page(va, &mut entry)?;
+            }
+
+            if entry.is_block_entry() {
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let _val = entry.update_shadow_fields(attributes, va.into());
+                    let _val = entry.update_shadow_fields(attributes, va.into(), false);
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
                         reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
-                    entry.update_fields(attributes, va.into())?;
+                    entry.update_fields(attributes, va.into(), false)?;
                     reg::update_translation_table_entry(entry.raw_address(), va.into());
                 }
+            } else {
+                let next_base = entry.get_canonical_page_table_base();
+
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
 
                 // get max va addressable by current entry
-                va = va.get_next_va(level);
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                self.remap_memory_region_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                    attributes,
+                )?;
             }
-            return Ok(());
-        }
-
-        for entry in table {
-            if !entry.is_valid() {
-                return Err(PtError::NoMapping);
-            }
-
-            let next_base = entry.get_canonical_page_table_base();
-
-            // split the va range appropriately for the next level pages
-
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
-
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
-
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-            self.remap_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-                attributes,
-            )?;
 
             va = va.get_next_va(level);
         }
@@ -368,6 +358,48 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         Ok(*prev_attributes)
     }
 
+    /// Splits a large page into the next page level pages. This done by
+    /// creating a new page table for the full range and then swapping the PA
+    /// and mapping to the new page table.
+    fn split_large_page(&mut self, va: VirtualAddress, entry: &mut AArch64PageTableEntry) -> PtResult<()> {
+        let level = entry.get_level();
+        debug_assert!(level != self.lowest_page_level && entry.is_block_entry());
+
+        // Round down to the nearest page boundary at the current level.
+        let large_page_start: u64 = va.into();
+        let large_page_start = large_page_start & !(level.entry_va_size() - 1);
+        let large_page_end: u64 = large_page_start + level.entry_va_size() - 1;
+
+        if level == self.lowest_page_level || !entry.is_block_entry() {
+            return Err(PtError::InvalidParameter);
+        }
+
+        let attributes = entry.get_attributes();
+        let pa = self.allocate_page()?;
+        self.map_memory_region_internal(
+            large_page_start.into(),
+            large_page_end.into(),
+            (level as u64 - 1).into(),
+            pa,
+            attributes,
+        )?;
+
+        if reg::is_this_page_table_active(self.base) {
+            // Need to do the heavy duty break-before-make sequence
+            let _val = entry.update_shadow_fields(attributes, va.into(), false);
+            #[cfg(all(not(test), target_arch = "aarch64"))]
+            unsafe {
+                reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
+            }
+        } else {
+            // Just update the entry and flush TLB
+            entry.update_fields(attributes, va.into(), false)?;
+            reg::update_translation_table_entry(entry.raw_address(), va.into());
+        }
+
+        Ok(())
+    }
+
     fn dump_page_tables_internal(
         &self,
         start_va: VirtualAddress,
@@ -378,33 +410,10 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let mut va = start_va;
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for entry in table {
-                // start of the next level va. It will be same as current va
-                let next_level_start_va = va;
-
-                // get max va addressable by current entry
-                let curr_va_ceil = va.round_up(level);
-
-                // end of next level va. It will be minimum of next va and end va
-                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-                let l: u64 = level.into();
-                let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
-                log::info!("{}|{:48}{}", level, range, entry.dump_entry());
-
-                va = va.get_next_va(level);
-            }
-            return;
-        }
-
         for entry in table {
             if !entry.is_valid() {
                 return;
             }
-            let next_base = entry.get_canonical_page_table_base();
-
-            // split the va range appropriately for the next level pages
 
             // start of the next level va. It will be same as current va
             let next_level_start_va = va;
@@ -419,12 +428,16 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
             log::info!("{}|{:48}{}", level, range, entry.dump_entry());
 
-            self.dump_page_tables_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-            );
+            if !entry.is_block_entry() {
+                // split the va range appropriately for the next level pages
+                let next_base = entry.get_canonical_page_table_base();
+                self.dump_page_tables_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                );
+            }
 
             va = va.get_next_va(level);
         }

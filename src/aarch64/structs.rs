@@ -328,6 +328,14 @@ impl VirtualAddress {
     pub fn min(lhs: VirtualAddress, rhs: VirtualAddress) -> VirtualAddress {
         VirtualAddress(core::cmp::min(lhs.0, rhs.0))
     }
+
+    /// This will return the range length between self and end (inclusive)
+    pub fn length_through(&self, end: VirtualAddress) -> u64 {
+        match end.0.checked_sub(self.0) {
+            None => panic!("Underflow occurred! {:x} {:x}", self.0, end.0),
+            Some(result) => result + 1,
+        }
+    }
 }
 
 impl From<u64> for VirtualAddress {

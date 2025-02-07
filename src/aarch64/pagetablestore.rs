@@ -99,18 +99,27 @@ pub struct AArch64PageTableEntry {
 }
 
 impl AArch64PageTableEntry {
-    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, block: bool) -> PtResult<()> {
         let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-        entry.update_fields(attributes, pa)
+        entry.update_fields(attributes, pa)?;
+        if block && self.level != PageLevel::Lvl3 {
+            entry.set_table_desc(false);
+        }
+        Ok(())
     }
 
-    pub fn update_shadow_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> u64 {
+    pub fn update_shadow_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, block: bool) -> u64 {
         let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
         let mut shadow_entry = *entry;
         match shadow_entry.update_fields(attributes, pa) {
             Ok(_) => {}
             Err(_) => panic!("Failed to update shadow table entry"),
         }
+
+        if block && self.level != PageLevel::Lvl3 {
+            shadow_entry.set_table_desc(false);
+        }
+
         shadow_entry.get_u64()
     }
 
@@ -153,6 +162,10 @@ impl AArch64PageTableEntry {
             }
             _ => false,
         }
+    }
+
+    pub fn get_level(&self) -> PageLevel {
+        self.level
     }
 }
 
