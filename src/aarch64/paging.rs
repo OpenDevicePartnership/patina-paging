@@ -324,12 +324,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let mut va = start_va;
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        if level == self.lowest_page_level {
-            for entry in table {
-                if !entry.is_valid() {
-                    return Err(PtError::NoMapping);
-                }
+        for entry in table {
+            if !entry.is_valid() {
+                return Err(PtError::NoMapping);
+            }
 
+            if entry.is_block_entry() {
                 // Given memory range can span multiple page table entries, in such
                 // scenario, the expectation is all entries should have same attributes.
                 let current_attributes = entry.get_attributes();
@@ -340,35 +340,28 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 if *prev_attributes != current_attributes {
                     return Err(PtError::IncompatibleMemoryAttributes);
                 }
+            } else {
+                let next_base = entry.get_canonical_page_table_base();
+
+                // split the va range appropriately for the next level pages
+
+                // start of the next level va. It will be same as current va
+                let next_level_start_va = va;
+
+                // get max va addressable by current entry
+                let curr_va_ceil = va.round_up(level);
+
+                // end of next level va. It will be minimum of next va and end va
+                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
+
+                self.query_memory_region_internal(
+                    next_level_start_va,
+                    next_level_end_va,
+                    (level as u64 - 1).into(),
+                    next_base,
+                    prev_attributes,
+                )?;
             }
-            return Ok(*prev_attributes);
-        }
-
-        for entry in table {
-            if !entry.is_valid() {
-                return Err(PtError::NoMapping);
-            }
-            let next_base = entry.get_canonical_page_table_base();
-
-            // split the va range appropriately for the next level pages
-
-            // start of the next level va. It will be same as current va
-            let next_level_start_va = va;
-
-            // get max va addressable by current entry
-            let curr_va_ceil = va.round_up(level);
-
-            // end of next level va. It will be minimum of next va and end va
-            let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-            self.query_memory_region_internal(
-                next_level_start_va,
-                next_level_end_va,
-                (level as u64 - 1).into(),
-                next_base,
-                prev_attributes,
-            )?;
-
             va = va.get_next_va(level);
         }
 

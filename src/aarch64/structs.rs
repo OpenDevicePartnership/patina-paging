@@ -225,6 +225,30 @@ pub enum PageLevel {
     Lvl3 = 1,
 }
 
+impl PageLevel {
+    pub fn start_bit(&self) -> u64 {
+        match self {
+            PageLevel::Lvl0 => LEVEL0_START_BIT,
+            PageLevel::Lvl1 => LEVEL1_START_BIT,
+            PageLevel::Lvl2 => LEVEL2_START_BIT,
+            PageLevel::Lvl3 => LEVEL3_START_BIT,
+        }
+    }
+
+    pub fn entry_va_size(&self) -> u64 {
+        1 << self.start_bit()
+    }
+
+    pub fn supports_block_entry(&self) -> bool {
+        match self {
+            PageLevel::Lvl3 => true,
+            // Large pages could be disabled by a crate feature in the future.
+            PageLevel::Lvl1 | PageLevel::Lvl2 => true,
+            _ => false,
+        }
+    }
+}
+
 impl From<PageLevel> for u64 {
     fn from(value: PageLevel) -> u64 {
         value as u64
@@ -272,13 +296,8 @@ impl VirtualAddress {
 
     pub fn round_up(&self, level: PageLevel) -> VirtualAddress {
         let va = self.0;
-        match level {
-            // TODO: fix these to use intrinsics
-            PageLevel::Lvl0 => Self((((va >> LEVEL0_START_BIT) + 1) << LEVEL0_START_BIT) - 1),
-            PageLevel::Lvl1 => Self((((va >> LEVEL1_START_BIT) + 1) << LEVEL1_START_BIT) - 1),
-            PageLevel::Lvl2 => Self((((va >> LEVEL2_START_BIT) + 1) << LEVEL2_START_BIT) - 1),
-            PageLevel::Lvl3 => Self((((va >> LEVEL3_START_BIT) + 1) << LEVEL3_START_BIT) - 1),
-        }
+        let start_bit = level.start_bit();
+        Self((((va >> start_bit) + 1) << start_bit) - 1)
     }
 
     pub fn get_next_va(&self, level: PageLevel) -> VirtualAddress {
@@ -296,14 +315,14 @@ impl VirtualAddress {
         }
     }
 
+    pub fn is_level_aligned(&self, level: PageLevel) -> bool {
+        let va = self.0;
+        va & (level.entry_va_size() - 1) == 0
+    }
+
     pub fn is_4kb_aligned(&self) -> bool {
         let va: u64 = self.0;
         (va & (FRAME_SIZE_4KB - 1)) == 0
-    }
-
-    pub fn is_2mb_aligned(&self) -> bool {
-        let va: u64 = self.0;
-        (va & (FRAME_SIZE_2MB - 1)) == 0
     }
 
     pub fn min(lhs: VirtualAddress, rhs: VirtualAddress) -> VirtualAddress {
@@ -357,8 +376,6 @@ impl Sub<u64> for VirtualAddress {
     }
 }
 
-const FRAME_SIZE_2MB: u64 = 0x200000; // 2MB
-
 #[derive(PartialEq, Eq, Clone, Copy)]
 pub struct PhysicalAddress(u64);
 impl PhysicalAddress {
@@ -369,11 +386,6 @@ impl PhysicalAddress {
     pub fn is_4kb_aligned(&self) -> bool {
         let va: u64 = self.0;
         (va & (FRAME_SIZE_4KB - 1)) == 0
-    }
-
-    pub fn is_2mb_aligned(&self) -> bool {
-        let va: u64 = self.0;
-        (va & (FRAME_SIZE_2MB - 1)) == 0
     }
 }
 
