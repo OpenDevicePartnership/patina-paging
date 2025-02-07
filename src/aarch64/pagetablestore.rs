@@ -102,9 +102,7 @@ impl AArch64PageTableEntry {
     pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, block: bool) -> PtResult<()> {
         let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
         entry.update_fields(attributes, pa)?;
-        if block && self.level != PageLevel::Lvl3 {
-            entry.set_table_desc(false);
-        }
+        entry.set_table_desc(self.level == PageLevel::Lvl3 || !block);
         Ok(())
     }
 
@@ -116,10 +114,7 @@ impl AArch64PageTableEntry {
             Err(_) => panic!("Failed to update shadow table entry"),
         }
 
-        if block && self.level != PageLevel::Lvl3 {
-            shadow_entry.set_table_desc(false);
-        }
-
+        shadow_entry.set_table_desc(self.level == PageLevel::Lvl3 || !block);
         shadow_entry.get_u64()
     }
 

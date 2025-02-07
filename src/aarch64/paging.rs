@@ -130,21 +130,25 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
         for mut entry in table {
-            // TODO large paging.
-            if level == self.lowest_page_level {
+            if !entry.is_valid()
+                && level.supports_block_entry()
+                && va.is_level_aligned(level)
+                && va.length_through(end_va) >= level.entry_va_size()
+            {
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let _val = entry.update_shadow_fields(attributes, va.into(), false);
+                    let _val = entry.update_shadow_fields(attributes, va.into(), true);
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
                         reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
-                    entry.update_fields(attributes, va.into(), false)?;
+                    entry.update_fields(attributes, va.into(), true)?;
                     reg::update_translation_table_entry(entry.raw_address(), va.into());
                 }
             } else {
+                assert!(level != self.lowest_page_level);
                 if !entry.is_valid() {
                     let pa = self.allocate_page()?;
 
@@ -161,9 +165,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                         reg::update_translation_table_entry(entry.raw_address(), pa.into());
                     }
                 }
-                let next_base = entry.get_canonical_page_table_base();
 
                 // split the va range appropriately for the next level pages
+                let next_base = entry.get_canonical_page_table_base();
 
                 // start of the next level va. It will be same as current va
                 let next_level_start_va = va;
@@ -266,14 +270,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             if entry.is_block_entry() {
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
-                    let _val = entry.update_shadow_fields(attributes, va.into(), false);
+                    let _val = entry.update_shadow_fields(attributes, va.into(), true);
                     #[cfg(all(not(test), target_arch = "aarch64"))]
                     unsafe {
                         reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
                 } else {
                     // Just update the entry and flush TLB
-                    entry.update_fields(attributes, va.into(), false)?;
+                    entry.update_fields(attributes, va.into(), true)?;
                     reg::update_translation_table_entry(entry.raw_address(), va.into());
                 }
             } else {
@@ -386,14 +390,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
         if reg::is_this_page_table_active(self.base) {
             // Need to do the heavy duty break-before-make sequence
-            let _val = entry.update_shadow_fields(attributes, va.into(), false);
+            let _val = entry.update_shadow_fields(attributes, pa.into(), false);
             #[cfg(all(not(test), target_arch = "aarch64"))]
             unsafe {
                 reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
             }
         } else {
             // Just update the entry and flush TLB
-            entry.update_fields(attributes, va.into(), false)?;
+            entry.update_fields(attributes, pa.into(), false)?;
             reg::update_translation_table_entry(entry.raw_address(), va.into());
         }
 
