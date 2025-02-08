@@ -1,5 +1,3 @@
-use mu_pi::fw_fs::ffs::attributes;
-
 use crate::aarch64::structs::{AArch64Descriptor, PageLevel, VirtualAddress, PAGE_SIZE};
 use crate::page_allocator::PageAllocator;
 use crate::{MemoryAttributes, PagingType};
@@ -16,7 +14,7 @@ pub struct TestPageAllocator {
     paging_type: PagingType,
 
     highest_page_level: PageLevel,
-    lowest_page_level: PageLevel,
+    _lowest_page_level: PageLevel,
 }
 
 impl TestPageAllocator {
@@ -32,7 +30,7 @@ impl TestPageAllocator {
             ref_impl: Rc::new(RefCell::new(TestPageAllocatorImpl::new(num_pages))),
             paging_type,
             highest_page_level,
-            lowest_page_level,
+            _lowest_page_level: lowest_page_level,
         }
     }
 

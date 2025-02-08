@@ -390,14 +390,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
         if reg::is_this_page_table_active(self.base) {
             // Need to do the heavy duty break-before-make sequence
-            let _val = entry.update_shadow_fields(attributes, pa.into(), false);
+            let _val = entry.update_shadow_fields(attributes, pa, false);
             #[cfg(all(not(test), target_arch = "aarch64"))]
             unsafe {
                 reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
             }
         } else {
             // Just update the entry and flush TLB
-            entry.update_fields(attributes, pa.into(), false)?;
+            entry.update_fields(attributes, pa, false)?;
             reg::update_translation_table_entry(entry.raw_address(), va.into());
         }
 
