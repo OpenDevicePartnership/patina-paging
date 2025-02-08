@@ -140,7 +140,7 @@ impl AArch64Descriptor {
     }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&mut self) -> MemoryAttributes {
+    pub fn get_attributes(&self) -> MemoryAttributes {
         let mut attributes = MemoryAttributes::empty();
 
         if !self.valid() {

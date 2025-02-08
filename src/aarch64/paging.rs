@@ -667,6 +667,56 @@ fn find_num_entries(start_offset: u64, end_offset: u64, num_parent_level_entries
     num_entries
 }
 
+/// Finds the number of pages that are saved using large pages for the given address
+/// range and paging levels compared for using the lowest level.
+fn find_large_page_savings(address: u64, size: u64, level: PageLevel, lowest_page_level: PageLevel) -> u64 {
+    // The number of large pages in a given address start & length is deterministic
+    // based on the alignment of the address to the individual large pages size.
+    // Recurse down through levels finding the optimal page size to use.
+
+    if (level == lowest_page_level) || (size == 0) {
+        return 0;
+    }
+
+    if !level.supports_block_entry() {
+        return find_large_page_savings(address, size, level - 1, lowest_page_level);
+    }
+
+    let mut savings = 0;
+    let alignment = level.entry_va_size();
+    let aligned_address = (address + alignment - 1) & !(alignment - 1);
+
+    // If there are no large pages that can be used for the given address range,
+    // then continue with the next level.
+    if aligned_address + alignment > address + size {
+        return find_large_page_savings(address, size, level - 1, lowest_page_level);
+    }
+
+    // Split of the unaligned beginning and end and recursive to the next level
+    // to find the savings with smaller page sizes.
+
+    savings += find_large_page_savings(address, aligned_address - address, level - 1, lowest_page_level);
+
+    let aligned_end = (address + size) & !(alignment - 1);
+    let remainder = (address + size) - aligned_end;
+
+    savings += find_large_page_savings(aligned_end, remainder, level - 1, lowest_page_level);
+
+    // The savings is the number of sub-pages that would be saved by each large page
+    // which is 1 for the current level and then 512 for each level below which.
+    // e.g. a large page at the third level would save 1 + 512
+    let num_large_pages = (aligned_end - aligned_address) / alignment;
+    let page_entries: u64 = 512;
+    let remaining_levels = level as u64 - lowest_page_level as u64;
+
+    savings += num_large_pages;
+    if remaining_levels > 1 {
+        savings += num_large_pages * page_entries.pow(remaining_levels as u32 - 1);
+    }
+
+    savings
+}
+
 pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) -> PtResult<u64> {
     let address = VirtualAddress::new(address);
     if size == 0 || !address.is_4kb_aligned() {
@@ -703,6 +753,11 @@ pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: Pag
         total_num_tables += num_tables;
         num_tables = num_entries;
     }
+
+    // The above calculates only the lowest pages, now calculate saving through large
+    // pages.
+    let savings = find_large_page_savings(address.into(), size, highest_page_level, lowest_page_level);
+    total_num_tables -= savings;
 
     Ok(total_num_tables)
 }
