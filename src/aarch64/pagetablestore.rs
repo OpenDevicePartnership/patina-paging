@@ -106,7 +106,7 @@ impl AArch64PageTableEntry {
 
     pub fn update_shadow_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> u64 {
         let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-        let mut shadow_entry = *entry;
+        let mut shadow_entry = entry.clone();
         match shadow_entry.update_fields(attributes, pa) {
             Ok(_) => {}
             Err(_) => panic!("Failed to update shadow table entry"),
