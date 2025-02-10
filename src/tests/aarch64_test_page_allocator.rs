@@ -14,7 +14,7 @@ pub struct TestPageAllocator {
     paging_type: PagingType,
 
     highest_page_level: PageLevel,
-    lowest_page_level: PageLevel,
+    _lowest_page_level: PageLevel,
 }
 
 impl TestPageAllocator {
@@ -30,7 +30,7 @@ impl TestPageAllocator {
             ref_impl: Rc::new(RefCell::new(TestPageAllocatorImpl::new(num_pages))),
             paging_type,
             highest_page_level,
-            lowest_page_level,
+            _lowest_page_level: lowest_page_level,
         }
     }
 
@@ -109,22 +109,20 @@ impl TestPageAllocator {
         let page = self.get_page(*page_index).unwrap();
         let mut va = start_va;
         for index in start_index..=end_index {
+            let leaf: bool;
             unsafe {
                 // hex_dump(page.add(index as usize) as *const u8, 8);
-                if level == self.lowest_page_level {
-                    // For PT entries we actually store the va
-                    self.validate_page_entry(page.add(index as usize), va.into(), level, attributes);
-                } else {
-                    // For non PT entries we actually store the page base physical address from memory
-                    self.validate_page_entry(
-                        page.add(index as usize),
-                        self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 1)) as u64,
-                        level,
-                        attributes,
-                    );
+                leaf = self.validate_page_entry(
+                    page.add(index as usize),
+                    va.into(),
+                    self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 1)) as u64,
+                    level,
+                    attributes,
+                );
 
-                    // We only consume further pages from PageAllocator memory
-                    // for page tables higher than PT type
+                // We only consume further pages from PageAllocator memory
+                // for page tables higher than PT type
+                if !leaf {
                     *page_index += 1;
                 }
             }
@@ -133,11 +131,12 @@ impl TestPageAllocator {
             let curr_va_ceiling = va.round_up(level);
             let next_level_end_va = VirtualAddress::min(curr_va_ceiling, end_va);
 
-            if level != self.lowest_page_level {
+            if !leaf {
+                let next_level = level - 1;
                 self.validate_pages_internal(
                     next_level_start_va,
                     next_level_end_va,
-                    ((level as u64) - 1).into(),
+                    next_level,
                     page_index,
                     attributes,
                 );
@@ -150,39 +149,37 @@ impl TestPageAllocator {
     fn validate_page_entry(
         &self,
         entry_ptr: *const u64,
-        expected_page_base: u64,
+        virtual_address: u64,
+        next_page_table_address: u64,
         level: PageLevel,
         expected_attributes: MemoryAttributes,
-    ) {
+    ) -> bool {
         unsafe {
             let table_base = *entry_ptr;
 
-            if self.paging_type == PagingType::AArch64PageTable4KB {
-                match level {
-                    PageLevel::Lvl0 | PageLevel::Lvl1 | PageLevel::Lvl2 => {
-                        let page_base: u64 =
-                            AArch64Descriptor::from_bits(table_base).get_canonical_page_table_base().into();
-                        let attributes = AArch64Descriptor::from_bits(table_base).get_attributes();
-                        assert_eq!(page_base, expected_page_base);
-                        // we don't set any attributes on higher level page table entries, but
-                        // this will be uncacheable from the empty cache attributes.
-                        assert_eq!(attributes, MemoryAttributes::empty() | MemoryAttributes::Writeback);
-                    }
-                    PageLevel::Lvl3 => {
-                        let page_base: u64 =
-                            AArch64Descriptor::from_bits(table_base).get_canonical_page_table_base().into();
-                        let attributes = AArch64Descriptor::from_bits(table_base).get_attributes();
-                        assert_eq!(page_base, expected_page_base);
-                        assert_eq!(attributes, expected_attributes);
-                    }
-                };
+            if self.paging_type != PagingType::AArch64PageTable4KB {
+                panic!("Paging type not supported");
             }
 
-            // Compare the actual page base address populated in the entry with
-            // the expected page base address
-            // log::info!("{:016X} {:016X}", page_base, expected_page_base);
-            // assert_eq!(page_base, expected_page_base);
-            // assert_eq!(attributes, expected_attributes);
+            let pte = AArch64Descriptor::from_bits(table_base);
+            assert!(pte.valid());
+            let page_base: u64 = pte.get_canonical_page_table_base().into();
+            let attributes = pte.get_attributes();
+            let leaf = match level {
+                PageLevel::Lvl3 => true,
+                PageLevel::Lvl1 | PageLevel::Lvl2 => !pte.table_desc(),
+                _ => false,
+            };
+
+            if leaf {
+                assert_eq!(page_base, virtual_address);
+                assert_eq!(attributes, expected_attributes);
+            } else {
+                assert_eq!(page_base, next_page_table_address);
+                assert_eq!(attributes, MemoryAttributes::Writeback);
+            }
+
+            leaf
         }
     }
 

@@ -57,7 +57,7 @@ impl Iterator for AArch64PageTableStoreIter {
             Some(AArch64PageTableEntry {
                 page_base: self.base,
                 index,
-                _level: self.level,
+                level: self.level,
                 _paging_type: self.paging_type,
             })
         } else {
@@ -94,23 +94,27 @@ impl IntoIterator for AArch64PageTableStore {
 pub struct AArch64PageTableEntry {
     page_base: PhysicalAddress,
     index: u64,
-    _level: PageLevel,
+    level: PageLevel,
     _paging_type: PagingType,
 }
 
 impl AArch64PageTableEntry {
-    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
+    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, block: bool) -> PtResult<()> {
         let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
-        entry.update_fields(attributes, pa)
+        entry.update_fields(attributes, pa)?;
+        entry.set_table_desc(self.level == PageLevel::Lvl3 || !block);
+        Ok(())
     }
 
-    pub fn update_shadow_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> u64 {
+    pub fn update_shadow_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, block: bool) -> u64 {
         let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
         let mut shadow_entry = *entry;
         match shadow_entry.update_fields(attributes, pa) {
             Ok(_) => {}
             Err(_) => panic!("Failed to update shadow table entry"),
         }
+
+        shadow_entry.set_table_desc(self.level == PageLevel::Lvl3 || !block);
         shadow_entry.get_u64()
     }
 
@@ -143,6 +147,21 @@ impl AArch64PageTableEntry {
         let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
         entry.dump_entry()
     }
+
+    pub fn is_block_entry(&self) -> bool {
+        match self.level {
+            PageLevel::Lvl3 => true,
+            PageLevel::Lvl1 | PageLevel::Lvl2 => {
+                let entry = unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index) };
+                !entry.table_desc()
+            }
+            _ => false,
+        }
+    }
+
+    pub fn get_level(&self) -> PageLevel {
+        self.level
+    }
 }
 
 const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
@@ -155,9 +174,5 @@ pub unsafe fn get_entry<'a, T>(base: PhysicalAddress, index: u64) -> &'a mut T {
     }
 
     let base: u64 = base.into();
-    if base == 0 {
-        panic!("Physical base address of a page table is not expected to be zero");
-    }
-
     unsafe { &mut *((base as *mut T).add(index as usize)) }
 }
