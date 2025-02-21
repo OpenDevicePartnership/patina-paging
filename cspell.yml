@@ -10,25 +10,27 @@ version: "0.2"
 language: en
 dictionaries:
   - "companies"
-  - "softwareTerms"
+  - "cpp"
+  - "cpp-legacy"
+  - "java"
+  - "makefile"
+  - "python"
   - "rust"
+  - "softwareTerms"
 ignorePaths:
   - "**/target/**"
   - "**/book/**"
   - "**/*.asm"
   - "Makefile.toml"
+ignoreRegExpList: ["/0x[0-9a-fA-F]+/"]
 minWordLength: 5
 caseSensitive: false
 allowCompoundWords: true
 words:
-  - aarch
-  - mtrr
-  - uncacheable
-  - sctlr
-  - xffff
-  - structs
-  - kbyte
-  - efiapi
-  - vmalle
-  - nshst
   - civac
+  - kbyte
+  - mtrrs
+  - nshst
+  - sctlr
+  - vmalle
+  - xffff
