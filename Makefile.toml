@@ -85,10 +85,34 @@ args = ["tarpaulin", "@@split(COV_FLAGS, )", "--output-dir", "${CARGO_MAKE_WORKS
 description = "Run cargo clippy."
 clear = true
 command = "cargo"
-args = ["clippy", "--all-targets", "--", "-D", "warnings"]
+args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
 
 [tasks.doc]
 env = { RUSTDOCFLAGS = "-D warnings"}
 description = "Builds all rust documentation in the workspace. Example `cargo make doc`"
 command = "cargo"
 args = ["doc", "@@split(INDIVIDUAL_PACKAGE_TARGETS, )", "--features", "doc", "--open"]
+
+[tasks.fmt]
+description = "Run cargo format."
+clear = true
+command = "cargo"
+args = ["fmt", "--all"]
+
+[tasks.cspell]
+description = "Run cspell for spell checking." # npm install -g cspell@latest
+script = "cspell --quiet  --no-progress --no-summary  --dot --gitignore -e \"{.git/**,.github/**,.vscode/**}\" ."
+
+[tasks.all]
+description = "Run all tasks for PR readiness."
+dependencies = [
+    "clippy",
+    "cspell",
+    "build",
+    "build-x64",
+    "build-aarch64",
+    "test",
+    "coverage",
+    "fmt",
+    "doc",
+]
