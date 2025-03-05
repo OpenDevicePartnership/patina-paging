@@ -11,7 +11,12 @@ extern "efiapi" {
     pub fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
 }
 
-use mu_pi::protocols::cpu_arch::CpuFlushType;
+#[allow(dead_code)]
+pub(crate) enum CpuFlushType {
+    EfiCpuFlushTypeWriteBackInvalidate,
+    EfiCpuFlushTypeWriteBack,
+    EFiCpuFlushTypeInvalidate,
+}
 
 pub fn get_phys_addr_bits() -> u64 {
     // read the id_aa64mmfr0_el1 register to get the physical address bits
