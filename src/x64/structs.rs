@@ -16,6 +16,38 @@ const PAGE_INDEX_MASK: u64 = 0x1FF;
 pub(crate) const MAX_PA_5_LEVEL: u64 = 0xFFFD_FFFF_FFFF_FFFF;
 pub(crate) const MAX_PA_4_LEVEL: u64 = 0xFFFF_FEFF_FFFF_FFFF;
 
+// The following definitions are the zero VA for each level of the page table hierarchy. These are used to create a
+// VA range that is used to zero pages before putting them in the page table. These addresses are calculated as the
+// first VA in the penultimate index in the top level page table.
+pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFFFF_FF00_0000_0000;
+pub(crate) const ZERO_VA_5_LEVEL: u64 = 0xFFFE_0000_0000_0000;
+
+// The self map index is used to map the page table itself. For simplicity, we choose the final index of the top
+// level page table. This does not conflict with any identity mapping, as the final index of the top level page table
+// maps beyond the physically addressable memory.
+pub(crate) const SELF_MAP_INDEX: u64 = 0x1FF;
+
+// The zero VA index is used to create a VA range that is used to zero pages before putting them in the page table,
+// to ensure break before make semantics. We cannot use the identity mapping because it does not exist. The
+// penultimate index in the top level page table is chosen because it also falls outside of physically addressable
+// address space and will not conflict with identity mapping.
+pub(crate) const ZERO_VA_INDEX: u64 = 0x1FE;
+
+// The following definitions are the address within the self map that points to that level of the page table
+// given the overall paging scheme, 4 vs 5 level. This is determined by choosing the self map index for each
+// level need to recurse into the self map, e.g. the top level entry is 0xFFFF_FFFF_FFFF_F000 because it is index
+// 0x1FF for each level of the hierarchy and is in canonical form (e.g. bits 63:48 match bit 47).
+pub(crate) const FIVE_LEVEL_PML5_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_FFFF_F000;
+pub(crate) const FIVE_LEVEL_PML4_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_FFE0_0000;
+pub(crate) const FIVE_LEVEL_PDP_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_C000_0000;
+pub(crate) const FIVE_LEVEL_PD_SELF_MAP_BASE: u64 = 0xFFFF_FF80_0000_0000;
+pub(crate) const FIVE_LEVEL_PT_SELF_MAP_BASE: u64 = 0xFFFF_0000_0000_0000;
+
+pub(crate) const FOUR_LEVEL_PML4_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_FFFF_F000;
+pub(crate) const FOUR_LEVEL_PDP_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_FFE0_0000;
+pub(crate) const FOUR_LEVEL_PD_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_C000_0000;
+pub(crate) const FOUR_LEVEL_PT_SELF_MAP_BASE: u64 = 0xFFFF_FF80_0000_0000;
+
 const PML5_START_BIT: u64 = 48;
 const PML4_START_BIT: u64 = 39;
 const PDP_START_BIT: u64 = 30;

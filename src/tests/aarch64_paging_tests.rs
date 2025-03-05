@@ -360,7 +360,7 @@ fn test_map_memory_address_zero_size() {
         size: u64,
     }
 
-    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0x1, size: 0 }];
+    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0x1000, size: 0 }];
 
     for test_config in test_configs {
         let TestConfig { size, address, paging_type } = test_config;
@@ -377,7 +377,7 @@ fn test_map_memory_address_zero_size() {
         let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::WriteCombining;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
-        assert_eq!(res, Err(PtError::UnalignedAddress));
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
     }
 }
 
@@ -572,7 +572,7 @@ fn test_unmap_memory_address_zero_size() {
         size: u64,
     }
 
-    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0x1, size: 0 }];
+    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0x1000, size: 0 }];
 
     for test_config in test_configs {
         let TestConfig { size, address, paging_type } = test_config;
@@ -587,7 +587,7 @@ fn test_unmap_memory_address_zero_size() {
 
         let res = pt.unmap_memory_region(address, size);
         assert!(res.is_err());
-        assert_eq!(res, Err(PtError::UnalignedAddress));
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
     }
 }
 
@@ -771,11 +771,11 @@ fn test_query_memory_address_zero_size() {
     assert!(pt.is_ok());
     let pt = pt.unwrap();
 
-    let address = 0x1;
+    let address = 0x1000;
     let size = 0;
     let res = pt.query_memory_region(address, size);
     assert!(res.is_err());
-    assert_eq!(res, Err(PtError::UnalignedAddress));
+    assert_eq!(res, Err(PtError::InvalidMemoryRange));
 }
 
 // Memory remap tests
@@ -972,7 +972,7 @@ fn test_remap_memory_address_zero_size() {
         size: u64,
     }
 
-    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0x1, size: 0 }];
+    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0x1000, size: 0 }];
 
     for test_config in test_configs {
         let TestConfig { size, address, paging_type } = test_config;
@@ -989,7 +989,7 @@ fn test_remap_memory_address_zero_size() {
         let attributes = MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback;
         let res = pt.remap_memory_region(address, size, attributes);
         assert!(res.is_err());
-        assert_eq!(res, Err(PtError::UnalignedAddress));
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
     }
 }
 
@@ -1166,6 +1166,157 @@ fn test_large_page_splitting() {
                         assert_eq!(res.unwrap(), check_attributes);
                     }
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_self_map() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+    }
+
+    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0x1000 }];
+
+    for test_config in test_configs {
+        let TestConfig { address, paging_type } = test_config;
+
+        let page_allocator = TestPageAllocator::new(0x1000, paging_type);
+        let pt = AArch64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        // Create some pages before the install, so VA = PA for accessing
+        for i in 0..10 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+            let test_attributes = match i % 3 {
+                0 => MemoryAttributes::ReadOnly | MemoryAttributes::Writeback,
+                1 => MemoryAttributes::Writeback,
+                _ => MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback,
+            };
+
+            let res = pt.map_memory_region(test_address, test_size, test_attributes);
+            assert!(res.is_ok());
+
+            let res = pt.query_memory_region(test_address, test_size);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), test_attributes);
+        }
+
+        let res = pt.install_page_table();
+        assert!(res.is_ok());
+    }
+}
+
+#[test]
+fn test_install_page_table() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+    }
+
+    let test_configs = [TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: 0x1000 }];
+
+    for test_config in test_configs {
+        let TestConfig { address, paging_type } = test_config;
+
+        let page_allocator = TestPageAllocator::new(0x1000, paging_type);
+        let pt = AArch64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        // Create some pages before the install, so VA = PA for accessing
+        for i in 0..10 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+            let test_attributes = match i % 3 {
+                0 => MemoryAttributes::ReadOnly | MemoryAttributes::Writeback,
+                1 => MemoryAttributes::Writeback,
+                _ => MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback,
+            };
+
+            let res = pt.map_memory_region(test_address, test_size, test_attributes);
+            assert!(res.is_ok());
+
+            let res = pt.query_memory_region(test_address, test_size);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), test_attributes);
+        }
+
+        let res = pt.install_page_table();
+        assert!(res.is_ok());
+
+        // Try mapping some new pages after the install
+        for i in 10..20 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+            let test_attributes = match i % 3 {
+                0 => MemoryAttributes::ReadOnly | MemoryAttributes::Writeback,
+                1 => MemoryAttributes::Writeback,
+                _ => MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback,
+            };
+
+            let res = pt.map_memory_region(test_address, test_size, test_attributes);
+            if res.is_err() {
+                log::error!("Page fault occurred while mapping address: {:#x}", test_address);
+                continue;
+            }
+
+            // Confirm querying the new pages show they are mapped
+            let res = pt.query_memory_region(test_address, test_size);
+            if res.is_err() {
+                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                continue;
+            }
+            assert_eq!(res.unwrap(), test_attributes);
+        }
+
+        // Now try remapping some of the originally mapped pages
+        for i in 0..2 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+            let test_attributes = match i % 3 {
+                0 => MemoryAttributes::ReadOnly | MemoryAttributes::Writeback,
+                1 => MemoryAttributes::Writeback,
+                _ => MemoryAttributes::ExecuteProtect | MemoryAttributes::Writeback,
+            };
+
+            let res = pt.remap_memory_region(test_address, test_size, test_attributes);
+            if res.is_err() {
+                log::error!("Page fault occurred while remapping address: {:#x}", test_address);
+                continue;
+            }
+
+            // Confirm querying the remapped pages show they are remapped
+            let res = pt.query_memory_region(test_address, test_size);
+            if res.is_err() {
+                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                continue;
+            }
+            assert_eq!(res.unwrap(), test_attributes);
+        }
+
+        // Now try unmapping some of the original pages
+        for i in 2..4 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+
+            let res = pt.unmap_memory_region(test_address, test_size);
+            if res.is_err() {
+                log::error!("Page fault occurred while unmapping address: {:#x}", test_address);
+                continue;
+            }
+
+            // Confirm querying the unmapped pages show they are unmapped
+            let res = pt.query_memory_region(test_address, test_size);
+            if res.is_err() {
+                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                continue;
             }
         }
     }

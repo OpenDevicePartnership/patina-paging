@@ -28,9 +28,9 @@ pub struct AArch64PageTable<A: PageAllocator> {
     base: PhysicalAddress,
     page_allocator: A,
     paging_type: PagingType,
-
     highest_page_level: PageLevel,
     lowest_page_level: PageLevel,
+    zero_va_pt_pa: Option<PhysicalAddress>,
 }
 
 impl<A: PageAllocator> AArch64PageTable<A> {
@@ -91,7 +91,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             _ => return Err(PtError::InvalidParameter),
         };
 
-        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
+        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level, zero_va_pt_pa: None })
     }
 
     /// Consumes the page table structure and returns the page table root.
@@ -102,15 +102,59 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
         let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
         if !reg::is_mmu_enabled() {
-            reg::cache_range_operation(base, PAGE_SIZE, CpuFlushType::EFiCpuFlushTypeInvalidate);
+            reg::cache_range_operation(base, PAGE_SIZE, reg::CpuFlushType::EFiCpuFlushTypeInvalidate);
         }
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
         // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
         // entries in the page table.
-        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
+        let zero_va = match self.is_installed_and_self_mapped() {
+            true => {
+                // we don't actually need this currently, but if it isn't set and we think the self map is set up,
+                // something has gone very wrong
+                let zero_va_pt_pa = match self.zero_va_pt_pa {
+                    Some(pa) => pa,
+                    _ => return Err(PtError::InvalidParameter),
+                };
 
+                let va = ZERO_VA_4_LEVEL;
+
+                // if we have set up the zero VA, we need to map the PA we just allocated into this range to zero it
+                // as we are relying on the self map to map these pages and we want to ensure break before make
+                // semantics.
+                // the page_base doesn't matter here because we don't use it in self-map mode, but let's still set
+                // the right address in case it gets used in the future and it is easy to persist
+                let mut zero_entry = AArch64PageTableEntry::new(
+                    zero_va_pt_pa,
+                    0,
+                    PageLevel::Lvl3,
+                    self.paging_type,
+                    VirtualAddress::new(va),
+                    true,
+                );
+
+                // in theory, this isn't needed because we the zero VA will not be our currently executing code
+                // but experimentation has shown that a regular update_fields + TLB flush for VA doesn't work, but
+                // invalidating the entire TLB in that case does work, so this seems less heavy.
+                let _val = zero_entry.update_shadow_fields(
+                    MemoryAttributes::Writeback | MemoryAttributes::ExecuteProtect,
+                    base.into(),
+                    true,
+                );
+                #[cfg(all(not(test), target_arch = "aarch64"))]
+                unsafe {
+                    reg::replace_live_xlat_entry(zero_entry.raw_address(), _val, va.into());
+                }
+
+                va
+            }
+            // If we have not installed this page table, we can't use our VA range to zero pages yet and have to go on
+            // the assumption that the caller has this page mapped
+            false => base,
+        };
+
+        unsafe { ptr::write_bytes(zero_va as *mut u8, 0, PAGE_SIZE as usize) };
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
             panic!("allocate_page() returned unaligned page");
@@ -129,7 +173,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     ) -> PtResult<()> {
         let mut va = start_va;
 
-        let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        let table = AArch64PageTableStore::new(
+            base,
+            level,
+            self.paging_type,
+            start_va,
+            end_va,
+            self.is_installed_and_self_mapped(),
+        );
         for mut entry in table {
             if !entry.is_valid()
                 && level.supports_block_entry()
@@ -203,7 +254,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     ) -> PtResult<()> {
         let mut va = start_va;
 
-        let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        let table = AArch64PageTableStore::new(
+            base,
+            level,
+            self.paging_type,
+            start_va,
+            end_va,
+            self.is_installed_and_self_mapped(),
+        );
         for mut entry in table {
             if !entry.is_valid() {
                 continue;
@@ -255,7 +313,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     ) -> PtResult<()> {
         let mut va = start_va;
 
-        let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        let table = AArch64PageTableStore::new(
+            base,
+            level,
+            self.paging_type,
+            start_va,
+            end_va,
+            self.is_installed_and_self_mapped(),
+        );
         for mut entry in table {
             if !entry.is_valid() {
                 return Err(PtError::NoMapping);
@@ -318,7 +383,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     ) -> PtResult<MemoryAttributes> {
         let mut va = start_va;
 
-        let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        let table = AArch64PageTableStore::new(
+            base,
+            level,
+            self.paging_type,
+            start_va,
+            end_va,
+            self.is_installed_and_self_mapped(),
+        );
         let mut entries = table.into_iter().peekable();
         while let Some(entry) = entries.next() {
             if !entry.is_valid() {
@@ -354,7 +426,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     next_level_start_va,
                     next_level_end_va,
                     (level as u64 - 1).into(),
-                    next_base.into(),
+                    next_base,
                     prev_attributes,
                 )?;
             }
@@ -387,13 +459,6 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
         let attributes = entry.get_attributes();
         let pa = self.allocate_page()?;
-        self.map_memory_region_internal(
-            large_page_start.into(),
-            large_page_end.into(),
-            (level as u64 - 1).into(),
-            pa,
-            attributes,
-        )?;
 
         if reg::is_this_page_table_active(self.base) {
             // Need to do the heavy duty break-before-make sequence
@@ -408,6 +473,29 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             reg::update_translation_table_entry(entry.raw_address(), va.into());
         }
 
+        // invalidate the self map VA for the region covered by the large page
+        // this function gets called multiple times to split from larger pages to smaller pages, so we only invalidate
+        // once for the new page table we created
+        let table = AArch64PageTableStore::new(
+            pa,
+            level - 1,
+            self.paging_type,
+            large_page_start.into(),
+            large_page_end.into(),
+            true,
+        );
+        if let Some(tb_entry) = table.into_iter().next() {
+            reg::update_translation_table_entry(tb_entry.raw_address(), tb_entry.raw_address());
+        }
+
+        self.map_memory_region_internal(
+            large_page_start.into(),
+            large_page_end.into(),
+            (level as u64 - 1).into(),
+            pa,
+            attributes,
+        )?;
+
         Ok(())
     }
 
@@ -420,7 +508,14 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     ) {
         let mut va = start_va;
 
-        let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
+        let table = AArch64PageTableStore::new(
+            base,
+            level,
+            self.paging_type,
+            start_va,
+            end_va,
+            self.is_installed_and_self_mapped(),
+        );
         for entry in table {
             if !entry.is_valid() {
                 return;
@@ -455,29 +550,54 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     }
 
     fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
-        match self.paging_type {
-            PagingType::AArch64PageTable4KB => {
-                // Overflow check
-                address.try_add(size)?;
+        if size == 0 {
+            return Err(PtError::InvalidMemoryRange);
+        }
+        // Overflow check
+        address.try_add(size - 1)?;
 
-                // Check the memory range
-                if address + size > VirtualAddress::new(MAX_VA) {
-                    return Err(PtError::InvalidMemoryRange);
-                }
-
-                if size == 0 || !address.is_4kb_aligned() {
-                    return Err(PtError::UnalignedAddress);
-                }
-
-                // Check the memory range is aligned
-                if !(address + size).is_4kb_aligned() {
-                    return Err(PtError::UnalignedMemoryRange);
-                }
-            }
-            _ => return Err(PtError::InvalidParameter),
+        // Check the memory range
+        if address + (size - 1) > VirtualAddress::new(MAX_VA) {
+            return Err(PtError::InvalidMemoryRange);
         }
 
+        if size == 0 || !address.is_4kb_aligned() {
+            return Err(PtError::UnalignedAddress);
+        }
+
+        // Check the memory range is aligned
+        if !VirtualAddress::new(size).is_4kb_aligned() {
+            return Err(PtError::UnalignedMemoryRange);
+        }
         Ok(())
+    }
+
+    /// Check if the page table is installed and self-mapped.
+    /// This is used to determine if we can use the self-map to zero pages and reference the page table pages.
+    /// If our page table base is not in TTBR0 and the MMU is not enabled, self-mapped entries won't work for this page
+    /// table. Similarly, if the expected self-map entry is not present or does not point to the page table base, we
+    /// can't use the self-map.
+    fn is_installed_and_self_mapped(&self) -> bool {
+        if !reg::is_this_page_table_active(self.base) {
+            return false;
+        }
+
+        // this is always read from the physical address of the page table, because we are trying to determine whether
+        // we are self-mapped or not
+        let self_map_entry = AArch64PageTableEntry::new(
+            self.base,
+            SELF_MAP_INDEX,
+            self.highest_page_level,
+            self.paging_type,
+            self.base.into(),
+            false,
+        );
+
+        if !self_map_entry.is_valid() || self_map_entry.get_canonical_page_table_base() != self.base {
+            return false;
+        }
+
+        true
     }
 }
 
@@ -525,21 +645,17 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         self.unmap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base)
     }
 
-    fn install_page_table(&self) -> PtResult<()> {
+    fn install_page_table(&mut self) -> PtResult<()> {
         // This step will need to configure the MMU and then activate it on the newly created table.
 
         let pa_bits = reg::get_phys_addr_bits();
-        //
-        // Limit the virtual address space to what we can actually use: core
-        // mandates a 1:1 mapping, so no point in making the virtual address
-        // space larger than the physical address space. We also have to take
-        // into account the architectural limitations that result from firmware's
-        // use of 4 KB pages.
-        //
         let max_address_bits = core::cmp::min(pa_bits, MAX_VA_BITS);
         let max_address = (1 << max_address_bits) - 1;
 
-        let t0sz = 64 - max_address_bits;
+        // TCR_EL2.T0SZ defines the size of the VA space addressed by TTBR0_EL2. The VA space size is 2^(64 - t0sz) bytes.
+        // We always want to set the minimum size of TCR_EL2.T0SZ to 16, which gives us a 48-bit VA space. This allows
+        // us to use the self map beyond PA space (depending on platform)
+        let t0sz = 16;
         let root_table_cnt = get_root_table_count(t0sz);
 
         let mut tcr: u64;
@@ -617,6 +733,15 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
         // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
         reg::set_mair(0x44 << 8 | 0xBB << 16 | 0xFF << 24);
+
+        // allocate the pages to map the zero VA range before we install the page table so that we can zero them with
+        // the old page table that has them mapped
+        let pa_array = [self.allocate_page()?, self.allocate_page()?, self.allocate_page()?];
+        for pa in &pa_array {
+            let pa: u64 = (*pa).into();
+            unsafe { ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE as usize) };
+        }
+
         // Set TTBR0
         reg::set_ttbr0(self.base.into());
 
@@ -628,6 +753,99 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
 
             reg::enable_mmu();
         }
+
+        // create our self-map entry as the final entry
+        let mut self_map_entry = AArch64PageTableEntry::new(
+            self.base,
+            SELF_MAP_INDEX,
+            PageLevel::Lvl0,
+            self.paging_type,
+            VirtualAddress::new(self.base.into()),
+            false,
+        );
+
+        // create it with permissive attributes
+        let _val = self_map_entry.update_shadow_fields(TABLE_ATTRIBUTES, self.base, false);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(self_map_entry.raw_address(), _val, self_map_entry.raw_address());
+        }
+
+        // now set up the zero VA range so that we can zero pages before installing them in the page table
+        // this will be at index 0x1FE for the top level page table.
+        // the base doesn't actually matter here since we are using the self map and will calculate the correct
+        // base for the zero VA range
+        let zero_va = ZERO_VA_4_LEVEL;
+
+        let pml4_index = ZERO_VA_INDEX;
+        let pml4_base = self.base;
+
+        // assign PA to the penultimate PML4 entry
+        let mut second_last_pml4_entry = AArch64PageTableEntry::new(
+            pml4_base,
+            pml4_index,
+            PageLevel::Lvl0,
+            self.paging_type,
+            VirtualAddress::new(zero_va),
+            true,
+        );
+        let _val = second_last_pml4_entry.update_shadow_fields(TABLE_ATTRIBUTES, pa_array[0], false);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(
+                second_last_pml4_entry.raw_address(),
+                _val,
+                second_last_pml4_entry.raw_address(),
+            );
+        }
+
+        // set up the PDP entry
+        let mut pdp_entry = AArch64PageTableEntry::new(
+            pa_array[0],
+            0,
+            PageLevel::Lvl1,
+            self.paging_type,
+            VirtualAddress::new(zero_va),
+            true,
+        );
+        let _val = pdp_entry.update_shadow_fields(TABLE_ATTRIBUTES, pa_array[1], false);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(pdp_entry.raw_address(), _val, pdp_entry.raw_address());
+        }
+
+        // set up the PD entry
+        let mut pd_entry = AArch64PageTableEntry::new(
+            pa_array[1],
+            0,
+            PageLevel::Lvl2,
+            self.paging_type,
+            VirtualAddress::new(zero_va),
+            true,
+        );
+        let _val = pd_entry.update_shadow_fields(TABLE_ATTRIBUTES, pa_array[2], false);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(pd_entry.raw_address(), _val, pd_entry.raw_address());
+        }
+
+        // set up the PT entry
+        let mut pt_entry = AArch64PageTableEntry::new(
+            pa_array[2],
+            0,
+            PageLevel::Lvl3,
+            self.paging_type,
+            VirtualAddress::new(zero_va),
+            true,
+        );
+        let _val = pt_entry.update_shadow_fields(MemoryAttributes::Writeback, PhysicalAddress::new(0), true);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(pt_entry.raw_address(), _val, pt_entry.raw_address());
+        }
+        pt_entry.set_invalid();
+
+        self.zero_va_pt_pa = Some(pa_array[2]);
 
         Ok(())
     }

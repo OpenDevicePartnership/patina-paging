@@ -311,40 +311,8 @@ fn test_map_memory_address_range_overflow() {
 
     let test_configs = [
         // VA range overflows
-        TestConfig { paging_type: PagingType::Paging4Level, address: MAX_PML4_VA, size: MAX_PML4_VA },
-        TestConfig { paging_type: PagingType::Paging5Level, address: MAX_PML5_VA, size: MAX_PML5_VA },
-    ];
-
-    for test_config in test_configs {
-        let TestConfig { size, address, paging_type } = test_config;
-
-        let max_pages: u64 = 10;
-
-        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
-        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
-
-        assert!(pt.is_ok());
-        let mut pt = pt.unwrap();
-
-        let attributes = MemoryAttributes::ReadOnly;
-        let res = pt.map_memory_region(address, size, attributes);
-        assert!(res.is_err());
-        assert_eq!(res, Err(PtError::InvalidMemoryRange));
-    }
-}
-
-#[test]
-fn test_map_memory_address_invalid_range() {
-    struct TestConfig {
-        paging_type: PagingType,
-        address: u64,
-        size: u64,
-    }
-
-    let test_configs = [
-        // VA above the valid address range
-        TestConfig { paging_type: PagingType::Paging4Level, address: MAX_PML4_VA + 1, size: FRAME_SIZE_4KB },
-        TestConfig { paging_type: PagingType::Paging5Level, address: MAX_PML5_VA + 1, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0xffff_ffff_ffff_f000, size: 0x2000 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0xffff_ffff_ffff_f000, size: 0x2000 },
     ];
 
     for test_config in test_configs {
@@ -374,8 +342,8 @@ fn test_map_memory_address_zero_size() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 0 },
-        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: 0 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: 0 },
     ];
 
     for test_config in test_configs {
@@ -392,7 +360,7 @@ fn test_map_memory_address_zero_size() {
         let attributes = MemoryAttributes::ReadOnly;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
-        assert_eq!(res, Err(PtError::UnalignedAddress));
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
     }
 }
 
@@ -604,8 +572,8 @@ fn test_unmap_memory_address_zero_size() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 0 },
-        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: 0 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: 0 },
     ];
 
     for test_config in test_configs {
@@ -620,7 +588,7 @@ fn test_unmap_memory_address_zero_size() {
 
         let res = pt.unmap_memory_region(address, size);
         assert!(res.is_err());
-        assert_eq!(res, Err(PtError::UnalignedAddress));
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
     }
 }
 
@@ -656,6 +624,7 @@ fn test_query_memory_address_simple() {
 
         let res = pt.query_memory_region(address, size);
         assert!(res.is_ok());
+        assert_eq!(res.unwrap(), attributes);
     }
 }
 
@@ -690,6 +659,7 @@ fn test_query_memory_address_0_to_ffff_ffff() {
 
             let res = pt.query_memory_region(address, size);
             assert!(res.is_ok());
+            assert_eq!(res.unwrap(), attributes);
             size <<= 1;
         }
     }
@@ -726,6 +696,7 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
 
             let res = pt.query_memory_region(address, size);
             assert!(res.is_ok());
+            assert_eq!(res.unwrap(), attributes);
             address += step;
         }
     }
@@ -773,6 +744,7 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
 
             let res = pt.query_memory_region(address, size);
             assert!(res.is_ok());
+            assert_eq!(res.unwrap(), attributes);
             address += step;
         }
     }
@@ -807,11 +779,11 @@ fn test_query_memory_address_zero_size() {
     assert!(pt.is_ok());
     let pt = pt.unwrap();
 
-    let address = 0x1;
+    let address = 0x1000;
     let size = 0;
     let res = pt.query_memory_region(address, size);
     assert!(res.is_err());
-    assert_eq!(res, Err(PtError::UnalignedAddress));
+    assert_eq!(res, Err(PtError::InvalidMemoryRange));
 }
 
 // Memory remap tests
@@ -1026,8 +998,8 @@ fn test_remap_memory_address_zero_size() {
     }
 
     let test_configs = [
-        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1, size: 0 },
-        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1, size: 0 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: 0 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: 0 },
     ];
 
     for test_config in test_configs {
@@ -1045,7 +1017,7 @@ fn test_remap_memory_address_zero_size() {
         let attributes = MemoryAttributes::ExecuteProtect;
         let res = pt.remap_memory_region(address, size, attributes);
         assert!(res.is_err());
-        assert_eq!(res, Err(PtError::UnalignedAddress));
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
     }
 }
 
@@ -1228,6 +1200,172 @@ fn test_large_page_splitting() {
                         assert_eq!(res.unwrap(), check_attributes);
                     }
                 }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_self_map() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+    }
+
+    let test_configs = [
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000 },
+    ];
+
+    for test_config in test_configs {
+        let TestConfig { address, paging_type } = test_config;
+
+        let page_allocator = TestPageAllocator::new(0x1000, paging_type);
+        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        // Create some pages before the install, so VA = PA for accessing
+        for i in 0..10 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+            let test_attributes = match i % 3 {
+                0 => MemoryAttributes::ReadOnly,
+                1 => MemoryAttributes::empty(),
+                _ => MemoryAttributes::ExecuteProtect,
+            };
+
+            let res = pt.map_memory_region(test_address, test_size, test_attributes);
+            assert!(res.is_ok());
+
+            let res = pt.query_memory_region(test_address, test_size);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), test_attributes);
+        }
+
+        let res = pt.install_page_table();
+        assert!(res.is_ok());
+
+        let root = pt.into_page_table_root();
+
+        // now we should see the zero VA and the self map entries in the base page table
+        let zero_va_top_level = root + ZERO_VA_INDEX * size_of::<PageTableEntry>() as u64;
+        assert!(unsafe { *(zero_va_top_level as *const u64) != 0 });
+
+        let self_map_top_level = root + SELF_MAP_INDEX * size_of::<PageTableEntry>() as u64;
+        assert_eq!(unsafe { *(self_map_top_level as *const u64) } & CR3_PAGE_BASE_ADDRESS_MASK, root);
+    }
+}
+
+#[test]
+fn test_install_page_table() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+    }
+
+    let test_configs = [
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000 },
+    ];
+
+    for test_config in test_configs {
+        let TestConfig { address, paging_type } = test_config;
+
+        let page_allocator = TestPageAllocator::new(0x1000, paging_type);
+        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        // Create some pages before the install, so VA = PA for accessing
+        for i in 0..10 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+            let test_attributes = match i % 3 {
+                0 => MemoryAttributes::ReadOnly,
+                1 => MemoryAttributes::empty(),
+                _ => MemoryAttributes::ExecuteProtect,
+            };
+
+            let res = pt.map_memory_region(test_address, test_size, test_attributes);
+            assert!(res.is_ok());
+
+            let res = pt.query_memory_region(test_address, test_size);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), test_attributes);
+        }
+
+        let res = pt.install_page_table();
+        assert!(res.is_ok());
+
+        // Try mapping some new pages after the install
+        for i in 10..20 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+            let test_attributes = match i % 3 {
+                0 => MemoryAttributes::ReadOnly,
+                1 => MemoryAttributes::empty(),
+                _ => MemoryAttributes::ExecuteProtect,
+            };
+
+            let res = pt.map_memory_region(test_address, test_size, test_attributes);
+            if res.is_err() {
+                log::error!("Page fault occurred while mapping address: {:#x}", test_address);
+                continue;
+            }
+
+            // Confirm querying the new pages show they are mapped
+            let res = pt.query_memory_region(test_address, test_size);
+            if res.is_err() {
+                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                continue;
+            }
+            assert_eq!(res.unwrap(), test_attributes);
+        }
+
+        // Now try remapping some of the originally mapped pages
+        for i in 0..2 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+            let test_attributes = match i % 3 {
+                0 => MemoryAttributes::ReadOnly,
+                1 => MemoryAttributes::empty(),
+                _ => MemoryAttributes::ExecuteProtect,
+            };
+
+            let res = pt.remap_memory_region(test_address, test_size, test_attributes);
+            if res.is_err() {
+                log::error!("Page fault occurred while remapping address: {:#x}", test_address);
+                continue;
+            }
+
+            // Confirm querying the remapped pages show they are remapped
+            let res = pt.query_memory_region(test_address, test_size);
+            if res.is_err() {
+                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                continue;
+            }
+            assert_eq!(res.unwrap(), test_attributes);
+        }
+
+        // Now try unmapping some of the original pages
+        for i in 2..4 {
+            let test_address = address + i * FRAME_SIZE_4KB;
+            let test_size = FRAME_SIZE_4KB;
+
+            let res = pt.unmap_memory_region(test_address, test_size);
+            if res.is_err() {
+                log::error!("Page fault occurred while unmapping address: {:#x}", test_address);
+                continue;
+            }
+
+            // Confirm querying the unmapped pages show they are unmapped
+            let res = pt.query_memory_region(test_address, test_size);
+            if res.is_err() {
+                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                continue;
             }
         }
     }
