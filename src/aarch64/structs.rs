@@ -66,26 +66,22 @@ impl AArch64Descriptor {
         self.valid() && self.table_desc()
     }
 
-    pub fn get_canonical_page_table_base(&self) -> PhysicalAddress {
+    pub fn get_canonical_page_table_base(&self) -> VirtualAddress {
         // This logic will need to be specialized if 16Kb or 64Kb granules are used.
         (self.page_frame_number() << PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT).into()
     }
 
     /// update all the fields and table base address
     pub fn update_fields(&mut self, attributes: MemoryAttributes, next_pa: PhysicalAddress) -> PtResult<()> {
-        if !self.is_valid_table() {
-            let next_level_table_base = next_pa.into();
-            if !is_4kb_aligned(next_level_table_base) {
-                panic!("allocated page is not 4k aligned {:X}", next_level_table_base);
-            }
-
-            let pfn = next_level_table_base >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;
-            self.set_page_frame_number(pfn);
-
-            // TODO this needs to change for large pages.
-            self.set_table_desc(true);
-            self.set_valid(true);
+        let next_level_table_base = next_pa.into();
+        if !is_4kb_aligned(next_level_table_base) {
+            panic!("allocated page is not 4k aligned {:X}", next_level_table_base);
         }
+
+        let pfn = next_level_table_base >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;
+        self.set_page_frame_number(pfn);
+
+        self.set_valid(true);
 
         // update the memory attributes irrespective of new or old page table
         self.set_attributes(attributes);
@@ -136,8 +132,6 @@ impl AArch64Descriptor {
         if attributes.contains(MemoryAttributes::ReadProtect) {
             self.set_valid(false);
         } else {
-            // TODO: this needs to be updated for large pages.
-            self.set_table_desc(true);
             self.set_valid(true);
             self.set_access_flag(true);
         }
