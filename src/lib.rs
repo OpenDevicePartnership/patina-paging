@@ -1,4 +1,7 @@
 #![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
+// Because of different architectures and very different test configurations, when building a given configuration,
+// Rust thinks a lot of code is dead. Let's just ignore this check
+#![allow(dead_code)]
 
 #[macro_use]
 extern crate alloc;
@@ -70,6 +73,18 @@ bitflags! {
 }
 
 use page_allocator::PageAllocator;
+
+// Define some commonly used sizes here
+pub(crate) const SIZE_4KB: u64 = 0x1000;
+pub(crate) const SIZE_2MB: u64 = 0x200000;
+pub(crate) const SIZE_1GB: u64 = 0x40000000;
+pub(crate) const SIZE_4GB: u64 = 0x100000000;
+pub(crate) const SIZE_512GB: u64 = 0x8000000000;
+pub(crate) const SIZE_64GB: u64 = 0x1000000000;
+pub(crate) const SIZE_1TB: u64 = 0x10000000000;
+pub(crate) const SIZE_4TB: u64 = 0x400000000000;
+pub(crate) const SIZE_16TB: u64 = 0x100000000000;
+pub(crate) const SIZE_256TB: u64 = 0x1000000000000;
 
 pub trait PageTable {
     /// This type is used to allow the caller to borrow the allocator and get a concrete type back
