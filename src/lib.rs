@@ -181,7 +181,7 @@ pub trait PageTable {
     fn get_page_table_pages_for_size(&self, address: u64, size: u64) -> PtResult<u64>;
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PagingType {
     Paging5Level,
     Paging4Level,

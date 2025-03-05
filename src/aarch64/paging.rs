@@ -319,7 +319,8 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let mut va = start_va;
 
         let table = AArch64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        for entry in table {
+        let mut entries = table.into_iter().peekable();
+        while let Some(entry) = entries.next() {
             if !entry.is_valid() {
                 return Err(PtError::NoMapping);
             }
@@ -353,11 +354,16 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     next_level_start_va,
                     next_level_end_va,
                     (level as u64 - 1).into(),
-                    next_base,
+                    next_base.into(),
                     prev_attributes,
                 )?;
             }
-            va = va.get_next_va(level);
+
+            // only calculate the next VA if there is another entry in the table we are processing
+            // when processing the self map, always calculating the next VA can result in overflow needlessly
+            if entries.peek().is_some() {
+                va = va.get_next_va(level);
+            }
         }
 
         Ok(*prev_attributes)
@@ -486,6 +492,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
+        if address + size - 1 > VirtualAddress::new(MAX_PA) {
+            panic!(
+                "Address range {:#x?} - {:#x?} exceeds maximum VA that can be supported by this crate",
+                address,
+                address + size - 1
+            );
+        }
 
         // We map until next alignment
         let start_va = address;
@@ -498,6 +511,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
+        if address + size - 1 > VirtualAddress::new(MAX_PA) {
+            panic!(
+                "Address range {:#x?} - {:#x?} exceeds maximum VA that can be supported by this crate",
+                address,
+                address + size - 1
+            );
+        }
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -565,7 +585,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
                 panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
             }
         } else {
-            panic!("mu-paging is only expected to run at EL2 and EL1, not EL3.");
+            panic!("paging is only expected to run at EL2 and EL1, not EL3.");
         }
 
         //
@@ -616,6 +636,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
+        if address + size - 1 > VirtualAddress::new(MAX_PA) {
+            panic!(
+                "Address range {:#x?} - {:#x?} exceeds maximum VA that can be supported by this crate",
+                address,
+                address + size - 1
+            );
+        }
 
         let start_va = address;
         let end_va = address + size - 1;
