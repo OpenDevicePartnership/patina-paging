@@ -6,10 +6,10 @@
 use super::{
     pagetablestore::{X64PageTableEntry, X64PageTableStore},
     reg::{invalidate_tlb, write_cr3},
-    structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_PML4_VA, MAX_PML5_VA, PAGE_SIZE},
+    structs::*,
 };
 use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
-use core::ptr;
+use core::{arch::asm, ptr};
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
@@ -314,7 +314,8 @@ impl<A: PageAllocator> X64PageTable<A> {
         let mut va = start_va;
 
         let table = X64PageTableStore::new(base, level, self.paging_type, start_va, end_va);
-        for entry in table {
+        let mut entries = table.into_iter().peekable();
+        while let Some(entry) = entries.next() {
             if !entry.present() {
                 return Err(PtError::NoMapping);
             }
@@ -350,7 +351,12 @@ impl<A: PageAllocator> X64PageTable<A> {
                     prev_attributes,
                 )?;
             }
-            va = va.get_next_va(level);
+
+            // only calculate the next VA if there is another entry in the table we are processing
+            // when processing the self map, always calculating the next VA can result in overflow needlessly
+            if entries.peek().is_some() {
+                va = va.get_next_va(level);
+            }
         }
 
         Ok(*prev_attributes)
@@ -430,23 +436,12 @@ impl<A: PageAllocator> X64PageTable<A> {
     }
 
     fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
-        // Overflow check
-        address.try_add(size)?;
-
-        // Check the memory range
-        match self.paging_type {
-            PagingType::Paging5Level => {
-                if address + size > VirtualAddress::new(MAX_PML5_VA) {
-                    return Err(PtError::InvalidMemoryRange);
-                }
-            }
-            PagingType::Paging4Level => {
-                if address + size > VirtualAddress::new(MAX_PML4_VA) {
-                    return Err(PtError::InvalidMemoryRange);
-                }
-            }
-            _ => return Err(PtError::InvalidParameter),
+        if size == 0 {
+            return Err(PtError::InvalidMemoryRange);
         }
+
+        // Overflow check, size is 0-based
+        address.try_add(size - 1)?;
 
         match self.paging_type {
             PagingType::Paging5Level | PagingType::Paging4Level => {
@@ -455,7 +450,7 @@ impl<A: PageAllocator> X64PageTable<A> {
                 }
 
                 // Check the memory range is aligned
-                if !(address + size).is_4kb_aligned() {
+                if !VirtualAddress::new(size).is_4kb_aligned() {
                     return Err(PtError::UnalignedMemoryRange);
                 }
             }
@@ -478,11 +473,26 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
 
         self.validate_address_range(address, size)?;
 
+        let max_pa = match self.paging_type {
+            PagingType::Paging5Level => VirtualAddress::new(MAX_PA_5_LEVEL),
+            PagingType::Paging4Level => VirtualAddress::new(MAX_PA_4_LEVEL),
+            _ => return Err(PtError::InvalidParameter),
+        };
+
+        if address + size - 1 > max_pa {
+            panic!(
+                "Address range {:#x?} - {:#x?} exceeds maximum PA that can be supported by this crate",
+                address,
+                address + size - 1
+            );
+        }
+
         // We map until next alignment
         let start_va = address;
         let end_va = address + size - 1;
 
-        let result = self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes);
+        let result =
+            self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base.into(), attributes);
 
         unsafe { invalidate_tlb(self.base.into()) };
 
@@ -536,7 +546,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         self.validate_address_range(address, size)?;
 
         let start_va = address;
-        let end_va = address + size - 1;
+        let end_va = address + (size - 1);
 
         let mut prev_attributes = MemoryAttributes::empty();
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)

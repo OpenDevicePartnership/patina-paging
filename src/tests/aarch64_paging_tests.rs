@@ -1,7 +1,7 @@
 use crate::{
     aarch64::{
         paging::{num_page_tables_required, AArch64PageTable},
-        structs::{FRAME_SIZE_4KB, MAX_VA},
+        structs::*,
     },
     tests::aarch64_test_page_allocator::TestPageAllocator,
     MemoryAttributes, PageTable, PagingType, PtError,
