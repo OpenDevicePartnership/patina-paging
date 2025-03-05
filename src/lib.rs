@@ -146,7 +146,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn install_page_table(&self) -> PtResult<()>;
+    fn install_page_table(&mut self) -> PtResult<()>;
 
     /// Function to query the mapping status and return attribute of supplied
     /// memory region if it is properly and consistently mapped.
