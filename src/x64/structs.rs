@@ -112,12 +112,12 @@ impl PageTableEntry {
     }
 
     /// return the 40 bits table base address converted to canonical address
-    pub fn get_canonical_page_table_base(&self) -> PhysicalAddress {
+    pub fn get_canonical_page_table_base(&self) -> VirtualAddress {
         let mut page_table_base_address = self.page_table_base_address();
 
         page_table_base_address <<= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT;
 
-        PhysicalAddress(page_table_base_address)
+        VirtualAddress(page_table_base_address)
     }
 
     pub fn dump_entry(&self) -> String {

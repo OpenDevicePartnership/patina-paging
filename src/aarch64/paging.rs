@@ -183,7 +183,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     next_level_start_va,
                     next_level_end_va,
                     (level as u64 - 1).into(),
-                    next_base,
+                    next_base.into(),
                     attributes,
                 )?;
             }
@@ -235,7 +235,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     next_level_start_va,
                     next_level_end_va,
                     (level as u64 - 1).into(),
-                    next_base,
+                    next_base.into(),
                 )?;
             }
 
@@ -297,7 +297,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     next_level_start_va,
                     next_level_end_va,
                     (level as u64 - 1).into(),
-                    next_base,
+                    next_base.into(),
                     attributes,
                 )?;
             }
@@ -440,7 +440,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     next_level_start_va,
                     next_level_end_va,
                     (level as u64 - 1).into(),
-                    next_base,
+                    next_base.into(),
                 );
             }
 

@@ -148,7 +148,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
-        base: PhysicalAddress,
+        base: VirtualAddress,
         attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
@@ -204,7 +204,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
-        base: PhysicalAddress,
+        base: VirtualAddress,
     ) -> PtResult<()> {
         let mut va = start_va;
 
@@ -253,7 +253,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
-        base: PhysicalAddress,
+        base: VirtualAddress,
         attributes: MemoryAttributes,
     ) -> PtResult<()> {
         let mut va = start_va;
@@ -308,7 +308,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
-        base: PhysicalAddress,
+        base: VirtualAddress,
         prev_attributes: &mut MemoryAttributes,
     ) -> PtResult<MemoryAttributes> {
         let mut va = start_va;
@@ -378,7 +378,7 @@ impl<A: PageAllocator> X64PageTable<A> {
             large_page_start.into(),
             large_page_end.into(),
             (level as u64 - 1).into(),
-            pa,
+            pa.into(),
             attributes,
         )?;
 
@@ -390,7 +390,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
-        base: PhysicalAddress,
+        base: VirtualAddress,
     ) {
         let mut va = start_va;
 
@@ -539,7 +539,13 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let end_va = address + size - 1;
 
         let mut prev_attributes = MemoryAttributes::empty();
-        self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
+        self.query_memory_region_internal(
+            start_va,
+            end_va,
+            self.highest_page_level,
+            self.base.into(),
+            &mut prev_attributes,
+        )
     }
 
     fn dump_page_tables(&self, address: u64, size: u64) {
@@ -557,7 +563,7 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         log::info!("                                                      | |           |                                        |   |Z|S|N| |D|T|S|W| |");
         log::info!("{}", "-".repeat(132));
         // uses current cr3 base
-        self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base);
+        self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base.into());
         log::info!("{}", "-".repeat(132));
     }
 
