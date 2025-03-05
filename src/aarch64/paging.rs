@@ -1,12 +1,13 @@
 use super::{
     pagetablestore::{AArch64PageTableEntry, AArch64PageTableStore},
     reg,
-    structs::{PageLevel, PhysicalAddress, VirtualAddress, MAX_VA, PAGE_SIZE},
+    structs::*,
 };
-use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
+use crate::{
+    page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult, SIZE_16TB, SIZE_1TB,
+    SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB,
+};
 use core::ptr;
-use mu_pi::protocols::cpu_arch::CpuFlushType;
-use uefi_sdk::base::{SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB};
 
 const MAX_VA_BITS: u64 = 48;
 
@@ -44,13 +45,13 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             reg::cache_range_operation(
                 function_pointer,
                 unsafe { replace_live_xlat_entry_size } as u64,
-                CpuFlushType::EfiCpuFlushTypeWriteBack,
+                reg::CpuFlushType::EfiCpuFlushTypeWriteBack,
             );
         }
 
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
         if !reg::is_mmu_enabled() {
-            reg::cache_range_operation(base, PAGE_SIZE, CpuFlushType::EFiCpuFlushTypeInvalidate);
+            reg::cache_range_operation(base, PAGE_SIZE, reg::CpuFlushType::EFiCpuFlushTypeInvalidate);
         }
 
         // SAFETY: We just allocated the page, so it is safe to use it.
@@ -584,7 +585,11 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         if !reg::is_mmu_enabled() {
             // Make sure we are not inadvertently hitting in the caches
             // when populating the page tables.
-            reg::cache_range_operation(self.base.into(), root_table_cnt * 8, CpuFlushType::EFiCpuFlushTypeInvalidate);
+            reg::cache_range_operation(
+                self.base.into(),
+                root_table_cnt * 8,
+                reg::CpuFlushType::EFiCpuFlushTypeInvalidate,
+            );
         }
 
         // EFI_MEMORY_UC ==> MAIR_ATTR_DEVICE_MEMORY
