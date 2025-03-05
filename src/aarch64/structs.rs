@@ -24,6 +24,37 @@ pub(crate) const INDEX_MASK: u64 = 0x1FF;
 
 const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
 
+// The zero VA used to create a VA range to zero pages before putting them in the page table. These addresses are
+// calculated as the first VA in the penultimate index in the top level page table.
+pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFF00_0000_0000;
+
+// The self map index is used to map the page table itself. For simplicity, we choose the final index of the top
+// level page table. This has a potential conflict with identity mapping, as the final index of the top level page table
+// in TTBR0 is still within physically addressable memory.
+pub(crate) const SELF_MAP_INDEX: u64 = 0x1FF;
+
+// The zero VA index is used to create a VA range that is used to zero pages before putting them in the page table,
+// to ensure break before make semantics. We cannot use the identity mapping because it does not exist. The
+// penultimate index in the top level page table is chosen, though this has a potential conflict with identity mapping,
+// as the final index of the top level page table in TTBR0 is still within physically addressable memory.
+pub(crate) const ZERO_VA_INDEX: u64 = 0x1FE;
+
+// The following definitions are the address within the self map that points to that level of the page table
+// given the overall paging scheme, which is only 4 level for aarch64. This is determined by choosing the self map
+// index for each level need to recurse into the self map, e.g. the top level entry is 0xFFFF_FFFF_F000 because it is
+// index 0x1FF for each level of the hierarchy.
+// N.B. These addresses are different for AARCH64 than X64 because there are two page table roots on AARCH64, TTBR0 and
+// TTBR1. Bits 63:48 of the VA are used to select the root, so the self map must be at the top of the address space that
+// corresponds to TTBR0, as that is the only root that this crate currently uses. However, this limits the address range
+// supported by this crate as we steal the last two entries in the top level page table for the zero VA and the self
+// map. The crate explicitly panics if such high level addresses are used, but this will be fixed in a future version
+// of this crate so as not to artificially limit the address range lower than what is physically addressable by the
+// CPU.
+pub(crate) const FOUR_LEVEL_PML4_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_F000;
+pub(crate) const FOUR_LEVEL_PDP_SELF_MAP_BASE: u64 = 0xFFFF_FFE0_0000;
+pub(crate) const FOUR_LEVEL_PD_SELF_MAP_BASE: u64 = 0xFFFF_C000_0000;
+pub(crate) const FOUR_LEVEL_PT_SELF_MAP_BASE: u64 = 0xFF80_0000_0000;
+
 fn is_4kb_aligned(addr: u64) -> bool {
     (addr & (FRAME_SIZE_4KB - 1)) == 0
 }
