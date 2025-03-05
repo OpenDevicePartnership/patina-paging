@@ -8,6 +8,10 @@ use core::{
 
 pub(crate) const MAX_VA: u64 = 0x0000_ffff_ffff_ffff;
 
+// this is the maximum physical address that can be used in the system because of our artifical restriction to use
+// the zero VA and self map index in the top level page table. This is a temporary restriction
+pub(crate) const MAX_PA: u64 = 0x0000_feff_ffff_ffff;
+
 const LEVEL0_START_BIT: u64 = 39;
 const LEVEL1_START_BIT: u64 = 30;
 const LEVEL2_START_BIT: u64 = 21;
@@ -287,7 +291,7 @@ impl fmt::Display for PageLevel {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
 pub struct VirtualAddress(u64);
 impl VirtualAddress {
     pub fn new(va: u64) -> Self {
@@ -350,6 +354,12 @@ impl From<VirtualAddress> for u64 {
     }
 }
 
+impl From<PhysicalAddress> for VirtualAddress {
+    fn from(va: PhysicalAddress) -> Self {
+        Self(va.0)
+    }
+}
+
 impl Display for VirtualAddress {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         write!(fmt, "0x{:016X}", self.0)
@@ -384,7 +394,7 @@ impl Sub<u64> for VirtualAddress {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct PhysicalAddress(u64);
 impl PhysicalAddress {
     pub fn new(va: u64) -> Self {

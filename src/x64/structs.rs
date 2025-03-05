@@ -11,8 +11,10 @@ pub const PAGE_SIZE: u64 = 0x1000; // 4KB
 
 const PAGE_INDEX_MASK: u64 = 0x1FF;
 
-pub(crate) const MAX_PML5_VA: u64 = 0x01ff_ffff_ffff_ffff;
-pub(crate) const MAX_PML4_VA: u64 = 0x0000_ffff_ffff_ffff;
+// The following definitions are the maximum physical address for each level of the page table hierarchy. These are
+// above the range generally supported by processors, but we only care that our zero VA and self-map aren't overwritten
+pub(crate) const MAX_PA_5_LEVEL: u64 = 0xFFFD_FFFF_FFFF_FFFF;
+pub(crate) const MAX_PA_4_LEVEL: u64 = 0xFFFF_FEFF_FFFF_FFFF;
 
 const PML5_START_BIT: u64 = 48;
 const PML4_START_BIT: u64 = 39;
@@ -250,7 +252,10 @@ impl VirtualAddress {
     /// round_up(va, PD) = 000000|0000000000|000000000|000000000|000000011|111111111|111111111111
     pub fn round_up(&self, level: PageLevel) -> VirtualAddress {
         let va = self.0;
-        Self((((va >> level.start_bit()) + 1) << level.start_bit()) - 1)
+        let mask = level.entry_va_size() - 1;
+        let va = va & !mask;
+        let va = va | mask;
+        Self(va)
     }
 
     /// This will return the next va addressable by the current entry
@@ -348,7 +353,7 @@ impl From<PhysicalAddress> for VirtualAddress {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct PhysicalAddress(u64);
 impl PhysicalAddress {
     pub fn new(va: u64) -> Self {

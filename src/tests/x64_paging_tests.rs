@@ -2,7 +2,7 @@ use crate::{
     tests::x64_test_page_allocator::TestPageAllocator,
     x64::{
         paging::{num_page_tables_required, X64PageTable},
-        structs::{FRAME_SIZE_4KB, MAX_PML4_VA, MAX_PML5_VA},
+        structs::*,
     },
     MemoryAttributes, PageTable, PagingType, PtError,
 };
