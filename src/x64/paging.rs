@@ -4,7 +4,7 @@
 /// - x64 4KB 4 level paging
 ///
 use super::{
-    pagetablestore::{X64PageTableEntry, X64PageTableStore},
+    pagetablestore::{pub_invalidate_self_map_va, X64PageTableEntry, X64PageTableStore},
     reg::{invalidate_tlb, write_cr3},
     structs::*,
 };
@@ -121,7 +121,9 @@ impl<A: PageAllocator> X64PageTable<A> {
                 )?;
 
                 // invalidate the TLB entry for the zero VA to ensure we are zeroing our newly placed page
-                unsafe { asm!("invlpg [{}]", in(reg) va) };
+                unsafe { asm!("mfence", "invlpg [{}]", in(reg) va) };
+
+                log::error!("OSDDEBUG6 Zeroing page at VA {:#x?} PA {:#x?}", va, base);
 
                 va
             }
@@ -477,6 +479,21 @@ impl<A: PageAllocator> X64PageTable<A> {
         // unique address in the self map that has not been referenced before. We do invalidate the TLB after finishing
         // whichever operation called this function.
         entry.update_fields(MemoryAttributes::empty(), pa, false)?;
+        log::error!(
+            "OSDDEBUG5 Splitting large page at VA {:#x?} to {:#x?} at level {:#x?} PA {:#x?} attr {:#x?}",
+            large_page_start,
+            large_page_end,
+            level,
+            pa,
+            attributes
+        );
+        // invalidate the TLB for the self map
+        let pa_u64: u64 = pa.into();
+        let pa_va = VirtualAddress::new(pa_u64);
+        pub_invalidate_self_map_va(pa, pa_va.get_index(level - 1), level - 1, pa_va, self.paging_type);
+        // unsafe { invalidate_tlb(self.base.into()) };
+        // unsafe { asm!("mfence", "invlpg [{}]", in(reg) entry.raw_address()) };
+        // unsafe { asm!("mfence", "invlpg [{}]", in(reg) large_page_start) };
         self.map_memory_region_internal(
             large_page_start.into(),
             large_page_end.into(),

@@ -754,7 +754,17 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         );
 
         // create it with permissive attributes
-        self_map_entry.update_fields(TABLE_ATTRIBUTES, self.base, false)?;
+        // self_map_entry.update_fields(TABLE_ATTRIBUTES, self.base, false)?;
+        let _val = self_map_entry.update_shadow_fields(TABLE_ATTRIBUTES, self.base, false);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(self_map_entry.raw_address(), _val, self_map_entry.get_self_map_va());
+        }
+
+        let base_u64: u64 = self.base.into();
+        log::error!("OSDDEBUG TTBR0: {:#x?} TTBR0 + 0xFF8 {:#x?}", self.base, unsafe {
+            *((base_u64 + 0xFF8) as *const u64)
+        });
 
         // now set up the zero VA range so that we can zero pages before installing them in the page table
         // this will be at index 0x1FE for the top level page table.
@@ -774,8 +784,17 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             VirtualAddress::new(zero_va),
             true,
         );
-        second_last_pml4_entry.update_fields(TABLE_ATTRIBUTES, pa_array[0], false)?;
-        reg::update_translation_table_entry(second_last_pml4_entry.raw_address(), pa_array[0].into());
+        // second_last_pml4_entry.update_fields(TABLE_ATTRIBUTES, pa_array[0], false)?;
+        // reg::update_translation_table_entry(second_last_pml4_entry.raw_address(), pa_array[0].into());
+        let _val = second_last_pml4_entry.update_shadow_fields(TABLE_ATTRIBUTES, pa_array[0], false);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(
+                second_last_pml4_entry.raw_address(),
+                _val,
+                second_last_pml4_entry.get_self_map_va(),
+            );
+        }
 
         // set up the PDP entry
         let mut pdp_entry = AArch64PageTableEntry::new(
@@ -786,8 +805,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             VirtualAddress::new(zero_va),
             true,
         );
-        pdp_entry.update_fields(TABLE_ATTRIBUTES, pa_array[1], false)?;
-        reg::update_translation_table_entry(pdp_entry.raw_address(), pa_array[1].into());
+        // pdp_entry.update_fields(TABLE_ATTRIBUTES, pa_array[1], false)?;
+        // reg::update_translation_table_entry(pdp_entry.raw_address(), pa_array[1].into());
+        let _val = pdp_entry.update_shadow_fields(TABLE_ATTRIBUTES, pa_array[1], false);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(pdp_entry.raw_address(), _val, pdp_entry.get_self_map_va());
+        }
 
         // set up the PD entry
         let mut pd_entry = AArch64PageTableEntry::new(
@@ -798,8 +822,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             VirtualAddress::new(zero_va),
             true,
         );
-        pd_entry.update_fields(TABLE_ATTRIBUTES, pa_array[2], false)?;
-        reg::update_translation_table_entry(pd_entry.raw_address(), pa_array[2].into());
+        // pd_entry.update_fields(TABLE_ATTRIBUTES, pa_array[2], false)?;
+        // reg::update_translation_table_entry(pd_entry.raw_address(), pa_array[2].into());
+        let _val = pd_entry.update_shadow_fields(TABLE_ATTRIBUTES, pa_array[2], false);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(pd_entry.raw_address(), _val, pd_entry.get_self_map_va());
+        }
 
         // set up the PT entry
         let mut pt_entry = AArch64PageTableEntry::new(
@@ -810,7 +839,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             VirtualAddress::new(zero_va),
             true,
         );
-        pt_entry.update_fields(MemoryAttributes::Writeback, PhysicalAddress::new(0), true)?;
+        // pt_entry.update_fields(MemoryAttributes::Writeback, PhysicalAddress::new(0), true)?;
+        // reg::update_translation_table_entry(pt_entry.raw_address(), PhysicalAddress::new(0).into());
+        let _val = pt_entry.update_shadow_fields(MemoryAttributes::Writeback, PhysicalAddress::new(0), true);
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            reg::replace_live_xlat_entry(pt_entry.raw_address(), _val, pt_entry.get_self_map_va());
+        }
         pt_entry.set_invalid();
 
         self.zero_va_pt_pa = Some(pa_array[2]);

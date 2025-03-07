@@ -1,3 +1,5 @@
+use core::arch::asm;
+
 use super::structs::*;
 use crate::{MemoryAttributes, PagingType, PtResult, SIZE_1GB, SIZE_2MB, SIZE_4KB, SIZE_512GB};
 use alloc::string::String;
@@ -146,6 +148,7 @@ impl X64PageTableEntry {
                 let page_size = leaf_entry && !attributes.contains(MemoryAttributes::ReadProtect);
                 copy.set_page_size(page_size);
                 entry.swap(&copy);
+                invalidate_self_map_va(entry);
             }
             _ => {
                 let entry = unsafe {
@@ -161,6 +164,7 @@ impl X64PageTableEntry {
                 let mut copy = *entry;
                 copy.update_fields(attributes, pa)?;
                 entry.swap(&copy);
+                invalidate_self_map_va(entry);
             }
         }
         Ok(())
@@ -261,9 +265,41 @@ impl X64PageTableEntry {
     pub fn get_level(&self) -> PageLevel {
         self.level
     }
+
+    pub fn raw_address(&self) -> u64 {
+        let entry = unsafe {
+            get_entry::<PageTableEntry>(
+                self.page_base,
+                self.index,
+                self.level,
+                self.start_va,
+                self._paging_type,
+                self.installed_and_self_mapped,
+            )
+        };
+        entry as *mut _ as u64
+    }
 }
 
 const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
+
+pub(crate) fn pub_invalidate_self_map_va(
+    base: PhysicalAddress,
+    index: u64,
+    level: PageLevel,
+    va: VirtualAddress,
+    paging_type: PagingType,
+) -> () {
+    let entry = unsafe { get_entry::<PageTableEntry>(base, index, level, va, paging_type, true) };
+    invalidate_self_map_va(entry);
+}
+
+fn invalidate_self_map_va(self_map_va: &mut PageTableEntry) -> () {
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        asm!("mfence", "invlpg [{0}]", in(reg) self_map_va as *const PageTableEntry as u64)
+    };
+}
 
 /// This function returns the base address of the self-mapped page table at the given level for this VA
 /// It is used in the get_entry function to determine the base address in the self map in which to apply
@@ -273,7 +309,7 @@ const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
 /// covers 512GB of memory, each PDP entry covers 1GB of memory, each PD entry covers 2MB of memory, and
 /// each PT entry covers 4KB of memory, but when we recurse in the self map to a given level, we shift what
 /// each entry covers to be the size of the next level down for each recursion into the self map we did.
-fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
+pub(crate) fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
     match paging_type {
         PagingType::Paging4Level => match level {
             PageLevel::Pml4 => FOUR_LEVEL_PML4_SELF_MAP_BASE,
@@ -320,7 +356,7 @@ fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: Pagin
 /// Main function which does the unsafe cast of PhysicalAddress to mut T. It
 /// reinterprets the page table entry as T.
 #[cfg(not(test))]
-pub unsafe fn get_entry<'a, T>(
+pub(crate) unsafe fn get_entry<'a, T>(
     base: PhysicalAddress,
     index: u64,
     level: PageLevel,
@@ -343,7 +379,7 @@ pub unsafe fn get_entry<'a, T>(
 /// We need a test version of this function because we cannot use the self map in
 /// test code, that points to an invalid address for user space
 #[cfg(test)]
-pub unsafe fn get_entry<'a, T>(
+pub(crate) unsafe fn get_entry<'a, T>(
     base: PhysicalAddress,
     index: u64,
     _level: PageLevel,

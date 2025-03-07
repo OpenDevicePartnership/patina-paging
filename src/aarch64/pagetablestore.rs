@@ -257,6 +257,12 @@ impl AArch64PageTableEntry {
     pub fn get_level(&self) -> PageLevel {
         self.level
     }
+
+    pub fn get_self_map_va(&self) -> u64 {
+        let entry =
+            unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index, self.level, self.start_va, true) };
+        entry as *mut _ as u64
+    }
 }
 
 const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
