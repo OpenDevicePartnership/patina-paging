@@ -7,7 +7,7 @@ use crate::{
     page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult, SIZE_16TB, SIZE_1TB,
     SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB,
 };
-use core::ptr;
+use core::{arch::asm, ptr};
 
 const MAX_VA_BITS: u64 = 48;
 
@@ -761,6 +761,8 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             reg::replace_live_xlat_entry(self_map_entry.raw_address(), _val, self_map_entry.get_self_map_va());
         }
 
+        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+
         let base_u64: u64 = self.base.into();
         log::error!("OSDDEBUG TTBR0: {:#x?} TTBR0 + 0xFF8 {:#x?}", self.base, unsafe {
             *((base_u64 + 0xFF8) as *const u64)
@@ -796,6 +798,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             );
         }
 
+        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+
+        log::error!("OSDDEBUG2");
+
         // set up the PDP entry
         let mut pdp_entry = AArch64PageTableEntry::new(
             pa_array[0],
@@ -812,6 +818,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         unsafe {
             reg::replace_live_xlat_entry(pdp_entry.raw_address(), _val, pdp_entry.get_self_map_va());
         }
+
+        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+
+        log::error!("OSDDEBUG3");
 
         // set up the PD entry
         let mut pd_entry = AArch64PageTableEntry::new(
@@ -830,6 +840,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             reg::replace_live_xlat_entry(pd_entry.raw_address(), _val, pd_entry.get_self_map_va());
         }
 
+        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+
+        log::error!("OSDDEBUG4");
+
         // set up the PT entry
         let mut pt_entry = AArch64PageTableEntry::new(
             pa_array[2],
@@ -847,6 +861,8 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             reg::replace_live_xlat_entry(pt_entry.raw_address(), _val, pt_entry.get_self_map_va());
         }
         pt_entry.set_invalid();
+
+        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
 
         self.zero_va_pt_pa = Some(pa_array[2]);
 
