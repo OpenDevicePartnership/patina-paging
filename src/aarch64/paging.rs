@@ -445,6 +445,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     /// creating a new page table for the full range and then swapping the PA
     /// and mapping to the new page table.
     fn split_large_page(&mut self, va: VirtualAddress, entry: &mut AArch64PageTableEntry) -> PtResult<()> {
+        log::error!("OSDDEBUG1 Splitting large page at VA {:#x?} into smaller pages", va);
         let level = entry.get_level();
         debug_assert!(level != self.lowest_page_level && entry.is_block_entry());
 
@@ -614,6 +615,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
+        log::error!(
+            "OSDDEBUG2 Mapping memory region {:#x?} - {:#x?} with attributes {:#x?}",
+            address,
+            address + size - 1,
+            attributes
+        );
+
         self.validate_address_range(address, size)?;
         if address + size - 1 > VirtualAddress::new(MAX_PA) {
             panic!(
@@ -632,6 +640,8 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
+
+        log::error!("OSDDEBUG3 Unmapping memory region {:#x?} - {:#x?}", address, address + size - 1);
 
         self.validate_address_range(address, size)?;
         if address + size - 1 > VirtualAddress::new(MAX_PA) {
@@ -859,6 +869,13 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
     fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
+        log::error!(
+            "OSDDEBUG4 Remapping memory region {:#x?} - {:#x?} with attributes {:#x?}",
+            address,
+            address + size - 1,
+            attributes
+        );
+
         self.validate_address_range(address, size)?;
         if address + size - 1 > VirtualAddress::new(MAX_PA) {
             panic!(
@@ -880,6 +897,8 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
 
     fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes> {
         let address = VirtualAddress::new(address);
+
+        log::error!("OSDDEBUG5 Querying memory region {:#x?} - {:#x?}", address, address + size - 1);
 
         self.validate_address_range(address, size)?;
 
