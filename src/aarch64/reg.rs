@@ -111,6 +111,74 @@ pub fn set_ttbr0(_ttbr0: u64) {
     }
 }
 
+pub fn get_id_aa64mmfr1_el1() -> u64 {
+    let mut _id_aa64mmfr1_el1: u64 = 0;
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        asm!(
+        "mrs {}, id_aa64mmfr1_el1",
+        out(reg) _id_aa64mmfr1_el1
+        );
+    }
+    _id_aa64mmfr1_el1
+}
+
+pub fn get_hcr() -> u64 {
+    let mut _hcr: u64 = 0;
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        let current_el = get_current_el();
+        if current_el == 2 {
+            asm!(
+              "mrs {}, hcr_el2",
+              out(reg) _hcr
+            );
+        } else if current_el == 1 {
+        } else {
+            panic!("Invalid current EL {}", current_el);
+        }
+    }
+    _hcr
+}
+
+pub fn set_hcr(_hcr: u64) {
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        let current_el = get_current_el();
+        if current_el == 2 {
+            asm!(
+              "msr hcr_el2, {}",
+              in(reg) _hcr
+            );
+        } else if current_el == 1 {
+        } else {
+            panic!("Invalid current EL {}", current_el);
+        }
+        asm!("isb", options(nostack));
+    }
+}
+
+pub fn set_ttbr1(_ttbr1: u64) {
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        let current_el = get_current_el();
+        if current_el == 2 {
+            asm!(
+              "msr S3_4_C2_C0_1, {}",
+              in(reg) _ttbr1
+            );
+        } else if current_el == 1 {
+            asm!(
+            "msr S3_0_C2_C0_1, {}",
+            in(reg) _ttbr1
+            );
+        } else {
+            panic!("Invalid current EL {}", current_el);
+        }
+        asm!("isb", options(nostack));
+    }
+}
+
 pub fn set_mair(_mair: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {

@@ -4,7 +4,7 @@
 /// - x64 4KB 4 level paging
 ///
 use super::{
-    pagetablestore::{pub_invalidate_self_map_va, X64PageTableEntry, X64PageTableStore},
+    pagetablestore::{invalidate_self_map_va, X64PageTableEntry, X64PageTableStore},
     reg::{invalidate_tlb, write_cr3},
     structs::*,
 };
@@ -478,6 +478,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         // not a likely scenario. We do not need to invalidate the TLB here, because this is a new mapping with a
         // unique address in the self map that has not been referenced before. We do invalidate the TLB after finishing
         // whichever operation called this function.
+        // unsafe { invalidate_tlb(self.base.into()) };
         entry.update_fields(MemoryAttributes::empty(), pa, false)?;
         log::error!(
             "OSDDEBUG5 Splitting large page at VA {:#x?} to {:#x?} at level {:#x?} PA {:#x?} attr {:#x?}",
@@ -490,10 +491,23 @@ impl<A: PageAllocator> X64PageTable<A> {
         // invalidate the TLB for the self map
         let pa_u64: u64 = pa.into();
         let pa_va = VirtualAddress::new(pa_u64);
-        pub_invalidate_self_map_va(pa, pa_va.get_index(level - 1), level - 1, pa_va, self.paging_type);
+        // invalidate every self map VA for the region covered by the large page
+        let table = X64PageTableStore::new(
+            pa.into(),
+            level - 1,
+            self.paging_type,
+            large_page_start.into(),
+            large_page_end.into(),
+            true,
+        );
+        for tb_entry in table {
+            invalidate_self_map_va(tb_entry.raw_address());
+            break;
+        }
         // unsafe { invalidate_tlb(self.base.into()) };
         // unsafe { asm!("mfence", "invlpg [{}]", in(reg) entry.raw_address()) };
         // unsafe { asm!("mfence", "invlpg [{}]", in(reg) large_page_start) };
+        // unsafe { asm!("mfence", "invlpg [{}]", in(reg) pa_u64) };
         self.map_memory_region_internal(
             large_page_start.into(),
             large_page_end.into(),

@@ -6,11 +6,11 @@ use core::{
     ops::{Add, Sub},
 };
 
-pub(crate) const MAX_VA: u64 = 0x0000_ffff_ffff_ffff;
+pub(crate) const MAX_VA: u64 = 0xffff_ffff_ffff;
 
 // this is the maximum physical address that can be used in the system because of our artifical restriction to use
 // the zero VA and self map index in the top level page table. This is a temporary restriction
-pub(crate) const MAX_PA: u64 = 0x0000_feff_ffff_ffff;
+pub(crate) const MAX_PA: u64 = 0xfeff_ffff_ffff;
 
 const LEVEL0_START_BIT: u64 = 39;
 const LEVEL1_START_BIT: u64 = 30;

@@ -473,6 +473,8 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             reg::update_translation_table_entry(entry.raw_address(), va.into());
         }
 
+        reg::update_translation_table_entry(entry.raw_address(), entry.raw_address());
+
         self.map_memory_region_internal(
             large_page_start.into(),
             large_page_end.into(),
@@ -644,7 +646,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let max_address_bits = core::cmp::min(pa_bits, MAX_VA_BITS);
         let max_address = (1 << max_address_bits) - 1;
 
-        let t0sz = 64 - max_address_bits;
+        let t0sz = 16;
         let root_table_cnt = get_root_table_count(t0sz);
 
         let mut tcr: u64;
@@ -707,6 +709,12 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         // Set TCR
         reg::set_tcr(tcr);
 
+        // let hcr = reg::get_hcr();
+        // log::error!("OSDDEBUG HCR: {:#x?}", hcr);
+        // let id_aa64mmfr1 = reg::get_id_aa64mmfr1_el1();
+        // log::error!("OSDDEBUG ID_AA64MMFR1: {:#x?}", id_aa64mmfr1);
+        // reg::set_hcr(hcr | 1 << 34);
+
         if !reg::is_mmu_enabled() {
             // Make sure we are not inadvertently hitting in the caches
             // when populating the page tables.
@@ -732,7 +740,9 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         }
 
         // Set TTBR0
+        // let ttbr1: u64 = self.base.into();
         reg::set_ttbr0(self.base.into());
+        // reg::set_ttbr1(ttbr1 + 0x800);
 
         if !reg::is_mmu_enabled() {
             reg::set_alignment_check(false);
@@ -761,7 +771,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             reg::replace_live_xlat_entry(self_map_entry.raw_address(), _val, self_map_entry.get_self_map_va());
         }
 
-        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb")
+        };
 
         let base_u64: u64 = self.base.into();
         log::error!("OSDDEBUG TTBR0: {:#x?} TTBR0 + 0xFF8 {:#x?}", self.base, unsafe {
@@ -798,7 +811,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             );
         }
 
-        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb")
+        };
 
         log::error!("OSDDEBUG2");
 
@@ -819,7 +835,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             reg::replace_live_xlat_entry(pdp_entry.raw_address(), _val, pdp_entry.get_self_map_va());
         }
 
-        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb")
+        };
 
         log::error!("OSDDEBUG3");
 
@@ -840,7 +859,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             reg::replace_live_xlat_entry(pd_entry.raw_address(), _val, pd_entry.get_self_map_va());
         }
 
-        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb")
+        };
 
         log::error!("OSDDEBUG4");
 
@@ -862,7 +884,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         }
         pt_entry.set_invalid();
 
-        unsafe { asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb") };
+        #[cfg(all(not(test), target_arch = "aarch64"))]
+        unsafe {
+            asm!("dsb ish", "isb", "tlbi alle2", "dsb ish", "isb")
+        };
 
         self.zero_va_pt_pa = Some(pa_array[2]);
 

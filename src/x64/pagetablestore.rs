@@ -148,7 +148,7 @@ impl X64PageTableEntry {
                 let page_size = leaf_entry && !attributes.contains(MemoryAttributes::ReadProtect);
                 copy.set_page_size(page_size);
                 entry.swap(&copy);
-                invalidate_self_map_va(entry);
+                invalidate_self_map_va(self.raw_address());
             }
             _ => {
                 let entry = unsafe {
@@ -164,7 +164,7 @@ impl X64PageTableEntry {
                 let mut copy = *entry;
                 copy.update_fields(attributes, pa)?;
                 entry.swap(&copy);
-                invalidate_self_map_va(entry);
+                invalidate_self_map_va(self.raw_address());
             }
         }
         Ok(())
@@ -283,21 +283,21 @@ impl X64PageTableEntry {
 
 const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
 
-pub(crate) fn pub_invalidate_self_map_va(
-    base: PhysicalAddress,
-    index: u64,
-    level: PageLevel,
-    va: VirtualAddress,
-    paging_type: PagingType,
-) -> () {
-    let entry = unsafe { get_entry::<PageTableEntry>(base, index, level, va, paging_type, true) };
-    invalidate_self_map_va(entry);
-}
+// pub(crate) fn pub_invalidate_self_map_va(
+//     base: PhysicalAddress,
+//     index: u64,
+//     level: PageLevel,
+//     va: VirtualAddress,
+//     paging_type: PagingType,
+// ) -> () {
+//     let entry = unsafe { get_entry::<PageTableEntry>(base, index, level, va, paging_type, true) };
+//     invalidate_self_map_va(entry);
+// }
 
-fn invalidate_self_map_va(self_map_va: &mut PageTableEntry) -> () {
+pub(crate) fn invalidate_self_map_va(self_map_va: u64) -> () {
     #[cfg(all(not(test), target_arch = "x86_64"))]
     unsafe {
-        asm!("mfence", "invlpg [{0}]", in(reg) self_map_va as *const PageTableEntry as u64)
+        asm!("mfence", "invlpg [{0}]", "mfence", in(reg) self_map_va)
     };
 }
 
