@@ -445,7 +445,6 @@ impl<A: PageAllocator> AArch64PageTable<A> {
     /// creating a new page table for the full range and then swapping the PA
     /// and mapping to the new page table.
     fn split_large_page(&mut self, va: VirtualAddress, entry: &mut AArch64PageTableEntry) -> PtResult<()> {
-        log::error!("OSDDEBUG1 Splitting large page at VA {:#x?} into smaller pages", va);
         let level = entry.get_level();
         debug_assert!(level != self.lowest_page_level && entry.is_block_entry());
 
@@ -472,24 +471,6 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             // Just update the entry and flush TLB
             entry.update_fields(attributes, pa, false)?;
             reg::update_translation_table_entry(entry.raw_address(), va.into());
-        }
-
-        // we flush the TLB entry associated with the self map VA to avoid speculative execution from having pulled
-        // it into the TLB while still invalid. This should not happen with the synchronization barriers in place
-        // when the page table is installed, but matches what the x86 side does and will allow the top level code
-        // to be merged in the future
-        // reg::update_translation_table_entry(entry.raw_address(), entry.raw_address());
-        log::error!("OSDDEBUG Splitting large page at VA {:#x?} into smaller pages", va);
-        let table = AArch64PageTableStore::new(
-            pa.into(),
-            level - 1,
-            self.paging_type,
-            large_page_start.into(),
-            large_page_end.into(),
-            true,
-        );
-        for tb_entry in table {
-            reg::update_translation_table_entry(tb_entry.raw_address(), tb_entry.raw_address());
         }
 
         self.map_memory_region_internal(
