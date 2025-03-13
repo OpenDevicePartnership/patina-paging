@@ -166,3 +166,4 @@ pub trait PageAllocator {
 ## Reference
 
 More reference test cases are in `src\tests\x64_paging_tests.rs`
+General paging related documentation `docs\paging.md`
