@@ -1,5 +1,11 @@
 # Paging/Identity Mapping/Self Mapping 101
 
+> Note: This document is intended to broadly cover the general concepts related
+> to paging, not necessarily the way this crate implements it. While it
+> generally follows the current implementation in the crate, that is not the
+> primary expectation. It also discusses the concepts with x64 architecture and
+> 5 level paging in mind.
+
 ## What is memory mapping?
 
 Memory mapping, in the context of paging, refers to the ability of the CPU to
@@ -10,7 +16,8 @@ raise a page fault exception. In other words, the VA is not mapped(unmapped).
 
 ## How is a Virtual Address (VA) decoded into a Physical Address (PA)?
 
-For example x64 CPUs break the given VA in to below components
+For example x64 CPUs break the given VA in to below components(assuming 5 Level
+paging)
 
 ```text
   63           57 56           48 47           39 38           30 29            21 20            12 11               0
@@ -32,7 +39,8 @@ the PML5 page table. This 0th entry contains the physical address (PA) of the
 PML4 page table base. Next, the CPU uses the PML4 component of the VA (which is
 0x24) and indexes into the corresponding PML4 page table. This process continues
 through each level—PDP, PD, and PT—until the CPU finally reaches the physical
-page offset (bits 0-11).
+page offset (bits 0-11).In addition to this, each Page Table Entry (PTE)
+contains memory protection-related bits (not covered in this document).
 
 The illustration below showcases the page table walk performed by the CPU.
 
@@ -101,7 +109,7 @@ This leads to an endless loop of:
 memory → need page tables → ..."
 
 To avoid this, **when we create the page tables for the first time, we are**
-**expected to map a sufficiently large chunk of memory upfront and perform
+**expected to map a sufficiently large chunk of memory upfront and perform a
 careful dance**, which will later be used for setting up mappings for new memory
 ranges.
 
@@ -117,7 +125,7 @@ We mainly consider below three type of paging schemes
 
 Identity mapping in paging is a technique where virtual addresses are mapped
 directly to the **same** physical addresses. By using identity mapping, the
-system can access hardware and memory locations without dealing with non trivial
+system can access hardware and memory locations without dealing with non-trivial
 address translation complexity. It is particularly useful during early system
 initialization and when transitioning between different memory management modes,
 such as moving from real mode to protected mode(in x64 architecture).
@@ -194,15 +202,15 @@ exactly to its PA.
 restriction of identity mapping. In other words, page tables for new memory
 regions need not be pre-allocated and mapped.
 
-Firstly, Self-mapping do not change the way the CPU resolves the *"normal"* VA
+Firstly, Self-mapping does not change the way the CPU resolves the *"normal"* VA
 to PA translations once it is enabled. But it does change how the page tables
 themselves are access and operated on. Meaning, how the page tables base address
 are decoded and accessed is different. More on this later.
 
-Secondly, The problem that self mapping is trying to solve is, "**How can we poke
+Secondly, the problem that self-mapping is trying to solve is, "**How can we poke
 the page tables which are not mapped up front?**". This is where things get really
-clever — and a bit mind-bending! Remember in order to wire up the intermidate
-page tables we need to first allocate them or grab from a known location(which
+clever — and a bit mind-bending! Remember in order to wire up the intermediate
+page tables we need to first allocate them or grab from a known location (which
 was already mapped). This was always true in the prior mapping schemes. If
 not they don't work.
 
@@ -229,26 +237,26 @@ at other levels unchanged. Now, if we try to access a special virtual address
 (VA) shown below, interesting behavior emerges.
 
 ```text
-0x01FF000000000000 :
+0xFFFF000000000000 :
        |     PML5|     PML4| PDP/PML3|  PD/PML2|  PT/PML1|    Physical
 6666555|555555544|444444443|333333333|222222222|211111111|110000000000
 3210987|654321098|765432109|876543210|987654321|098765432|109876543210
-0000000|111111111|000000000|000000000|000000000|000000000|000000000000
-      0|      1FF|        0|        0|        0|        0|           0 Hex
-      0|      511|        0|        0|        0|        0|           0 Decimal
+1111111|111111111|000000000|000000000|000000000|000000000|000000000000
+     7F|      1FF|        0|        0|        0|        0|           0 Hex
+    127|      511|        0|        0|        0|        0|           0 Decimal
 ```
 
 Compared to the previous illustration, in the self-mapping case, the final
 address translation lands on the base address of the 0th PT (Page Table) instead
 of landing on the physical frame. What does this mean? This means the CPU has
 effectively mapped the **0th PT Page Table itself** using the special VA
-`0x01FF000000000000`. Take a deep breath and reread the previous sentence again!
-Furthermore, the same logic can be applied to map the **2nd PT Page Table** by
-using the VA `0x1FF000000200000`. So, **with just one self-referencing
+`0xFFFF000000000000`. Take a deep breath and reread the previous sentence again!
+Furthermore, the same logic can be applied to map the **2nd PT Page Table base** by
+using the VA `0xFFFF000000200000`. So, **with just one self-referencing
 (self-loop) entry in the PML5 page table, we gain access to all PT page tables**
 simply by crafting appropriate virtual addresses. If we were to craft a VA like
-`0x1FFFF8000000000`, which loops back into the PML5 page table twice(why?
-because `0x1FFFF8000000000 = |1FF|1FF|0|0|0`), we would be able to **locate the PD
+`0xFFFFFF8000000000`, which loops back into the PML5 page table twice (why?
+because `0xFFFFFF8000000000 = |1FF|1FF|0|0|0`), we would be able to **locate the PD
 (Page Directory) page tables**, and so on for higher levels.
 
 Let's walk through the page tables for these special VAs with some
@@ -269,11 +277,11 @@ corresponding page tables to be mapped.
                        | L | L | D | P | P |
                        | 5 | 4 | P | D | T |
 -----------------------+---+---+---+---+---+-----------------------------
-0x01FFFFFFFFFFF000 =>  |1FF|1FF|1FF|1FF|1FF| => maps 0th PML5 Page table
-0x01FFFFFFFFE00000 =>  |1FF|1FF|1FF|1FF|  0| => maps 0th PML4 Page table
-0x01FFFFFFC0000000 =>  |1FF|1FF|1FF|  0|  0| => maps 0th PDP Page table
-0x01FFFF8000000000 =>  |1FF|1FF|  0|  0|  0| => maps 0th PD Page table
-0x01FF000000000000 =>  |1FF|  0|  0|  0|  0| => maps 0th PT Page table
+0xFFFFFFFFFFFFF000 =>  |1FF|1FF|1FF|1FF|1FF| => maps 0th PML5 Page table
+0xFFFFFFFFFFE00000 =>  |1FF|1FF|1FF|1FF|  0| => maps 0th PML4 Page table
+0xFFFFFFFFC0000000 =>  |1FF|1FF|1FF|  0|  0| => maps 0th PDP Page table
+0xFFFFFF8000000000 =>  |1FF|1FF|  0|  0|  0| => maps 0th PD Page table
+0xFFFF000000000000 =>  |1FF|  0|  0|  0|  0| => maps 0th PT Page table
 ```
 
 The generalized formula for accessing any page table base is shown below. It is
@@ -300,16 +308,15 @@ how self mapped paging can be enabled
 
 ### Self mapping is not already enabled
 
-When self-mapping is not active (which is usually the case), the assumption is
-that the pages provided by the allocator are already mapped. This is because,
-without self-mapping being enabled (since CR3 points to non-self-mapped page
-tables), we cannot use the self-mapping trick to modify those pages. As a
-result, we are required to have those pages mapped in advance in order to wire
-them properly.
+When self-mapping is not active, the assumption is that the pages provided by
+the allocator are already mapped. This is because, without self-mapping being
+enabled (since CR3 points to non-self-mapped page tables), we cannot use the
+self-mapping trick to modify those pages. As a result, we are required to have
+those pages mapped in advance in order to wire them properly.
 
 ### Self mapping is already active
 
-Once self-mapping is enabled (i.e., when CR3 is updated to point to the
+Once self-mapping is enabled (i.e., when CR3 is already updated to point to the
 self-mapped page tables), any page tables needed to map new memory regions no
 longer need to be pre-mapped. Since CR3 now references the self-mapped page
 tables, we can leverage the trick to map and access the corresponding page table
