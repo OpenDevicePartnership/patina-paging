@@ -289,7 +289,6 @@ fn get_self_mapped_base(level: PageLevel, va: VirtualAddress) -> u64 {
 
 /// Main function which does the unsafe cast of PhysicalAddress to mut T. It
 /// reinterprets the page table entry as T.
-#[cfg(not(test))]
 unsafe fn get_entry<'a, T>(
     base: PhysicalAddress,
     index: u64,
@@ -306,23 +305,4 @@ unsafe fn get_entry<'a, T>(
         false => base.into(),
     };
     unsafe { &mut *((base as *mut T).add(index as usize)) }
-}
-
-/// We need a test version of this function because we cannot use the self map in
-/// test code, that points to an invalid address for user space
-#[cfg(test)]
-unsafe fn get_entry<'a, T>(
-    base: PhysicalAddress,
-    index: u64,
-    _level: PageLevel,
-    _va: VirtualAddress,
-    _installed_and_self_mapped: bool,
-) -> &'a mut T {
-    if index >= MAX_ENTRIES as u64 {
-        panic!("index {} cannot be greater than {}", index, MAX_ENTRIES - 1);
-    }
-
-    let base: u64 = base.into();
-
-    (unsafe { &mut *((base as *mut T).add(index as usize)) }) as _
 }
