@@ -39,8 +39,107 @@ impl<A: PageAllocator> X64PageTable<A> {
         unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
         assert!(PhysicalAddress::new(base).is_4kb_aligned());
 
+        // allocate the pages to map the zero VA range and zero them
+        let pa_array = [
+            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
+            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
+            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
+            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
+        ];
+
+        pa_array.iter().for_each(|pa| {
+            unsafe { ptr::write_bytes(*pa as *mut u8, 0, PAGE_SIZE as usize) };
+        });
+
+        let pa_array: [PhysicalAddress; 4] = pa_array.map(Into::into);
+
         // SAFETY: We just allocated the page, so it is safe to use it.
-        unsafe { Self::from_existing(base, page_allocator, paging_type) }
+        match unsafe { Self::from_existing(base, page_allocator, paging_type) } {
+            Ok(mut pt) => {
+                // we choose the penultimate PML[4|5] entry to use as the zeroing range and the last PML[4|5] entry for
+                // the self-map entry. We need to map down to the 4k page for the zero page
+                let (level, zero_va) = match pt.paging_type {
+                    PagingType::Paging5Level => (PageLevel::Pml5, ZERO_VA_5_LEVEL),
+                    PagingType::Paging4Level => (PageLevel::Pml4, ZERO_VA_4_LEVEL),
+                    _ => return Err(PtError::InvalidParameter),
+                };
+
+                // create our self-map entry as the final entry
+                let mut self_map_entry =
+                    X64PageTableEntry::new(pt.base, SELF_MAP_INDEX, level, pt.paging_type, pt.base.into(), false);
+
+                // create it with permissive attributes
+                self_map_entry.update_fields(MemoryAttributes::empty(), pt.base, false)?;
+
+                // now set up the zero VA range so that we can zero pages before installing them in the page table
+                // this will be at index 0x1FE for the top level page table.
+                let mut pml4_index = ZERO_VA_INDEX;
+                let mut pml4_base = pt.base;
+                if pt.paging_type == PagingType::Paging5Level {
+                    // assign PA to the penultimate PML5 entry
+                    let mut last_pml5_entry = X64PageTableEntry::new(
+                        pt.base,
+                        ZERO_VA_INDEX,
+                        PageLevel::Pml5,
+                        pt.paging_type,
+                        VirtualAddress::new(zero_va),
+                        false,
+                    );
+                    last_pml5_entry.update_fields(MemoryAttributes::empty(), pa_array[3], false)?;
+                    pml4_index = 0;
+                    pml4_base = pa_array[3];
+                }
+
+                // assign PA to the penultimate PML4 entry if 4 level paging, otherwise to the first index
+                let mut second_last_pml4_entry = X64PageTableEntry::new(
+                    pml4_base,
+                    pml4_index,
+                    PageLevel::Pml4,
+                    pt.paging_type,
+                    VirtualAddress::new(zero_va),
+                    false,
+                );
+                second_last_pml4_entry.update_fields(MemoryAttributes::empty(), pa_array[0], false)?;
+
+                // set up the PDP entry
+                let mut pdp_entry = X64PageTableEntry::new(
+                    pa_array[0],
+                    0,
+                    PageLevel::Pdp,
+                    pt.paging_type,
+                    VirtualAddress::new(zero_va),
+                    false,
+                );
+                pdp_entry.update_fields(MemoryAttributes::empty(), pa_array[1], false)?;
+
+                // set up the PD entry next
+                let mut pd_entry = X64PageTableEntry::new(
+                    pa_array[1],
+                    0,
+                    PageLevel::Pd,
+                    pt.paging_type,
+                    VirtualAddress::new(zero_va),
+                    false,
+                );
+                pd_entry.update_fields(MemoryAttributes::empty(), pa_array[2], false)?;
+
+                // set up an invalid PT entry that will get overridden by each page we allocate
+                let mut pt_entry = X64PageTableEntry::new(
+                    pa_array[2],
+                    0,
+                    PageLevel::Pt,
+                    pt.paging_type,
+                    VirtualAddress::new(zero_va),
+                    false,
+                );
+                pt_entry.update_fields(MemoryAttributes::empty(), PhysicalAddress::new(0), true)?;
+                pt_entry.set_present(false);
+
+                pt.zero_va_pt_pa = Some(pa_array[2]);
+                Ok(pt)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     pub fn borrow_allocator(&mut self) -> &mut A {
@@ -698,89 +797,8 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
     }
 
     fn install_page_table(&mut self) -> PtResult<()> {
-        let (level, zero_va) = match self.paging_type {
-            PagingType::Paging5Level => (PageLevel::Pml5, ZERO_VA_5_LEVEL),
-            PagingType::Paging4Level => (PageLevel::Pml4, ZERO_VA_4_LEVEL),
-            _ => return Err(PtError::InvalidParameter),
-        };
-
-        // allocate the pages to map the zero VA range before we install the page table so that we can zero them with
-        // the old page table that has them mapped
-        let pa_array = [self.allocate_page()?, self.allocate_page()?, self.allocate_page()?, self.allocate_page()?];
-        for pa in &pa_array {
-            let pa: u64 = (*pa).into();
-            unsafe { ptr::write_bytes(pa as *mut u8, 0, PAGE_SIZE as usize) };
-        }
-
         let value: u64 = self.base.into();
         unsafe { write_cr3(value) };
-
-        // we have now installed this page table, so we can use our VA range to zero pages and self-map the pt
-        // we choose the penultimate PML[4|5] entry to use as the zeroing range and the last PML[4|5] entry for the
-        // self-map entry. We need to map down to the 4k page for the zero page
-
-        // create our self-map entry as the final entry
-        let mut self_map_entry =
-            X64PageTableEntry::new(self.base, SELF_MAP_INDEX, level, self.paging_type, self.base.into(), false);
-
-        // create it with permissive attributes
-        self_map_entry.update_fields(MemoryAttributes::empty(), self.base, false)?;
-
-        // now set up the zero VA range so that we can zero pages before installing them in the page table
-        // this will be at index 0x1FE for the top level page table.
-        // the base doesn't actually matter here since we are using the self map and will calculate the correct
-        // base for the zero VA range
-        let mut pml4_index = ZERO_VA_INDEX;
-        let mut pml4_base = self.base;
-        if self.paging_type == PagingType::Paging5Level {
-            // assign PA to the penultimate PML5 entry
-            let mut last_pml5_entry = X64PageTableEntry::new(
-                self.base,
-                ZERO_VA_INDEX,
-                PageLevel::Pml5,
-                self.paging_type,
-                VirtualAddress::new(zero_va),
-                true,
-            );
-            last_pml5_entry.update_fields(MemoryAttributes::empty(), pa_array[3], false)?;
-            pml4_index = 0;
-            pml4_base = pa_array[3];
-        }
-
-        // assign PA to the penultimate PML4 entry if 4 level paging, otherwise to the first index
-        let mut second_last_pml4_entry = X64PageTableEntry::new(
-            pml4_base,
-            pml4_index,
-            PageLevel::Pml4,
-            self.paging_type,
-            VirtualAddress::new(zero_va),
-            true,
-        );
-        second_last_pml4_entry.update_fields(MemoryAttributes::empty(), pa_array[0], false)?;
-
-        // set up the PDP entry
-        let mut pdp_entry = X64PageTableEntry::new(
-            pa_array[0],
-            0,
-            PageLevel::Pdp,
-            self.paging_type,
-            VirtualAddress::new(zero_va),
-            true,
-        );
-        pdp_entry.update_fields(MemoryAttributes::empty(), pa_array[1], false)?;
-
-        // set up the PD entry next
-        let mut pd_entry =
-            X64PageTableEntry::new(pa_array[1], 0, PageLevel::Pd, self.paging_type, VirtualAddress::new(zero_va), true);
-        pd_entry.update_fields(MemoryAttributes::empty(), pa_array[2], false)?;
-
-        // set up an invalid PT entry that will get overridden by each page we allocate
-        let mut pt_entry =
-            X64PageTableEntry::new(pa_array[2], 0, PageLevel::Pt, self.paging_type, VirtualAddress::new(zero_va), true);
-        pt_entry.update_fields(MemoryAttributes::empty(), PhysicalAddress::new(0), true)?;
-        pt_entry.set_present(false);
-
-        self.zero_va_pt_pa = Some(pa_array[2]);
 
         Ok(())
     }
