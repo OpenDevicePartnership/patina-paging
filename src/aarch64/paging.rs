@@ -7,7 +7,6 @@ use crate::{
     page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult, SIZE_16TB, SIZE_1TB,
     SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB,
 };
-use core::ptr;
 
 const MAX_VA_BITS: u64 = 48;
 
@@ -50,9 +49,16 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         }
 
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
+        assert!(PhysicalAddress::new(base).is_4kb_aligned());
         if !reg::is_mmu_enabled() {
             reg::cache_range_operation(base, PAGE_SIZE, reg::CpuFlushType::EFiCpuFlushTypeInvalidate);
         }
+
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
+        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
+        // entries in the page table.
+        unsafe { reg::zero_page(base) };
 
         // allocate the pages to map the zero VA range
         let pa_array = [
@@ -66,17 +72,10 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 reg::cache_range_operation(*pa, PAGE_SIZE, reg::CpuFlushType::EFiCpuFlushTypeInvalidate);
             }
 
-            unsafe { ptr::write_bytes(*pa as *mut u8, 0, PAGE_SIZE as usize) };
+            unsafe { reg::zero_page(*pa) };
         });
 
         let pa_array: [PhysicalAddress; 3] = pa_array.map(Into::into);
-
-        // SAFETY: We just allocated the page, so it is safe to use it.
-        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
-        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
-        // entries in the page table.
-        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
-        assert!(PhysicalAddress::new(base).is_4kb_aligned());
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         match unsafe { Self::from_existing(base, page_allocator, paging_type) } {
@@ -244,7 +243,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             false => base,
         };
 
-        unsafe { ptr::write_bytes(zero_va as *mut u8, 0, PAGE_SIZE as usize) };
+        unsafe { reg::zero_page(zero_va) };
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
             panic!("allocate_page() returned unaligned page");

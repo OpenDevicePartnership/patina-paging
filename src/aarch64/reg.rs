@@ -391,3 +391,27 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
         false
     }
 }
+
+/// Zero a page of memory
+/// This is done in asm to:
+/// 1. Ensure that the compiler does not optimize out the zeroing
+/// 2. Ensure that the zeroing is done as quickly as possible as without this, the zero takes a long time on
+///    non-optimized builds
+///
+/// # Safety
+/// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
+/// is mapped.
+pub(crate) unsafe fn zero_page(_page: u64) {
+    #[cfg(target_arch = "aarch64")]
+    asm!(
+        "mov x0, {}",               // Address of the page
+        "mov x1, #0",               // Zero value
+        "mov x2, #256",             // 256 iterations of 16 bytes each
+        "1:",
+        "stp x1, x1, [x0], #16",    // Store 0 to the next 16 bytes of the page
+        "subs x2, x2, #1",          // Decrement the counter
+        "bne 1b",                   // Loop back if we haven't done 256 iterations
+        in(reg) _page,
+        options(nostack, preserves_flags)
+    );
+}

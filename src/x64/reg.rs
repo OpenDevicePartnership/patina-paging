@@ -34,3 +34,26 @@ pub unsafe fn invalidate_tlb(base: u64) {
         write_cr3(value);
     }
 }
+
+/// Zero a page of memory
+/// This is done in asm to:
+/// 1. Ensure that the compiler does not optimize out the zeroing
+/// 2. Ensure that the zeroing is done as quickly as possible as without this, the zero takes a long time on
+///    non-optimized builds
+///
+/// # Safety
+/// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
+/// is mapped.
+pub(crate) unsafe fn zero_page(_page: u64) {
+    #[cfg(target_arch = "x86_64")]
+    unsafe {
+        asm!(
+        "cld",              // Clear the direction flag so that we increment rdi with each store
+        "rep stosq",        // Repeat the store of qword in rax to [rdi] rcx times
+        in("rcx") 0x200,    // we write 512 qwords (4096 bytes)
+        in("rdi") _page,    // start at the page
+        in("rax") 0,        // store 0
+        options(nostack, preserves_flags)
+        );
+    }
+}

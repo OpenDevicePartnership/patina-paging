@@ -32,6 +32,8 @@ words:
   - mfence
   - mtrrs
   - nshst
+  - qwords
   - sctlr
+  - stosq
   - vmalle
   - xffff
