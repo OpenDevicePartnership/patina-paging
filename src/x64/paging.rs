@@ -5,11 +5,11 @@
 ///
 use super::{
     pagetablestore::{invalidate_self_map_va, X64PageTableEntry, X64PageTableStore},
-    reg::{invalidate_tlb, write_cr3},
+    reg::{invalidate_tlb, write_cr3, zero_page},
     structs::*,
 };
 use crate::{page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult};
-use core::{arch::asm, ptr};
+use core::arch::asm;
 
 /// Below struct is used to manage the page table hierarchy. It keeps track of
 /// page table base and create any intermediate page tables required with
@@ -28,6 +28,7 @@ impl<A: PageAllocator> X64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the top level page table(PML5)
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
+        assert!(PhysicalAddress::new(base).is_4kb_aligned());
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
@@ -36,8 +37,7 @@ impl<A: PageAllocator> X64PageTable<A> {
 
         // we have not installed this page table, we can't use our VA range to zero page or
         // rely on self-map, so we have to rely on the identity mapping for the root page
-        unsafe { ptr::write_bytes(base as *mut u8, 0, PAGE_SIZE as usize) };
-        assert!(PhysicalAddress::new(base).is_4kb_aligned());
+        unsafe { zero_page(base) };
 
         // allocate the pages to map the zero VA range and zero them
         let pa_array = [
@@ -48,7 +48,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         ];
 
         pa_array.iter().for_each(|pa| {
-            unsafe { ptr::write_bytes(*pa as *mut u8, 0, PAGE_SIZE as usize) };
+            unsafe { zero_page(*pa) };
         });
 
         let pa_array: [PhysicalAddress; 4] = pa_array.map(Into::into);
@@ -229,7 +229,7 @@ impl<A: PageAllocator> X64PageTable<A> {
             false => base,
         };
 
-        unsafe { ptr::write_bytes(zero_va as *mut u8, 0, PAGE_SIZE as usize) };
+        unsafe { zero_page(zero_va) };
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
             panic!("allocate_page() returned unaligned page");
