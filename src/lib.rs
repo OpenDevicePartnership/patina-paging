@@ -170,15 +170,6 @@ pub trait PageTable {
     /// * `address` - The memory address to map.
     /// * `size` - The memory size to map.
     fn dump_page_tables(&self, address: u64, size: u64);
-
-    /// Function to get the number of page table pages required for the new address and size.
-    ///
-    /// ## Arguments
-    /// * `size` - The memory size to map.
-    ///
-    /// ## Returns
-    /// Returns the number of page table pages required for the new address and size.
-    fn get_page_table_pages_for_size(&self, address: u64, size: u64) -> PtResult<u64>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
