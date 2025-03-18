@@ -833,10 +833,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base);
         log::info!("{}", "-".repeat(132));
     }
-
-    fn get_page_table_pages_for_size(&self, address: u64, size: u64) -> PtResult<u64> {
-        num_page_tables_required(address, size, self.paging_type)
-    }
 }
 
 /// Given the [start, end offset] at the current level from the [start, end VA],
