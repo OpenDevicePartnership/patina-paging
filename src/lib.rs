@@ -42,6 +42,13 @@ pub enum PtError {
     InconsistentMappingAcrossRange,
 }
 
+#[derive(Debug, PartialEq)]
+enum RangeMappingState {
+    Uninitialized,
+    Mapped(MemoryAttributes),
+    Unmapped,
+}
+
 // NOTE: On X64, Memory caching attributes are handled via MTRRs. On AArch64,
 // paging handles both memory access and caching attributes. Hence we defined
 // both of them here.

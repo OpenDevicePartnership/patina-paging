@@ -786,6 +786,105 @@ fn test_query_memory_address_zero_size() {
     assert_eq!(res, Err(PtError::InvalidMemoryRange));
 }
 
+#[test]
+fn test_query_memory_address_inconsistent_mappings() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x1000, size: 0x3000 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x1000, size: 0x3000 },
+    ];
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let num_pages = num_page_tables_required(address, size, paging_type).unwrap() + 0x4;
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        // Map the first part of the range
+        let attributes = MemoryAttributes::ReadOnly;
+        let res = pt.map_memory_region(address, FRAME_SIZE_4KB, attributes);
+        assert!(res.is_ok());
+
+        // Map the last part of the range
+        let res = pt.map_memory_region(address + 2 * FRAME_SIZE_4KB, FRAME_SIZE_4KB, attributes);
+        assert!(res.is_ok());
+
+        // Query the entire range, should return InconsistentMappingAcrossRange error
+        let res = pt.query_memory_region(address, size);
+        assert!(res.is_err());
+        assert_eq!(res, Err(PtError::InconsistentMappingAcrossRange));
+    }
+}
+
+#[test]
+fn test_query_memory_address_inconsistent_mappings_across_2mb_boundary() {
+    struct TestConfig {
+        paging_type: PagingType,
+        address: u64,
+        size: u64,
+    }
+
+    let test_configs = [
+        TestConfig { paging_type: PagingType::Paging4Level, address: 0x0, size: 0x400000 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: 0x0, size: 0x400000 },
+    ];
+
+    for test_config in test_configs {
+        let TestConfig { size, address, paging_type } = test_config;
+
+        let page_allocator = TestPageAllocator::new(0x1000, paging_type);
+        let pt = X64PageTable::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        // Map the first 2MB, but not the second 2MB, map in 1MB chunks so that all PTEs are mapped
+        let attributes = MemoryAttributes::ReadOnly;
+        let res = pt.map_memory_region(address, 0x100000, attributes);
+        assert!(res.is_ok());
+        let res = pt.map_memory_region(address + 0x100000, 0x100000, attributes);
+        assert!(res.is_ok());
+        // now unmap so we have valid entries down to PTE, but invalid there
+        // let res = pt.unmap_memory_region(address, 0x200000);
+        // assert!(res.is_ok());
+        let res = pt.map_memory_region(address + 0x200000, 0x100000, attributes);
+        assert!(res.is_ok());
+        let res = pt.map_memory_region(address + 0x300000, 0x100000, attributes);
+        assert!(res.is_ok());
+        let res = pt.unmap_memory_region(address + 0x200000, 0x200000);
+        assert!(res.is_ok());
+
+        // Query the entire range, should return InconsistentMappingsAcrossRange error
+        let res = pt.query_memory_region(address, size);
+        assert!(res.is_err());
+        assert_eq!(res, Err(PtError::InconsistentMappingAcrossRange));
+
+        // Now unmap the first 2MB and map the second 2MB
+        let res = pt.unmap_memory_region(address, 0x200000);
+        assert!(res.is_ok());
+
+        let res = pt.map_memory_region(address + 0x200000, 0x100000, attributes);
+        assert!(res.is_ok());
+        let res = pt.map_memory_region(address + 0x300000, 0x100000, attributes);
+        assert!(res.is_ok());
+
+        // Query the entire range, should return InconsistentMappingsAcrossRange error
+        let res = pt.query_memory_region(address, size);
+        assert!(res.is_err());
+        assert_eq!(res, Err(PtError::InconsistentMappingAcrossRange));
+    }
+}
+
 // Memory remap tests
 #[test]
 fn test_remap_memory_address_simple() {

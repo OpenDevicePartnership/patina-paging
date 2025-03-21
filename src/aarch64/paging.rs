@@ -4,8 +4,8 @@ use super::{
     structs::*,
 };
 use crate::{
-    page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult, SIZE_16TB, SIZE_1TB,
-    SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB,
+    page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult, RangeMappingState,
+    SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB,
 };
 
 const MAX_VA_BITS: u64 = 48;
@@ -468,7 +468,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
-        prev_attributes: &mut MemoryAttributes,
+        prev_attributes: &mut RangeMappingState,
     ) -> PtResult<MemoryAttributes> {
         let mut va = start_va;
 
@@ -483,19 +483,31 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         let mut entries = table.into_iter().peekable();
         while let Some(entry) = entries.next() {
             if !entry.is_valid() {
-                return Err(PtError::NoMapping);
+                // if we found an entry that is not present after finding entries that were already mapped,
+                // we fail this with InconsistentMappingAcrossRange. If we have set found any region yet, mark
+                // this as an unmapped region and continue
+                match prev_attributes {
+                    RangeMappingState::Uninitialized => *prev_attributes = RangeMappingState::Unmapped,
+                    RangeMappingState::Mapped(_) => return Err(PtError::InconsistentMappingAcrossRange),
+                    RangeMappingState::Unmapped => {}
+                }
+                continue;
             }
 
             if entry.is_block_entry() {
                 // Given memory range can span multiple page table entries, in such
                 // scenario, the expectation is all entries should have same attributes.
                 let current_attributes = entry.get_attributes();
-                if (*prev_attributes).is_empty() {
-                    *prev_attributes = current_attributes;
-                }
-
-                if *prev_attributes != current_attributes {
-                    return Err(PtError::IncompatibleMemoryAttributes);
+                match prev_attributes {
+                    RangeMappingState::Uninitialized => {
+                        *prev_attributes = RangeMappingState::Mapped(current_attributes)
+                    }
+                    RangeMappingState::Unmapped => return Err(PtError::InconsistentMappingAcrossRange),
+                    RangeMappingState::Mapped(attrs) => {
+                        if *attrs != current_attributes {
+                            return Err(PtError::IncompatibleMemoryAttributes);
+                        }
+                    }
                 }
             } else {
                 let next_base = entry.get_canonical_page_table_base();
@@ -511,13 +523,19 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 // end of next level va. It will be minimum of next va and end va
                 let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
 
-                self.query_memory_region_internal(
+                // if we got an error besides NoMapping, we should return that up the stack, we've failed entirely
+                // no mapping may be the case, but we need to continue walking down the page tables to see if we
+                // find any mapped regions and need to fail the query with InconsistentMappingAcrossRange
+                match self.query_memory_region_internal(
                     next_level_start_va,
                     next_level_end_va,
                     (level as u64 - 1).into(),
                     next_base,
                     prev_attributes,
-                )?;
+                ) {
+                    Ok(_) | Err(PtError::NoMapping) => {}
+                    Err(e) => return Err(e),
+                }
             }
 
             // only calculate the next VA if there is another entry in the table we are processing
@@ -527,7 +545,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             }
         }
 
-        Ok(*prev_attributes)
+        match prev_attributes {
+            // entire region was mapped consistently
+            RangeMappingState::Mapped(attrs) => Ok(*attrs),
+            // we only found unmapped regions, so report the entire region is unmapped
+            _ => Err(PtError::NoMapping),
+        }
     }
 
     /// Splits a large page into the next page level pages. This done by
@@ -854,7 +877,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let end_va = address + size - 1;
 
         // make sure the memory region has same attributes set
-        let mut prev_attributes = MemoryAttributes::empty();
+        let mut prev_attributes = RangeMappingState::Uninitialized;
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)?;
 
         self.remap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes)
@@ -868,7 +891,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        let mut prev_attributes = MemoryAttributes::empty();
+        let mut prev_attributes = RangeMappingState::Uninitialized;
         self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
     }
 
