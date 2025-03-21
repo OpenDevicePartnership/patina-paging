@@ -319,7 +319,15 @@ impl<A: PageAllocator> X64PageTable<A> {
                 // so we can map the whole range in one go.
                 entry.update_fields(attributes, va.into(), true)?;
             } else {
-                assert!(level != self.lowest_page_level);
+                if level == self.lowest_page_level {
+                    // We are trying to map a page but it is already mapped. The caller has an inconsistent state
+                    // of the page table
+                    log::error!(
+                        "Paging crate failed to map memory region at VA {:#x?} as the entry is already valid",
+                        va
+                    );
+                    return Err(PtError::InconsistentMappingAcrossRange);
+                }
                 if !entry.present() {
                     let pa = self.allocate_page()?;
                     // non-leaf pages should always have the most permissive memory attributes.
