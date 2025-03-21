@@ -37,6 +37,9 @@ pub enum PtError {
 
     // Invalid Memory Range
     InvalidMemoryRange,
+
+    // The range specified contains some pages that are mapped and some that are unmapped
+    InconsistentMappingAcrossRange,
 }
 
 // NOTE: On X64, Memory caching attributes are handled via MTRRs. On AArch64,
