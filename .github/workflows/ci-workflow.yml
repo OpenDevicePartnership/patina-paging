@@ -12,12 +12,12 @@ name: CI
 on:
   workflow_dispatch:
   push:
-    branches: [ "main" ]
+    branches: [ "personal/mikuback/add_cargo_deny_test" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "personal/mikuback/add_cargo_deny_test" ]
 
 jobs:
   ci_workflow:
     name: Run
-    uses: OpenDevicePartnership/uefi-dxe-core/.github/workflows/CiWorkflow.yml@main
+    uses: OpenDevicePartnership/uefi-dxe-core/.github/workflows/CiWorkflow.yml@personal/mikuback/add_cargo_deny
     secrets: inherit
