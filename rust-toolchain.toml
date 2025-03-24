@@ -3,6 +3,7 @@ channel = "1.80.0"
 components = ["rust-src", "clippy", "rustfmt", "rust-docs"]
 
 [tools]
+cargo-deny = "^0.17"
 cargo-make = "0.37.21"
 cargo-release = "0.25.12"
 cargo-tarpaulin = "0.31.2"

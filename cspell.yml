@@ -29,6 +29,7 @@ allowCompoundWords: true
 words:
   - civac
   - kbyte
+  - keccak
   - mfence
   - mtrrs
   - nshst
