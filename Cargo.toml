@@ -14,7 +14,7 @@ features = ["doc"]
 [dependencies]
 bitfield-struct = "0.10"
 bitflags = "2.6.0"
-log = { version = "=0.4.22", default-features = false }
+log = { version = "^0.4", default-features = false }
 
 [features]
 std = []
