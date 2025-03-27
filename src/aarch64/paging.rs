@@ -29,7 +29,6 @@ pub struct AArch64PageTable<A: PageAllocator> {
     paging_type: PagingType,
     highest_page_level: PageLevel,
     lowest_page_level: PageLevel,
-    zero_va_pt_pa: Option<PhysicalAddress>,
 }
 
 impl<A: PageAllocator> AArch64PageTable<A> {
@@ -60,26 +59,9 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         // entries in the page table.
         unsafe { reg::zero_page(base) };
 
-        // allocate the pages to map the zero VA range
-        let pa_array = [
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-        ];
-
-        pa_array.iter().for_each(|pa| {
-            if !reg::is_mmu_enabled() {
-                reg::cache_range_operation(*pa, PAGE_SIZE, reg::CpuFlushType::EFiCpuFlushTypeInvalidate);
-            }
-
-            unsafe { reg::zero_page(*pa) };
-        });
-
-        let pa_array: [PhysicalAddress; 3] = pa_array.map(Into::into);
-
         // SAFETY: We just allocated the page, so it is safe to use it.
         match unsafe { Self::from_existing(base, page_allocator, paging_type) } {
-            Ok(mut pt) => {
+            Ok(pt) => {
                 // create our self-map entry as the final entry
                 let mut self_map_entry = AArch64PageTableEntry::new(
                     pt.base,
@@ -92,62 +74,6 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
                 // create it with permissive attributes
                 self_map_entry.update_fields(TABLE_ATTRIBUTES, pt.base, false)?;
-
-                // now set up the zero VA range so that we can zero pages before installing them in the page table
-                // this will be at index 0x1FE for the top level page table.
-                // the base doesn't actually matter here since we are using the self map and will calculate the correct
-                // base for the zero VA range
-                let zero_va = ZERO_VA_4_LEVEL;
-
-                let pml4_index = ZERO_VA_INDEX;
-                let pml4_base = pt.base;
-
-                // assign PA to the penultimate PML4 entry
-                let mut second_last_pml4_entry = AArch64PageTableEntry::new(
-                    pml4_base,
-                    pml4_index,
-                    PageLevel::Lvl0,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                second_last_pml4_entry.update_fields(TABLE_ATTRIBUTES, pa_array[0], false)?;
-
-                // set up the PDP entry
-                let mut pdp_entry = AArch64PageTableEntry::new(
-                    pa_array[0],
-                    0,
-                    PageLevel::Lvl1,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pdp_entry.update_fields(TABLE_ATTRIBUTES, pa_array[1], false)?;
-
-                // set up the PD entry
-                let mut pd_entry = AArch64PageTableEntry::new(
-                    pa_array[1],
-                    0,
-                    PageLevel::Lvl2,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pd_entry.update_fields(TABLE_ATTRIBUTES, pa_array[2], false)?;
-
-                // set up the PT entry
-                let mut pt_entry = AArch64PageTableEntry::new(
-                    pa_array[2],
-                    0,
-                    PageLevel::Lvl3,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pt_entry.update_fields(MemoryAttributes::Writeback, PhysicalAddress::new(0), true)?;
-                pt_entry.set_invalid();
-
-                pt.zero_va_pt_pa = Some(pa_array[2]);
                 Ok(pt)
             }
             Err(e) => Err(e),
@@ -180,7 +106,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             _ => return Err(PtError::InvalidParameter),
         };
 
-        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level, zero_va_pt_pa: None })
+        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
     }
 
     /// Consumes the page table structure and returns the page table root.
@@ -190,42 +116,31 @@ impl<A: PageAllocator> AArch64PageTable<A> {
 
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
         let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
+        let base = PhysicalAddress::new(base);
+        if !base.is_4kb_aligned() {
+            panic!("allocate_page() returned unaligned page");
+        }
+
         if !reg::is_mmu_enabled() {
-            reg::cache_range_operation(base, PAGE_SIZE, reg::CpuFlushType::EFiCpuFlushTypeInvalidate);
+            reg::cache_range_operation(base.into(), PAGE_SIZE, reg::CpuFlushType::EFiCpuFlushTypeInvalidate);
         }
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
         // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
         // entries in the page table.
-        let zero_va = match self.is_installed_and_self_mapped() {
+        match self.is_installed_and_self_mapped() {
             true => {
-                // we don't actually need this currently, but if it isn't set and we think the self map is set up,
-                // something has gone very wrong
-                let zero_va_pt_pa = match self.zero_va_pt_pa {
-                    Some(pa) => pa,
-                    _ => return Err(PtError::InvalidParameter),
-                };
-
-                let va = ZERO_VA_4_LEVEL;
-
-                // if we have set up the zero VA, we need to map the PA we just allocated into this range to zero it
-                // as we are relying on the self map to map these pages and we want to ensure break before make
-                // semantics.
-                // the page_base doesn't matter here because we don't use it in self-map mode, but let's still set
-                // the right address in case it gets used in the future and it is easy to persist
                 let mut zero_entry = AArch64PageTableEntry::new(
-                    zero_va_pt_pa,
-                    0,
-                    PageLevel::Lvl3,
+                    PhysicalAddress::new(0),
+                    ZERO_VA_INDEX,
+                    PageLevel::Lvl0,
                     self.paging_type,
-                    VirtualAddress::new(va),
+                    VirtualAddress::new(0),
                     true,
                 );
 
-                // in theory, this isn't needed because we the zero VA will not be our currently executing code
-                // but experimentation has shown that a regular update_fields + TLB flush for VA doesn't work, but
-                // invalidating the entire TLB in that case does work, so this seems less heavy.
+                // Plug in the new base address into the zero entry.
                 let _val = zero_entry.update_shadow_fields(
                     MemoryAttributes::Writeback | MemoryAttributes::ExecuteProtect,
                     base.into(),
@@ -233,23 +148,23 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 );
                 #[cfg(all(not(test), target_arch = "aarch64"))]
                 unsafe {
-                    reg::replace_live_xlat_entry(zero_entry.raw_address(), _val, va.into());
+                    reg::replace_live_xlat_entry(zero_entry.raw_address(), _val, ZERO_VA_4_LEVEL);
                 }
 
-                va
+                // Now use the special ZERO_VA_*_LEVEL va to zero the page.
+                unsafe { reg::zero_page(ZERO_VA_4_LEVEL) };
+
+                // Disconnect the new page from the zero entry.
+                zero_entry.set_invalid();
+                Ok(base)
             }
             // If we have not installed this page table, we can't use our VA range to zero pages yet and have to go on
             // the assumption that the caller has this page mapped
-            false => base,
-        };
-
-        unsafe { reg::zero_page(zero_va) };
-        let base = PhysicalAddress::new(base);
-        if !base.is_4kb_aligned() {
-            panic!("allocate_page() returned unaligned page");
+            false => {
+                unsafe { reg::zero_page(base.into()) };
+                Ok(base)
+            }
         }
-
-        Ok(base)
     }
 
     fn map_memory_region_internal(

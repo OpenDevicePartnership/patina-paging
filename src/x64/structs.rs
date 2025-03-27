@@ -16,11 +16,10 @@ const PAGE_INDEX_MASK: u64 = 0x1FF;
 pub(crate) const MAX_PA_5_LEVEL: u64 = 0xFFFD_FFFF_FFFF_FFFF;
 pub(crate) const MAX_PA_4_LEVEL: u64 = 0xFFFF_FEFF_FFFF_FFFF;
 
-// The following definitions are the zero VA for each level of the page table hierarchy. These are used to create a
-// VA range that is used to zero pages before putting them in the page table. These addresses are calculated as the
-// first VA in the penultimate index in the top level page table.
-pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFFFF_FF00_0000_0000;
-pub(crate) const ZERO_VA_5_LEVEL: u64 = 0xFFFE_0000_0000_0000;
+// The following definitions are the VA for the penultimate index in the top
+// level page table, used for zeroing newly allocated pages.
+pub(crate) const ZERO_VA_5_LEVEL: u64 = 0xFFFF_FFFF_FFFF_E000;
+pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFFFF_FFFF_FFFF_E000;
 
 // The self map index is used to map the page table itself. For simplicity, we choose the final index of the top
 // level page table. This does not conflict with any identity mapping, as the final index of the top level page table

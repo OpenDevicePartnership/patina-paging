@@ -23,7 +23,6 @@ pub struct X64PageTable<A: PageAllocator> {
     paging_type: PagingType,
     highest_page_level: PageLevel,
     lowest_page_level: PageLevel,
-    zero_va_pt_pa: Option<PhysicalAddress>,
 }
 
 impl<A: PageAllocator> X64PageTable<A> {
@@ -41,103 +40,17 @@ impl<A: PageAllocator> X64PageTable<A> {
         // rely on self-map, so we have to rely on the identity mapping for the root page
         unsafe { zero_page(base) };
 
-        // allocate the pages to map the zero VA range and zero them
-        let pa_array = [
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-        ];
-
-        pa_array.iter().for_each(|pa| {
-            unsafe { zero_page(*pa) };
-        });
-
-        let pa_array: [PhysicalAddress; 4] = pa_array.map(Into::into);
-
         // SAFETY: We just allocated the page, so it is safe to use it.
         match unsafe { Self::from_existing(base, page_allocator, paging_type) } {
-            Ok(mut pt) => {
-                // we choose the penultimate PML[4|5] entry to use as the zeroing range and the last PML[4|5] entry for
-                // the self-map entry. We need to map down to the 4k page for the zero page
-                let (level, zero_va) = match pt.paging_type {
-                    PagingType::Paging5Level => (PageLevel::Pml5, ZERO_VA_5_LEVEL),
-                    PagingType::Paging4Level => (PageLevel::Pml4, ZERO_VA_4_LEVEL),
-                    _ => return Err(PtError::InvalidParameter),
-                };
+            Ok(pt) => {
 
                 // create our self-map entry as the final entry
+                let level = if pt.paging_type == PagingType::Paging5Level { PageLevel::Pml5 } else { PageLevel::Pml4 };
                 let mut self_map_entry =
                     X64PageTableEntry::new(pt.base, SELF_MAP_INDEX, level, pt.paging_type, pt.base.into(), false);
 
                 // create it with permissive attributes
                 self_map_entry.update_fields(MemoryAttributes::empty(), pt.base, false)?;
-
-                // now set up the zero VA range so that we can zero pages before installing them in the page table
-                // this will be at index 0x1FE for the top level page table.
-                let mut pml4_index = ZERO_VA_INDEX;
-                let mut pml4_base = pt.base;
-                if pt.paging_type == PagingType::Paging5Level {
-                    // assign PA to the penultimate PML5 entry
-                    let mut last_pml5_entry = X64PageTableEntry::new(
-                        pt.base,
-                        ZERO_VA_INDEX,
-                        PageLevel::Pml5,
-                        pt.paging_type,
-                        VirtualAddress::new(zero_va),
-                        false,
-                    );
-                    last_pml5_entry.update_fields(MemoryAttributes::empty(), pa_array[3], false)?;
-                    pml4_index = 0;
-                    pml4_base = pa_array[3];
-                }
-
-                // assign PA to the penultimate PML4 entry if 4 level paging, otherwise to the first index
-                let mut second_last_pml4_entry = X64PageTableEntry::new(
-                    pml4_base,
-                    pml4_index,
-                    PageLevel::Pml4,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                second_last_pml4_entry.update_fields(MemoryAttributes::empty(), pa_array[0], false)?;
-
-                // set up the PDP entry
-                let mut pdp_entry = X64PageTableEntry::new(
-                    pa_array[0],
-                    0,
-                    PageLevel::Pdp,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pdp_entry.update_fields(MemoryAttributes::empty(), pa_array[1], false)?;
-
-                // set up the PD entry next
-                let mut pd_entry = X64PageTableEntry::new(
-                    pa_array[1],
-                    0,
-                    PageLevel::Pd,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pd_entry.update_fields(MemoryAttributes::empty(), pa_array[2], false)?;
-
-                // set up an invalid PT entry that will get overridden by each page we allocate
-                let mut pt_entry = X64PageTableEntry::new(
-                    pa_array[2],
-                    0,
-                    PageLevel::Pt,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pt_entry.update_fields(MemoryAttributes::empty(), PhysicalAddress::new(0), true)?;
-                pt_entry.set_present(false);
-
-                pt.zero_va_pt_pa = Some(pa_array[2]);
                 Ok(pt)
             }
             Err(e) => Err(e),
@@ -171,7 +84,7 @@ impl<A: PageAllocator> X64PageTable<A> {
             _ => return Err(PtError::InvalidParameter),
         };
 
-        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level, zero_va_pt_pa: None })
+        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level })
     }
 
     /// Consumes the page table structure and returns the page table root.
@@ -181,63 +94,52 @@ impl<A: PageAllocator> X64PageTable<A> {
 
     pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
         let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
-
-        // SAFETY: We just allocated the page, so it is safe to use it.
-        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
-        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
-        // entries in the page table.
-        let zero_va = match self.is_installed_and_self_mapped() {
-            true => {
-                let va = match self.paging_type {
-                    PagingType::Paging5Level => ZERO_VA_5_LEVEL,
-                    PagingType::Paging4Level => ZERO_VA_4_LEVEL,
-                    _ => return Err(PtError::InvalidParameter),
-                };
-
-                // we don't actually need this currently, but if it isn't set and we think the self map is set up,
-                // something has gone very wrong
-                let zero_va_pt_pa = match self.zero_va_pt_pa {
-                    Some(pa) => pa,
-                    _ => return Err(PtError::InvalidParameter),
-                };
-
-                // if we have set up the zero VA, we need to map the PA we just allocated into this range to zero it
-                // as we are relying on the self map to map these pages and we want to ensure break before make
-                // semantics.
-                // the page_base doesn't matter here because we don't use it in self-map mode, but let's still set
-                // the right address in case it gets used in the future and it is easy to persist
-                let mut zero_entry = X64PageTableEntry::new(
-                    zero_va_pt_pa,
-                    0,
-                    PageLevel::Pt,
-                    self.paging_type,
-                    VirtualAddress::new(va),
-                    true,
-                );
-
-                zero_entry.update_fields(
-                    MemoryAttributes::empty() | MemoryAttributes::ExecuteProtect,
-                    PhysicalAddress::new(base),
-                    true,
-                )?;
-
-                // invalidate the TLB entry for the zero VA to ensure we are zeroing our newly placed page
-                unsafe { asm!("mfence", "invlpg [{}]", in(reg) va) };
-
-                va
-            }
-            // If we have not installed this page table, we can't use our VA range to zero pages yet and have to go on
-            // the assumption that the caller has this page mapped
-            false => base,
-        };
-
-        unsafe { zero_page(zero_va) };
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
             panic!("allocate_page() returned unaligned page");
         }
 
-        Ok(base)
+        // SAFETY: We just allocated the page, so it is safe to use it.
+        // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
+        // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
+        // entries in the page table.
+        match self.is_installed_and_self_mapped() {
+            true => {
+                let (level, zero_va) = match self.paging_type {
+                    PagingType::Paging5Level => (PageLevel::Pml5, ZERO_VA_5_LEVEL),
+                    PagingType::Paging4Level => (PageLevel::Pml4, ZERO_VA_4_LEVEL),
+                    _ => return Err(PtError::InvalidParameter),
+                };
+
+                let mut zero_entry = X64PageTableEntry::new(
+                    PhysicalAddress::new(0),
+                    ZERO_VA_INDEX,
+                    level,
+                    self.paging_type,
+                    VirtualAddress::new(0),
+                    true,
+                );
+
+                // Plug in the new base address into the zero entry.
+                zero_entry.update_fields(MemoryAttributes::empty() | MemoryAttributes::ExecuteProtect, base, true)?;
+
+                // invalidate the TLB entry for the zero VA to ensure we are zeroing our newly placed page
+                unsafe { asm!("mfence", "invlpg [{}]", in(reg) zero_va) };
+
+                // Now use the special ZERO_VA_*_LEVEL va to zero the page.
+                unsafe { zero_page(zero_va) };
+
+                // Disconnect the new page from the zero entry.
+                zero_entry.set_present(false);
+                Ok(base)
+            }
+            // If we have not installed this page table, we can't use our VA range to zero pages yet and have to go on
+            // the assumption that the caller has this page mapped
+            false => {
+                unsafe { zero_page(base.into()) };
+                Ok(base)
+            }
+        }
     }
 
     // For a given memory range, the number of intermediate page table entries

@@ -111,24 +111,21 @@ impl TestPageAllocator {
         let page = self.get_page(*page_index).unwrap();
         let mut va = start_va;
         for index in start_index..=end_index {
-            let page_base = unsafe {
-                // this is a little weird, the 0th page is allocated as the root, then the next three pages are
-                // allocated to support the zero VA range, which we don't validate here (a separate test validates)
-                match page_index {
-                    0 => self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 5)) as u64,
-                    _ => self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 1)) as u64,
-                }
-            };
-            let leaf =
-                unsafe { self.validate_page_entry(page.add(index as usize), va.into(), page_base, level, attributes) };
+            let leaf: bool;
+            unsafe {
+                // hex_dump(page.add(index as usize) as *const u8, 8);
+                leaf = self.validate_page_entry(
+                    page.add(index as usize),
+                    va.into(),
+                    self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 1)) as u64,
+                    level,
+                    attributes,
+                );
 
-            // We only consume further pages from PageAllocator memory
-            // for page tables higher than PT type
-            if !leaf {
-                match page_index {
-                    // skip over the zero VA pages
-                    0 => *page_index += 5,
-                    _ => *page_index += 1,
+                // We only consume further pages from PageAllocator memory
+                // for page tables higher than PT type
+                if !leaf {
+                    *page_index += 1;
                 }
             }
 
