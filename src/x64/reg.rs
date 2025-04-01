@@ -4,7 +4,7 @@ use core::arch::asm;
 
 /// Write CR3 register. Also invalidates TLB.
 pub unsafe fn write_cr3(_value: u64) {
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(not(test))]
     {
         unsafe {
             asm!("mov cr3, {}", in(reg) _value, options(nostack, preserves_flags));
@@ -16,7 +16,7 @@ pub unsafe fn write_cr3(_value: u64) {
 pub unsafe fn read_cr3() -> u64 {
     let mut _value = 0u64;
 
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(not(test))]
     {
         unsafe {
             asm!("mov {}, cr3", out(reg) _value, options(nostack, preserves_flags));
@@ -45,7 +45,7 @@ pub unsafe fn invalidate_tlb(base: u64) {
 /// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
 /// is mapped.
 pub(crate) unsafe fn zero_page(_page: u64) {
-    #[cfg(target_arch = "x86_64")]
+    #[cfg(not(test))]
     unsafe {
         asm!(
         "cld",              // Clear the direction flag so that we increment rdi with each store
