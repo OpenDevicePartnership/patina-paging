@@ -1,20 +1,19 @@
 use super::structs::PhysicalAddress;
-#[allow(unused_imports)]
-use core::arch::{asm, global_asm};
 
-#[cfg(all(not(test), target_arch = "aarch64"))]
-global_asm!(include_str!("replace_table_entry.asm"));
-
-// Use efiapi for the consistent calling convention.
-#[cfg(all(not(test), target_arch = "aarch64"))]
-extern "efiapi" {
-    pub fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
+cfg_if::cfg_if! {
+    if #[cfg(not(test))] {
+        use core::arch::{asm, global_asm};
+        global_asm!(include_str!("replace_table_entry.asm"));
+        // Use efiapi for the consistent calling convention.
+        extern "efiapi" {
+            pub fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
+        }
+    }
 }
 
-#[allow(dead_code)]
 pub(crate) enum CpuFlushType {
-    EfiCpuFlushTypeWriteBackInvalidate,
-    EfiCpuFlushTypeWriteBack,
+    _EfiCpuFlushTypeWriteBackInvalidate,
+    _EfiCpuFlushTypeWriteBack,
     EFiCpuFlushTypeInvalidate,
 }
 
@@ -30,7 +29,7 @@ pub fn get_phys_addr_bits() -> u64 {
     #[allow(unused_assignments)]
     let mut pa_bits: u64 = 0;
 
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         asm!(
         "mrs {}, id_aa64mmfr0_el1",
@@ -53,7 +52,7 @@ pub fn get_phys_addr_bits() -> u64 {
 pub fn get_current_el() -> u64 {
     // Default to EL2
     let mut _current_el: u64 = 8;
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         asm!(
         "mrs {}, CurrentEL",
@@ -70,7 +69,7 @@ pub fn get_current_el() -> u64 {
 }
 
 pub fn set_tcr(_tcr: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         if current_el == 2 {
@@ -91,7 +90,7 @@ pub fn set_tcr(_tcr: u64) {
 }
 
 pub fn set_ttbr0(_ttbr0: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         if current_el == 2 {
@@ -112,7 +111,7 @@ pub fn set_ttbr0(_ttbr0: u64) {
 }
 
 pub fn set_mair(_mair: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         if current_el == 2 {
@@ -134,7 +133,7 @@ pub fn set_mair(_mair: u64) {
 
 pub fn is_mmu_enabled() -> bool {
     let mut _sctlr: u64 = 0;
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         match get_current_el() {
             2 => asm!("mrs {}, sctlr_el2", out(reg) _sctlr),
@@ -147,7 +146,7 @@ pub fn is_mmu_enabled() -> bool {
 }
 
 pub fn enable_mmu() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         if current_el == 2 {
@@ -178,7 +177,7 @@ pub fn enable_mmu() {
 }
 
 pub fn set_stack_alignment_check(_enable: bool) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         if current_el == 2 {
@@ -202,7 +201,7 @@ pub fn set_stack_alignment_check(_enable: bool) {
 }
 
 pub fn set_alignment_check(_enable: bool) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         if current_el == 2 {
@@ -226,7 +225,7 @@ pub fn set_alignment_check(_enable: bool) {
 }
 
 pub fn enable_instruction_cache() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         if current_el == 2 {
@@ -242,7 +241,7 @@ pub fn enable_instruction_cache() {
 }
 
 pub fn enable_data_cache() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         if current_el == 2 {
@@ -258,7 +257,7 @@ pub fn enable_data_cache() {
 }
 
 pub fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
         let ls_mva = _mva << 12;
@@ -296,16 +295,16 @@ pub fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) 
 }
 
 // AArch64 related cache functions
-pub fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
+pub(crate) fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
     let cacheline_alignment = data_cache_line_len() - 1;
     let mut aligned_addr = start - (start & cacheline_alignment);
     let end_addr = start + length;
 
     loop {
         match op {
-            CpuFlushType::EfiCpuFlushTypeWriteBack => clean_data_entry_by_mva(aligned_addr),
+            CpuFlushType::_EfiCpuFlushTypeWriteBackInvalidate => clean_and_invalidate_data_entry_by_mva(aligned_addr),
+            CpuFlushType::_EfiCpuFlushTypeWriteBack => clean_data_entry_by_mva(aligned_addr),
             CpuFlushType::EFiCpuFlushTypeInvalidate => invalidate_data_cache_entry_by_mva(aligned_addr),
-            CpuFlushType::EfiCpuFlushTypeWriteBackInvalidate => clean_and_invalidate_data_entry_by_mva(aligned_addr),
         }
 
         aligned_addr += cacheline_alignment;
@@ -314,14 +313,14 @@ pub fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
         }
     }
 
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         asm!("dsb sy", options(nostack));
     }
 }
 
 fn data_cache_line_len() -> u64 {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     {
         let ctr_el0 = unsafe {
             let ctr_el0: u64;
@@ -330,7 +329,7 @@ fn data_cache_line_len() -> u64 {
         };
         return 4 << ((ctr_el0 >> 16) & 0xf);
     }
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(test)]
     {
         // For all other cases, return 64 bytes
         64_u64
@@ -338,21 +337,21 @@ fn data_cache_line_len() -> u64 {
 }
 
 fn clean_data_entry_by_mva(_mva: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         asm!("dc cvac, {}", in(reg) _mva, options(nostack, preserves_flags));
     }
 }
 
 fn invalidate_data_cache_entry_by_mva(_mva: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         asm!("dc ivac, {}", in(reg) _mva, options(nostack, preserves_flags));
     }
 }
 
 fn clean_and_invalidate_data_entry_by_mva(_mva: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         asm!("dc civac, {}", in(reg) _mva, options(nostack, preserves_flags));
     }
@@ -364,7 +363,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
     // our base
     let mut _ttbr0: u64 = 0;
     let _current_el = get_current_el();
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(not(test))]
     unsafe {
         match _current_el {
             2 => asm!("mrs {}, ttbr0_el2", out(reg) _ttbr0),
@@ -377,7 +376,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
         false
     } else {
         // Check to see if MMU is enabled
-        #[cfg(all(not(test), target_arch = "aarch64"))]
+        #[cfg(not(test))]
         unsafe {
             let sctlr: u64;
             match _current_el {
@@ -402,7 +401,7 @@ pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
 /// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
 /// is mapped.
 pub(crate) unsafe fn zero_page(_page: u64) {
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(not(test))]
     asm!(
         "mov x0, {}",               // Address of the page
         "mov x1, #0",               // Zero value

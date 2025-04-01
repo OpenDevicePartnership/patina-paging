@@ -16,31 +16,6 @@ RUSTC_TARGET = "debug"
 RUSTC_PROFILE = "release"
 RUSTC_TARGET = "release"
 
-[tasks.build]
-description = """Builds a single rust package with the standard library.
-
-Customizations:
-    -p [development|release]: Builds in debug or release. Default: development
-
-Example:
-    `cargo make build`
-    `cargo make -p release build`
-"""
-alias = "build-std"
-
-[tasks.build-std]
-description = """Builds paging crate as std target.
-
-Customizations:
-    -p [development|release]: Builds in debug or release. Default: development
-
-Example:
-    `cargo make build-std`
-"""
-clear = true
-command = "cargo"
-args = ["build", "--profile", "${RUSTC_PROFILE}", "--features", "std", "--target", "${CARGO_MAKE_RUST_TARGET_TRIPLE}", "@@split(BUILD_CRATES, )", "@@split(UEFI_CRATES, )"]
-
 [tasks.build-x64]
 description = """Builds paging crate as UEFI target.
 
@@ -117,7 +92,6 @@ dependencies = [
     "deny",
     "clippy",
     "cspell",
-    "build",
     "build-x64",
     "build-aarch64",
     "test",

@@ -2,10 +2,10 @@ use super::{
     pagetablestore::{AArch64PageTableEntry, AArch64PageTableStore},
     reg,
     structs::*,
+    SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB,
 };
 use crate::{
     page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult, RangeMappingState,
-    SIZE_16TB, SIZE_1TB, SIZE_256TB, SIZE_4GB, SIZE_4TB, SIZE_64GB,
 };
 
 const MAX_VA_BITS: u64 = 48;
@@ -14,7 +14,7 @@ const MAX_VA_BITS: u64 = 48;
 /// operation, but should be valid for self-map usage.
 const TABLE_ATTRIBUTES: MemoryAttributes = MemoryAttributes::Writeback;
 
-#[cfg(all(not(test), target_arch = "aarch64"))]
+#[cfg(not(test))]
 extern "C" {
     static replace_live_xlat_entry_size: u32;
 }
@@ -35,7 +35,7 @@ pub struct AArch64PageTable<A: PageAllocator> {
 impl<A: PageAllocator> AArch64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
         // Allocate the root page table
-        #[cfg(all(not(test), target_arch = "aarch64"))]
+        #[cfg(not(test))]
         if !reg::is_mmu_enabled() {
             // This is guarded behind the mmu check because enabling mmu will also
             // enable data and instruction cache. So, we don't need to manually do
@@ -44,7 +44,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
             reg::cache_range_operation(
                 function_pointer,
                 unsafe { replace_live_xlat_entry_size } as u64,
-                reg::CpuFlushType::EfiCpuFlushTypeWriteBack,
+                reg::CpuFlushType::_EfiCpuFlushTypeWriteBack,
             );
         }
 
@@ -231,7 +231,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     base.into(),
                     true,
                 );
-                #[cfg(all(not(test), target_arch = "aarch64"))]
+                #[cfg(not(test))]
                 unsafe {
                     reg::replace_live_xlat_entry(zero_entry.raw_address(), _val, va.into());
                 }
@@ -279,7 +279,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
                     let _val = entry.update_shadow_fields(attributes, va.into(), true);
-                    #[cfg(all(not(test), target_arch = "aarch64"))]
+                    #[cfg(not(test))]
                     unsafe {
                         reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
@@ -296,7 +296,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                     if reg::is_this_page_table_active(self.base) {
                         // Need to do the heavy duty break-before-make sequence
                         let _val = entry.update_shadow_fields(TABLE_ATTRIBUTES, pa, false);
-                        #[cfg(all(not(test), target_arch = "aarch64"))]
+                        #[cfg(not(test))]
                         unsafe {
                             reg::replace_live_xlat_entry(entry.raw_address(), _val, pa.into());
                         }
@@ -426,7 +426,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
                 if reg::is_this_page_table_active(self.base) {
                     // Need to do the heavy duty break-before-make sequence
                     let _val = entry.update_shadow_fields(attributes, va.into(), true);
-                    #[cfg(all(not(test), target_arch = "aarch64"))]
+                    #[cfg(not(test))]
                     unsafe {
                         reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
                     }
@@ -575,7 +575,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         if reg::is_this_page_table_active(self.base) {
             // Need to do the heavy duty break-before-make sequence
             let _val = entry.update_shadow_fields(attributes, pa, false);
-            #[cfg(all(not(test), target_arch = "aarch64"))]
+            #[cfg(not(test))]
             unsafe {
                 reg::replace_live_xlat_entry(entry.raw_address(), _val, va.into());
             }
@@ -907,116 +907,6 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         log::info!("{}", "-".repeat(130));
         self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base)
     }
-}
-
-fn find_num_entries(start_offset: u64, end_offset: u64, num_parent_level_entries: u64) -> u64 {
-    let mut num_entries = 0;
-    if num_parent_level_entries > 1 {
-        // entries spanning multiple pages
-        num_entries += 512 - start_offset; // number of upper entries in first page
-        num_entries += (num_parent_level_entries - 2) * 512; // number of entries in between pages
-        num_entries += end_offset + 1; // number of lower entries in the last page
-    } else {
-        // entries do not span multiple pages(end_offset is guaranteed to be higher than start offset)
-        num_entries = end_offset - start_offset + 1; // number of entries in the page
-    }
-
-    num_entries
-}
-
-/// Finds the number of pages that are saved using large pages for the given address
-/// range and paging levels compared for using the lowest level.
-fn find_large_page_savings(address: u64, size: u64, level: PageLevel, lowest_page_level: PageLevel) -> u64 {
-    // The number of large pages in a given address start & length is deterministic
-    // based on the alignment of the address to the individual large pages size.
-    // Recurse down through levels finding the optimal page size to use.
-
-    if (level == lowest_page_level) || (size == 0) {
-        return 0;
-    }
-
-    if !level.supports_block_entry() {
-        return find_large_page_savings(address, size, level - 1, lowest_page_level);
-    }
-
-    let mut savings = 0;
-    let alignment = level.entry_va_size();
-    let aligned_address = (address + alignment - 1) & !(alignment - 1);
-
-    // If there are no large pages that can be used for the given address range,
-    // then continue with the next level.
-    if aligned_address + alignment > address + size {
-        return find_large_page_savings(address, size, level - 1, lowest_page_level);
-    }
-
-    // Split of the unaligned beginning and end and recursive to the next level
-    // to find the savings with smaller page sizes.
-
-    savings += find_large_page_savings(address, aligned_address - address, level - 1, lowest_page_level);
-
-    let aligned_end = (address + size) & !(alignment - 1);
-    let remainder = (address + size) - aligned_end;
-
-    savings += find_large_page_savings(aligned_end, remainder, level - 1, lowest_page_level);
-
-    // The savings is the number of sub-pages that would be saved by each large page
-    // which is 1 for the current level and then 512 for each level below which.
-    // e.g. a large page at the third level would save 1 + 512
-    let num_large_pages = (aligned_end - aligned_address) / alignment;
-    let page_entries: u64 = 512;
-    let remaining_levels = level as u64 - lowest_page_level as u64;
-
-    savings += num_large_pages;
-    if remaining_levels > 1 {
-        savings += num_large_pages * page_entries.pow(remaining_levels as u32 - 1);
-    }
-
-    savings
-}
-
-pub(crate) fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) -> PtResult<u64> {
-    let address = VirtualAddress::new(address);
-    if size == 0 || !address.is_4kb_aligned() {
-        return Err(PtError::UnalignedAddress);
-    }
-
-    // Check the memory range is aligned
-    if !(address + size).is_4kb_aligned() {
-        return Err(PtError::UnalignedAddress);
-    }
-
-    let start_va = address;
-    let end_va = address + size - 1;
-
-    // For the given paging type identify the highest and lowest page levels.
-    // This is used during page building to stop the recursion.
-    let (highest_page_level, lowest_page_level) = match paging_type {
-        PagingType::AArch64PageTable4KB => (PageLevel::Lvl0, PageLevel::Lvl3),
-        _ => return Err(PtError::InvalidParameter),
-    };
-
-    // The key to calculate the number of tables required for the current level
-    // dependents on the number of entries in the parent level. Also, the number
-    // of entries in the current level depends on the number of tables in the
-    // current level and the current offset(done by `find_num_entries()`).
-    let mut num_entries = 0;
-    let mut num_tables = 1; // top level table
-    let mut total_num_tables = 0;
-    for level in ((lowest_page_level as u64)..=(highest_page_level as u64)).rev() {
-        let start_offset = start_va.get_index(level.into());
-        let end_offset = end_va.get_index(level.into());
-
-        num_entries = find_num_entries(start_offset, end_offset, num_entries);
-        total_num_tables += num_tables;
-        num_tables = num_entries;
-    }
-
-    // The above calculates only the lowest pages, now calculate saving through large
-    // pages.
-    let savings = find_large_page_savings(address.into(), size, highest_page_level, lowest_page_level);
-    total_num_tables -= savings;
-
-    Ok(total_num_tables)
 }
 
 fn get_root_table_count(t0sz: u64) -> u64 {

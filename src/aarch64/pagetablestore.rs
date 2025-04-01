@@ -1,5 +1,5 @@
-use super::structs::*;
-use crate::{MemoryAttributes, PagingType, PtResult, SIZE_1GB, SIZE_2MB, SIZE_4KB};
+use super::{structs::*, SIZE_1GB, SIZE_2MB, SIZE_4KB};
+use crate::{MemoryAttributes, PagingType, PtResult};
 use alloc::string::String;
 
 /// Contains enough metadata to work with a single page table

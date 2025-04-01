@@ -1,5 +1,5 @@
-use super::structs::*;
-use crate::{MemoryAttributes, PagingType, PtResult, SIZE_1GB, SIZE_2MB, SIZE_4KB, SIZE_512GB};
+use super::{structs::*, SIZE_1GB, SIZE_2MB, SIZE_4KB, SIZE_512GB};
+use crate::{MemoryAttributes, PagingType, PtResult};
 use alloc::string::String;
 
 /// Contains enough metadata to work with a single page table
@@ -280,7 +280,7 @@ impl X64PageTableEntry {
 const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
 
 pub(crate) fn invalidate_self_map_va(_self_map_va: u64) {
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(not(test))]
     unsafe {
         core::arch::asm!("mfence", "invlpg [{0}]", in(reg) _self_map_va)
     };
