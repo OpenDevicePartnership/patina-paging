@@ -246,7 +246,7 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         unsafe { reg::zero_page(zero_va) };
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
-            panic!("allocate_page() returned unaligned page");
+            return Err(PtError::UnalignedPageBase);
         }
 
         Ok(base)
@@ -665,11 +665,12 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         if size == 0 {
             return Err(PtError::InvalidMemoryRange);
         }
+
         // Overflow check
         address.try_add(size - 1)?;
 
         // Check the memory range
-        if address + (size - 1) > VirtualAddress::new(MAX_VA) {
+        if address + (size - 1) > VirtualAddress::new(MAX_VA_4_LEVEL) {
             return Err(PtError::InvalidMemoryRange);
         }
 
@@ -724,13 +725,6 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
-        if address + size - 1 > VirtualAddress::new(MAX_PA) {
-            panic!(
-                "Address range {:#x?} - {:#x?} exceeds maximum VA that can be supported by this crate",
-                address,
-                address + size - 1
-            );
-        }
 
         // We map until next alignment
         let start_va = address;
@@ -743,13 +737,6 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
-        if address + size - 1 > VirtualAddress::new(MAX_PA) {
-            panic!(
-                "Address range {:#x?} - {:#x?} exceeds maximum VA that can be supported by this crate",
-                address,
-                address + size - 1
-            );
-        }
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -790,7 +777,7 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             } else if max_address < SIZE_256TB {
                 tcr |= 5 << 16;
             } else {
-                panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
+                return Err(PtError::InvalidParameter);
             }
         } else if reg::get_current_el() == 1 {
             // Due to Cortex-A57 erratum #822227 we must set TG1[1] == 1, regardless of EPD1.
@@ -810,10 +797,10 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
             } else if max_address < SIZE_256TB {
                 tcr |= 5 << 32;
             } else {
-                panic!("The MaxAddress 0x{:x} is not supported by this MMU configuration.", max_address);
+                return Err(PtError::InvalidParameter);
             }
         } else {
-            panic!("paging is only expected to run at EL2 and EL1, not EL3.");
+            return Err(PtError::InvalidParameter);
         }
 
         //
@@ -865,13 +852,6 @@ impl<A: PageAllocator> PageTable for AArch64PageTable<A> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
-        if address + size - 1 > VirtualAddress::new(MAX_PA) {
-            panic!(
-                "Address range {:#x?} - {:#x?} exceeds maximum VA that can be supported by this crate",
-                address,
-                address + size - 1
-            );
-        }
 
         let start_va = address;
         let end_va = address + size - 1;

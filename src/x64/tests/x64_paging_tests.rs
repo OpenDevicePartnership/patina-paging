@@ -1,6 +1,6 @@
 use log::{Level, LevelFilter, Metadata, Record};
 
-use crate::PageTable;
+use crate::x64::structs::{PageLevel, VirtualAddress, MAX_VA_4_LEVEL, MAX_VA_5_LEVEL};
 use crate::{
     x64::{
         structs::{PageTableEntry, CR3_PAGE_BASE_ADDRESS_MASK, FRAME_SIZE_4KB, SELF_MAP_INDEX, ZERO_VA_INDEX},
@@ -9,6 +9,7 @@ use crate::{
     },
     MemoryAttributes, PagingType, PtError,
 };
+use crate::{PageTable, PtResult};
 
 // Sample logger for log crate to dump stuff in tests
 struct SimpleLogger;
@@ -470,8 +471,8 @@ fn test_map_memory_address_range_overflow() {
 
     let test_configs = [
         // VA range overflows
-        TestConfig { paging_type: PagingType::Paging4Level, address: 0xffff_ffff_ffff_f000, size: 0x2000 },
-        TestConfig { paging_type: PagingType::Paging5Level, address: 0xffff_ffff_ffff_f000, size: 0x2000 },
+        TestConfig { paging_type: PagingType::Paging4Level, address: MAX_VA_4_LEVEL, size: 0x2000 },
+        TestConfig { paging_type: PagingType::Paging5Level, address: MAX_VA_5_LEVEL, size: 0x2000 },
     ];
 
     for test_config in test_configs {

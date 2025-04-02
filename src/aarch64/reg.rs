@@ -6,7 +6,7 @@ cfg_if::cfg_if! {
         global_asm!(include_str!("replace_table_entry.asm"));
         // Use efiapi for the consistent calling convention.
         extern "efiapi" {
-            pub fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
+            pub(crate) fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
         }
     }
 }
@@ -17,7 +17,7 @@ pub(crate) enum CpuFlushType {
     EFiCpuFlushTypeInvalidate,
 }
 
-pub fn get_phys_addr_bits() -> u64 {
+pub(crate) fn get_phys_addr_bits() -> u64 {
     // read the id_aa64mmfr0_el1 register to get the physical address bits
     // Bits 0..3 of the id_aa64mmfr0_el1 system register encode the size of the
     // physical address space support on this CPU:
@@ -49,7 +49,7 @@ pub fn get_phys_addr_bits() -> u64 {
     (pa_bits << 2) + 32
 }
 
-pub fn get_current_el() -> u64 {
+pub(crate) fn get_current_el() -> u64 {
     // Default to EL2
     let mut _current_el: u64 = 8;
     #[cfg(not(test))]
@@ -68,7 +68,7 @@ pub fn get_current_el() -> u64 {
     }
 }
 
-pub fn set_tcr(_tcr: u64) {
+pub(crate) fn set_tcr(_tcr: u64) {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -89,7 +89,7 @@ pub fn set_tcr(_tcr: u64) {
     }
 }
 
-pub fn set_ttbr0(_ttbr0: u64) {
+pub(crate) fn set_ttbr0(_ttbr0: u64) {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -110,7 +110,7 @@ pub fn set_ttbr0(_ttbr0: u64) {
     }
 }
 
-pub fn set_mair(_mair: u64) {
+pub(crate) fn set_mair(_mair: u64) {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -131,7 +131,7 @@ pub fn set_mair(_mair: u64) {
     }
 }
 
-pub fn is_mmu_enabled() -> bool {
+pub(crate) fn is_mmu_enabled() -> bool {
     let mut _sctlr: u64 = 0;
     #[cfg(not(test))]
     unsafe {
@@ -145,7 +145,7 @@ pub fn is_mmu_enabled() -> bool {
     _sctlr & 0x1 == 1
 }
 
-pub fn enable_mmu() {
+pub(crate) fn enable_mmu() {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -176,7 +176,7 @@ pub fn enable_mmu() {
     }
 }
 
-pub fn set_stack_alignment_check(_enable: bool) {
+pub(crate) fn set_stack_alignment_check(_enable: bool) {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -200,7 +200,7 @@ pub fn set_stack_alignment_check(_enable: bool) {
     }
 }
 
-pub fn set_alignment_check(_enable: bool) {
+pub(crate) fn set_alignment_check(_enable: bool) {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -224,7 +224,7 @@ pub fn set_alignment_check(_enable: bool) {
     }
 }
 
-pub fn enable_instruction_cache() {
+pub(crate) fn enable_instruction_cache() {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -240,7 +240,7 @@ pub fn enable_instruction_cache() {
     }
 }
 
-pub fn enable_data_cache() {
+pub(crate) fn enable_data_cache() {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -256,7 +256,7 @@ pub fn enable_data_cache() {
     }
 }
 
-pub fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
+pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
@@ -358,7 +358,7 @@ fn clean_and_invalidate_data_entry_by_mva(_mva: u64) {
 }
 
 // Helper function to check if this page table is active
-pub fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
+pub(crate) fn is_this_page_table_active(page_table_base: PhysicalAddress) -> bool {
     // Check the TTBR0 register to see if this page table matches
     // our base
     let mut _ttbr0: u64 = 0;

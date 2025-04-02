@@ -234,7 +234,7 @@ impl<A: PageAllocator> X64PageTable<A> {
         unsafe { zero_page(zero_va) };
         let base = PhysicalAddress::new(base);
         if !base.is_4kb_aligned() {
-            panic!("allocate_page() returned unaligned page");
+            return Err(PtError::UnalignedPageBase);
         }
 
         Ok(base)
@@ -681,6 +681,16 @@ impl<A: PageAllocator> X64PageTable<A> {
             return Err(PtError::InvalidMemoryRange);
         }
 
+        let max_va = match self.paging_type {
+            PagingType::Paging5Level => VirtualAddress::new(MAX_VA_5_LEVEL),
+            PagingType::Paging4Level => VirtualAddress::new(MAX_VA_4_LEVEL),
+            _ => return Err(PtError::InvalidParameter),
+        };
+
+        if address + size - 1 > max_va {
+            return Err(PtError::InvalidMemoryRange);
+        }
+
         // Overflow check, size is 0-based
         address.try_add(size - 1)?;
 
@@ -742,20 +752,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
 
         self.validate_address_range(address, size)?;
 
-        let max_pa = match self.paging_type {
-            PagingType::Paging5Level => VirtualAddress::new(MAX_PA_5_LEVEL),
-            PagingType::Paging4Level => VirtualAddress::new(MAX_PA_4_LEVEL),
-            _ => return Err(PtError::InvalidParameter),
-        };
-
-        if address + size - 1 > max_pa {
-            panic!(
-                "Address range {:#x?} - {:#x?} exceeds maximum PA that can be supported by this crate",
-                address,
-                address + size - 1
-            );
-        }
-
         // We map until next alignment
         let start_va = address;
         let end_va = address + size - 1;
@@ -771,19 +767,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
-        let max_pa = match self.paging_type {
-            PagingType::Paging5Level => VirtualAddress::new(MAX_PA_5_LEVEL),
-            PagingType::Paging4Level => VirtualAddress::new(MAX_PA_4_LEVEL),
-            _ => return Err(PtError::InvalidParameter),
-        };
-
-        if address + size - 1 > max_pa {
-            panic!(
-                "Address range {:#x?} - {:#x?} exceeds maximum VA that can be supported by this crate",
-                address,
-                address + size - 1
-            );
-        }
 
         let start_va = address;
         let end_va = address + size - 1;
@@ -799,20 +782,6 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
-
-        let max_pa = match self.paging_type {
-            PagingType::Paging5Level => VirtualAddress::new(MAX_PA_5_LEVEL),
-            PagingType::Paging4Level => VirtualAddress::new(MAX_PA_4_LEVEL),
-            _ => return Err(PtError::InvalidParameter),
-        };
-
-        if address + size - 1 > max_pa {
-            panic!(
-                "Address range {:#x?} - {:#x?} exceeds maximum VA that can be supported by this crate",
-                address,
-                address + size - 1
-            );
-        }
 
         let start_va = address;
         let end_va = address + size - 1;
