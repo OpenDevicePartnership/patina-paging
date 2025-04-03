@@ -6,11 +6,9 @@ use core::{
     ops::{Add, Sub},
 };
 
-pub(crate) const MAX_VA: u64 = 0x0000_ffff_ffff_ffff;
-
-// this is the maximum physical address that can be used in the system because of our artifical restriction to use
+// This is the maximum virtual address that can be used in the system because of our artifical restriction to use
 // the zero VA and self map index in the top level page table. This is a temporary restriction
-pub(crate) const MAX_PA: u64 = 0x0000_feff_ffff_ffff;
+pub(crate) const MAX_VA_4_LEVEL: u64 = 0x0000_FEFF_FFFF_FFFF;
 
 const LEVEL0_START_BIT: u64 = 39;
 const LEVEL1_START_BIT: u64 = 30;
@@ -106,7 +104,7 @@ impl AArch64Descriptor {
     pub fn update_fields(&mut self, attributes: MemoryAttributes, next_pa: PhysicalAddress) -> PtResult<()> {
         let next_level_table_base = next_pa.into();
         if !is_4kb_aligned(next_level_table_base) {
-            panic!("allocated page is not 4k aligned {:X}", next_level_table_base);
+            return Err(PtError::UnalignedPageBase);
         }
 
         let pfn = next_level_table_base >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;

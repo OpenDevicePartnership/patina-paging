@@ -1,7 +1,7 @@
 cfg_if::cfg_if! {
     // Do not optimize these sections. Maintainability and readability take
     // priority over everything else.
-    if #[cfg(target_arch = "aarch64")] {
+    if #[cfg(all(not(test), target_arch = "aarch64"))] {
         // Build the lib only for aarch64 when targetting aarch64-unknown-uefi
         pub(crate) mod pagetablestore;
         pub(crate) mod paging;

@@ -11,16 +11,16 @@ pub const PAGE_SIZE: u64 = 0x1000; // 4KB
 
 const PAGE_INDEX_MASK: u64 = 0x1FF;
 
-// The following definitions are the maximum physical address for each level of the page table hierarchy. These are
+// The following definitions are the maximum virtual address for each level of the page table hierarchy. These are
 // above the range generally supported by processors, but we only care that our zero VA and self-map aren't overwritten
-pub(crate) const MAX_PA_5_LEVEL: u64 = 0xFFFD_FFFF_FFFF_FFFF;
-pub(crate) const MAX_PA_4_LEVEL: u64 = 0xFFFF_FEFF_FFFF_FFFF;
+pub(crate) const MAX_VA_5_LEVEL: u64 = 0xFFFD_FFFF_FFFF_FFFF;
+pub(crate) const MAX_VA_4_LEVEL: u64 = 0xFFFF_FEFF_FFFF_FFFF;
 
 // The following definitions are the zero VA for each level of the page table hierarchy. These are used to create a
 // VA range that is used to zero pages before putting them in the page table. These addresses are calculated as the
 // first VA in the penultimate index in the top level page table.
-pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFFFF_FF00_0000_0000;
 pub(crate) const ZERO_VA_5_LEVEL: u64 = 0xFFFE_0000_0000_0000;
+pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFFFF_FF00_0000_0000;
 
 // The self map index is used to map the page table itself. For simplicity, we choose the final index of the top
 // level page table. This does not conflict with any identity mapping, as the final index of the top level page table
@@ -54,11 +54,11 @@ const PDP_START_BIT: u64 = 30;
 const PD_START_BIT: u64 = 21;
 const PT_START_BIT: u64 = 12;
 
-pub(crate) const CR3_PAGE_BASE_ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000; // 40 bit - lower 12 bits for alignment
+pub(crate) const CR3_PAGE_BASE_ADDRESS_MASK: u64 = 0x000F_FFFF_FFFF_F000; // 40 bit - lower 12 bits for alignment
 
 pub(crate) const FRAME_SIZE_4KB: u64 = 0x1000; // 4KB
 pub(crate) const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
-pub(crate) const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000; // 40 bit - lower 12 bits for alignment
+pub(crate) const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK: u64 = 0x000F_FFFF_FFFF_F000; // 40 bit - lower 12 bits for alignment
 
 #[rustfmt::skip]
 #[bitfield(u64)]

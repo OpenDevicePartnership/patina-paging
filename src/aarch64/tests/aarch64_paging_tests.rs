@@ -6,8 +6,8 @@ use crate::PtResult;
 use crate::{
     aarch64::{
         structs::{
-            AArch64Descriptor, FOUR_LEVEL_PML4_SELF_MAP_BASE, FRAME_SIZE_4KB, MAX_VA, SELF_MAP_INDEX, ZERO_VA_4_LEVEL,
-            ZERO_VA_INDEX,
+            AArch64Descriptor, FOUR_LEVEL_PML4_SELF_MAP_BASE, FRAME_SIZE_4KB, MAX_VA_4_LEVEL, SELF_MAP_INDEX,
+            ZERO_VA_4_LEVEL, ZERO_VA_INDEX,
         },
         tests::aarch64_test_page_allocator::TestPageAllocator,
         AArch64PageTable,
@@ -418,7 +418,7 @@ fn test_map_memory_address_range_overflow() {
 
     let test_configs = [
         // VA range overflows
-        TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: MAX_VA, size: MAX_VA },
+        TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: MAX_VA_4_LEVEL, size: MAX_VA_4_LEVEL },
     ];
 
     for test_config in test_configs {
@@ -449,7 +449,7 @@ fn test_map_memory_address_invalid_range() {
 
     let test_configs = [
         // VA above the valid address range
-        TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: MAX_VA + 1, size: FRAME_SIZE_4KB },
+        TestConfig { paging_type: PagingType::AArch64PageTable4KB, address: MAX_VA_4_LEVEL + 1, size: FRAME_SIZE_4KB },
     ];
 
     for test_config in test_configs {
@@ -1400,9 +1400,10 @@ fn test_self_map() {
         assert!(pt.is_ok());
         let pt = pt.unwrap();
 
-        // query self map base addresses
+        // we can't query PML4 self map base address(with FOUR_LEVEL_PML4_SELF_MAP_BASE VA), as that
+        // va is exclusively reserved for use by the self-map system.
         let res = pt.query_memory_region(FOUR_LEVEL_PML4_SELF_MAP_BASE, FRAME_SIZE_4KB);
-        assert!(res.is_ok());
+        assert!(res.is_err());
 
         // we can't query the zero VA because in new() it is not mapped on purpose, so we just check we mapped
         // down to the PTE level
