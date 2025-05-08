@@ -260,14 +260,14 @@ pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva
     #[cfg(not(test))]
     unsafe {
         let current_el = get_current_el();
-        let ls_mva = _mva << 12;
+        let pfn = _mva >> 12;
         let mut sctlr: u64;
         asm!("dsb     nshst", options(nostack));
         if current_el == 2 {
             asm!(
                 "tlbi vae2, {}",
                 "mrs {}, sctlr_el2",
-                in(reg) ls_mva,
+                in(reg) pfn,
                 out(reg) sctlr,
                 options(nostack)
             );
@@ -275,7 +275,7 @@ pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva
             asm!(
                 "tlbi vaae1, {}",
                 "mrs {}, sctlr_el1",
-                in(reg) ls_mva,
+                in(reg) pfn,
                 out(reg) sctlr,
                 options(nostack)
             );
