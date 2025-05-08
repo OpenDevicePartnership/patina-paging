@@ -1,6 +1,6 @@
 [package]
 name = "paging"
-version = "4.0.1"
+version = "4.0.2"
 publish = ["UefiRust"]
 edition = "2021"
 license = "BSD-2-Clause-Patent"
