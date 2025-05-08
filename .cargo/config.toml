@@ -1,8 +1,8 @@
 [registries]
-UefiRust = { index = "sparse+https://pkgs.dev.azure.com/microsoft/MsUEFI/_packaging/UefiRust/Cargo/index/" }
+patina-fw = { index = "sparse+https://pkgs.dev.azure.com/patina-fw/_packaging/patina-fw/Cargo/index/" }
 
 [source.crates-io]
-replace-with = "UefiRust"
+replace-with = "patina-fw"
 
 # This tells cargo to consider the MSV of rust for our crate vs our depencencies
 [resolver]

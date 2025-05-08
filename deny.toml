@@ -95,7 +95,7 @@ ignore = false
 # is only published to private registries, and ignore is true, the crate will
 # not have its license(s) checked
 registries = [
-    "sparse+https://pkgs.dev.azure.com/microsoft/MsUEFI/_packaging/UefiRust/Cargo/index/",
+    "sparse+https://pkgs.dev.azure.com/patina-fw/_packaging/patina-fw/Cargo/index/",
 ]
 
 # This section is considered when running `cargo deny check bans`.
