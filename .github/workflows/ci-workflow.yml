@@ -19,5 +19,5 @@ on:
 jobs:
   ci_workflow:
     name: Run
-    uses: OpenDevicePartnership/uefi-dxe-core/.github/workflows/CiWorkflow.yml@main
+    uses: ./.github/workflows/CiWorkflow.yml@main
     secrets: inherit

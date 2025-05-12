@@ -39,7 +39,7 @@ the PML5 page table. This 0th entry contains the physical address (PA) of the
 PML4 page table base. Next, the CPU uses the PML4 component of the VA (which is
 0x24) and indexes into the corresponding PML4 page table. This process continues
 through each level—PDP, PD, and PT—until the CPU finally reaches the physical
-page offset (bits 0-11).In addition to this, each Page Table Entry (PTE)
+page offset (bits 0-11). In addition to this, each Page Table Entry (PTE)
 contains memory protection-related bits (not covered in this document).
 
 The illustration below showcases the page table walk performed by the CPU.
