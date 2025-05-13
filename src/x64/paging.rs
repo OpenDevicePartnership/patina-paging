@@ -63,7 +63,6 @@ impl<A: PageAllocator> X64PageTable<A> {
                 let (level, zero_va) = match pt.paging_type {
                     PagingType::Paging5Level => (PageLevel::Pml5, ZERO_VA_5_LEVEL),
                     PagingType::Paging4Level => (PageLevel::Pml4, ZERO_VA_4_LEVEL),
-                    _ => return Err(PtError::InvalidParameter),
                 };
 
                 // create our self-map entry as the final entry
@@ -168,7 +167,6 @@ impl<A: PageAllocator> X64PageTable<A> {
         let (highest_page_level, lowest_page_level) = match paging_type {
             PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
             PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
-            _ => return Err(PtError::InvalidParameter),
         };
 
         Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level, zero_va_pt_pa: None })
@@ -191,7 +189,6 @@ impl<A: PageAllocator> X64PageTable<A> {
                 let va = match self.paging_type {
                     PagingType::Paging5Level => ZERO_VA_5_LEVEL,
                     PagingType::Paging4Level => ZERO_VA_4_LEVEL,
-                    _ => return Err(PtError::InvalidParameter),
                 };
 
                 // we don't actually need this currently, but if it isn't set and we think the self map is set up,
@@ -684,7 +681,6 @@ impl<A: PageAllocator> X64PageTable<A> {
         let max_va = match self.paging_type {
             PagingType::Paging5Level => VirtualAddress::new(MAX_VA_5_LEVEL),
             PagingType::Paging4Level => VirtualAddress::new(MAX_VA_4_LEVEL),
-            _ => return Err(PtError::InvalidParameter),
         };
 
         if address + size - 1 > max_va {
@@ -694,18 +690,13 @@ impl<A: PageAllocator> X64PageTable<A> {
         // Overflow check, size is 0-based
         address.try_add(size - 1)?;
 
-        match self.paging_type {
-            PagingType::Paging5Level | PagingType::Paging4Level => {
-                if size == 0 || !address.is_4kb_aligned() {
-                    return Err(PtError::UnalignedAddress);
-                }
+        if size == 0 || !address.is_4kb_aligned() {
+            return Err(PtError::UnalignedAddress);
+        }
 
-                // Check the memory range is aligned
-                if !VirtualAddress::new(size).is_4kb_aligned() {
-                    return Err(PtError::UnalignedMemoryRange);
-                }
-            }
-            _ => return Err(PtError::InvalidParameter),
+        // Check the memory range is aligned
+        if !VirtualAddress::new(size).is_4kb_aligned() {
+            return Err(PtError::UnalignedMemoryRange);
         }
 
         Ok(())

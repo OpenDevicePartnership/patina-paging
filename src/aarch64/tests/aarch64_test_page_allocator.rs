@@ -22,7 +22,7 @@ impl TestPageAllocator {
         // For the given paging type identify the highest and lowest page levels.
         // This is used during page building to stop the recursion.
         let (highest_page_level, lowest_page_level) = match paging_type {
-            PagingType::AArch64PageTable4KB => (PageLevel::Lvl0, PageLevel::Lvl3),
+            PagingType::Paging4Level => (PageLevel::Lvl0, PageLevel::Lvl3),
             _ => panic!("Paging type not supported"),
         };
 
@@ -160,7 +160,7 @@ impl TestPageAllocator {
         unsafe {
             let table_base = *entry_ptr;
 
-            if self.paging_type != PagingType::AArch64PageTable4KB {
+            if self.paging_type != PagingType::Paging4Level {
                 panic!("Paging type not supported");
             }
 

@@ -7,7 +7,7 @@ pub struct AArch64PageTableStore {
     /// Physical page table base address
     base: PhysicalAddress,
 
-    /// paging type is required to distinguish between AArch64PageTable4KB vs.
+    /// paging type is required to distinguish between Paging4Level vs.
     /// potentially, AArch64PageTable64KB entries at the lowest page level. For
     /// example, For Paging4KB4Level paging, at the lowest level(at Pt level),
     /// we use PageTableEntry4KB entries, but for Paging2MB4Level paging(in
