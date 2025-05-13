@@ -24,7 +24,7 @@ impl TestPageAllocator {
         let (highest_page_level, lowest_page_level) = match paging_type {
             PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
             PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
-            PagingType::AArch64PageTable4KB => (PageLevel::Pml4, PageLevel::Pt),
+            PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
         };
 
         Self {

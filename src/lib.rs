@@ -11,32 +11,35 @@ pub type PtResult<T> = Result<T, PtError>;
 
 #[derive(Debug, PartialEq)]
 pub enum PtError {
-    // Invalid parameter
+    /// Invalid parameter
     InvalidParameter,
 
-    // Out of resources
+    /// Out of resources
     OutOfResources,
 
-    // No Mapping
+    /// No Mapping exists.
     NoMapping,
 
-    // Incompatible Memory Attributes
+    /// Incompatible Memory Attributes
     IncompatibleMemoryAttributes,
 
-    // Unaligned Page Base
+    /// Unaligned Page Base
     UnalignedPageBase,
 
-    // Unaligned Address
+    /// Unaligned Address
     UnalignedAddress,
 
-    // Unaligned Memory Range
+    /// Unaligned Memory Range
     UnalignedMemoryRange,
 
-    // Invalid Memory Range
+    /// Invalid Memory Range
     InvalidMemoryRange,
 
-    // The range specified contains some pages that are mapped and some that are unmapped
+    /// The range specified contains some pages that are mapped and some that are unmapped
     InconsistentMappingAcrossRange,
+
+    /// Paging type not supported.
+    UnsupportedPagingType,
 }
 
 #[derive(Debug, PartialEq)]
@@ -171,5 +174,4 @@ pub trait PageTable {
 pub enum PagingType {
     Paging5Level,
     Paging4Level,
-    AArch64PageTable4KB,
 }

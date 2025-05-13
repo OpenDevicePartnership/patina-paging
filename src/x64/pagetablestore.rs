@@ -334,7 +334,6 @@ fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: Pagin
                     + (SIZE_4KB * va.get_index(PageLevel::Pd))
             }
         },
-        _ => panic!("unexpected paging type"),
     }
 }
 

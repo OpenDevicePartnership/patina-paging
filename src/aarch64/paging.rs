@@ -34,6 +34,10 @@ pub struct AArch64PageTable<A: PageAllocator> {
 
 impl<A: PageAllocator> AArch64PageTable<A> {
     pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
+        if !matches!(paging_type, PagingType::Paging4Level) {
+            return Err(PtError::UnsupportedPagingType);
+        }
+
         // Allocate the root page table
         #[cfg(not(test))]
         if !reg::is_mmu_enabled() {
@@ -176,8 +180,8 @@ impl<A: PageAllocator> AArch64PageTable<A> {
         // For the given paging type identify the highest and lowest page levels.
         // This is used during page building to stop the recursion.
         let (highest_page_level, lowest_page_level) = match paging_type {
-            PagingType::AArch64PageTable4KB => (PageLevel::Lvl0, PageLevel::Lvl3),
-            _ => return Err(PtError::InvalidParameter),
+            PagingType::Paging4Level => (PageLevel::Lvl0, PageLevel::Lvl3),
+            _ => return Err(PtError::UnsupportedPagingType),
         };
 
         Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level, zero_va_pt_pa: None })
