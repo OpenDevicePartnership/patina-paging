@@ -1,4 +1,4 @@
-# Specifies labels to apply to pull requests in Project Mu repositories based on regular expressions.
+# Specifies labels to apply to pull requests in ODP repositories based on regular expressions.
 #
 ##
 # Copyright (c) Microsoft Corporation.
@@ -12,15 +12,15 @@
 
   impact:breaking-change:
     - '\s*-\s*\[\s*[x|X]\s*\] Breaking change\?'
-  
+
   impact:non-functional:
     - '\s*-\s*\[\s*(?![x|X])\s*\] Impacts functionality\?'
-  
+
   impact:security:
     - '\s*-\s*\[\s*[x|X]\s*\] Impacts security\?'
-  
+
   impact:testing:
     - '\s*-\s*\[\s*[x|X]\s*\] Includes tests\?'
-  
+
   type:documentation:
     - '\s*-\s*\[\s*[x|X]\s*\] Includes documentation\?'

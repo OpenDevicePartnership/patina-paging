@@ -4,8 +4,8 @@ default_to_workspace = false
 [env]
 RUSTC_BOOTSTRAP = 1
 BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings=html"
-UEFI_CRATES = "-p paging"
-BUILD_CRATES = "-p paging"
+UEFI_CRATES = "-p patina-paging"
+BUILD_CRATES = "-p patina-paging"
 COV_FLAGS = { value = "--out html --exclude-files **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
 
 [env.development]
@@ -17,7 +17,7 @@ RUSTC_PROFILE = "release"
 RUSTC_TARGET = "release"
 
 [tasks.build-x64]
-description = """Builds paging crate as UEFI target.
+description = """Builds patina-paging crate as UEFI target.
 
 Example:
     `cargo make build-x64`
@@ -28,7 +28,7 @@ command = "cargo"
 args = ["build", "--target", "x86_64-unknown-uefi", "@@split(BUILD_FLAGS, )", "@@split(UEFI_CRATES, )"]
 
 [tasks.build-aarch64]
-description = """Builds paging crate as UEFI target.
+description = """Builds patina-paging crate as UEFI target.
 
 Example:
     `cargo make build-aarch64`
