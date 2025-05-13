@@ -1,41 +1,16 @@
-use crate::{MemoryAttributes, PtError, PtResult};
+use crate::{structs::PhysicalAddress, MemoryAttributes, PtError, PtResult};
 use alloc::string::String;
 use bitfield_struct::bitfield;
-use core::{
-    fmt::{self, Display, Formatter},
-    ops::{Add, Sub},
-};
 
 // This is the maximum virtual address that can be used in the system because of our artifical restriction to use
 // the zero VA and self map index in the top level page table. This is a temporary restriction
 pub(crate) const MAX_VA_4_LEVEL: u64 = 0x0000_FEFF_FFFF_FFFF;
-
-const LEVEL0_START_BIT: u64 = 39;
-const LEVEL1_START_BIT: u64 = 30;
-const LEVEL2_START_BIT: u64 = 21;
-const LEVEL3_START_BIT: u64 = 12;
-
-/// TODO: This needs to be moved some common places
-pub(crate) const FRAME_SIZE_4KB: u64 = 0x1000; // 4KB
-pub(crate) const PAGE_SIZE: u64 = 0x1000; // 4KB
-pub(crate) const INDEX_MASK: u64 = 0x1FF;
 
 const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
 
 // The zero VA used to create a VA range to zero pages before putting them in the page table. These addresses are
 // calculated as the first VA in the penultimate index in the top level page table.
 pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFF00_0000_0000;
-
-// The self map index is used to map the page table itself. For simplicity, we choose the final index of the top
-// level page table. This has a potential conflict with identity mapping, as the final index of the top level page table
-// in TTBR0 is still within physically addressable memory.
-pub(crate) const SELF_MAP_INDEX: u64 = 0x1FF;
-
-// The zero VA index is used to create a VA range that is used to zero pages before putting them in the page table,
-// to ensure break before make semantics. We cannot use the identity mapping because it does not exist. The
-// penultimate index in the top level page table is chosen, though this has a potential conflict with identity mapping,
-// as the final index of the top level page table in TTBR0 is still within physically addressable memory.
-pub(crate) const ZERO_VA_INDEX: u64 = 0x1FE;
 
 // The following definitions are the address within the self map that points to that level of the page table
 // given the overall paging scheme, which is only 4 level for aarch64. This is determined by choosing the self map
@@ -48,14 +23,10 @@ pub(crate) const ZERO_VA_INDEX: u64 = 0x1FE;
 // map. The crate explicitly panics if such high level addresses are used, but this will be fixed in a future version
 // of this crate so as not to artificially limit the address range lower than what is physically addressable by the
 // CPU.
-pub(crate) const FOUR_LEVEL_PML4_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_F000;
-pub(crate) const FOUR_LEVEL_PDP_SELF_MAP_BASE: u64 = 0xFFFF_FFE0_0000;
-pub(crate) const FOUR_LEVEL_PD_SELF_MAP_BASE: u64 = 0xFFFF_C000_0000;
-pub(crate) const FOUR_LEVEL_PT_SELF_MAP_BASE: u64 = 0xFF80_0000_0000;
-
-fn is_4kb_aligned(addr: u64) -> bool {
-    (addr & (FRAME_SIZE_4KB - 1)) == 0
-}
+pub(crate) const FOUR_LEVEL_4_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_F000;
+pub(crate) const FOUR_LEVEL_3_SELF_MAP_BASE: u64 = 0xFFFF_FFE0_0000;
+pub(crate) const FOUR_LEVEL_2_SELF_MAP_BASE: u64 = 0xFFFF_C000_0000;
+pub(crate) const FOUR_LEVEL_1_SELF_MAP_BASE: u64 = 0xFF80_0000_0000;
 
 // Below is a common definition for the AArch64 VMSAv8-64 stage-1 decriptors. This uses
 // the common understanding of bits accross all levels/types to simplify translation
@@ -102,10 +73,11 @@ impl AArch64Descriptor {
 
     /// update all the fields and table base address
     pub fn update_fields(&mut self, attributes: MemoryAttributes, next_pa: PhysicalAddress) -> PtResult<()> {
-        let next_level_table_base = next_pa.into();
-        if !is_4kb_aligned(next_level_table_base) {
+        if !next_pa.is_page_aligned() {
             return Err(PtError::UnalignedPageBase);
         }
+
+        let next_level_table_base: u64 = next_pa.into();
 
         let pfn = next_level_table_base >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;
         self.set_page_frame_number(pfn);
@@ -241,215 +213,5 @@ impl AArch64Descriptor {
 
     pub fn get_u64(&self) -> u64 {
         self.0
-    }
-}
-
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum PageLevel {
-    Lvl0 = 4,
-    Lvl1 = 3,
-    Lvl2 = 2,
-    Lvl3 = 1,
-}
-
-impl PageLevel {
-    pub fn start_bit(&self) -> u64 {
-        match self {
-            PageLevel::Lvl0 => LEVEL0_START_BIT,
-            PageLevel::Lvl1 => LEVEL1_START_BIT,
-            PageLevel::Lvl2 => LEVEL2_START_BIT,
-            PageLevel::Lvl3 => LEVEL3_START_BIT,
-        }
-    }
-
-    pub fn entry_va_size(&self) -> u64 {
-        1 << self.start_bit()
-    }
-
-    pub fn supports_block_entry(&self) -> bool {
-        match self {
-            PageLevel::Lvl3 => true,
-            // Large pages could be disabled by a crate feature in the future.
-            PageLevel::Lvl1 | PageLevel::Lvl2 => true,
-            _ => false,
-        }
-    }
-}
-
-impl From<PageLevel> for u64 {
-    fn from(value: PageLevel) -> u64 {
-        value as u64
-    }
-}
-
-impl From<u64> for PageLevel {
-    fn from(value: u64) -> PageLevel {
-        match value {
-            4 => PageLevel::Lvl0,
-            3 => PageLevel::Lvl1,
-            2 => PageLevel::Lvl2,
-            1 => PageLevel::Lvl3,
-            _ => panic!("Invalid page level: {}", value),
-        }
-    }
-}
-
-impl Sub<u64> for PageLevel {
-    type Output = Self;
-
-    fn sub(self, _rhs: u64) -> Self::Output {
-        ((self as u64) - 1).into()
-    }
-}
-
-impl fmt::Display for PageLevel {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let level_name = match self {
-            PageLevel::Lvl0 => "LVL0",
-            PageLevel::Lvl1 => "LVL1",
-            PageLevel::Lvl2 => "LVL2",
-            PageLevel::Lvl3 => "LVL3",
-        };
-        write!(f, "{:5}", level_name)
-    }
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Debug)]
-pub struct VirtualAddress(u64);
-impl VirtualAddress {
-    pub fn new(va: u64) -> Self {
-        Self(va)
-    }
-
-    pub fn round_up(&self, level: PageLevel) -> VirtualAddress {
-        let va = self.0;
-        let start_bit = level.start_bit();
-        Self((((va >> start_bit) + 1) << start_bit) - 1)
-    }
-
-    pub fn get_next_va(&self, level: PageLevel) -> VirtualAddress {
-        self.round_up(level) + 1
-    }
-
-    pub fn get_index(&self, level: PageLevel) -> u64 {
-        let va = self.0;
-        match level {
-            // TODO: fix these to use intrinsics
-            PageLevel::Lvl0 => (va >> LEVEL0_START_BIT) & INDEX_MASK,
-            PageLevel::Lvl1 => (va >> LEVEL1_START_BIT) & INDEX_MASK,
-            PageLevel::Lvl2 => (va >> LEVEL2_START_BIT) & INDEX_MASK,
-            PageLevel::Lvl3 => (va >> LEVEL3_START_BIT) & INDEX_MASK,
-        }
-    }
-
-    pub fn is_level_aligned(&self, level: PageLevel) -> bool {
-        let va = self.0;
-        va & (level.entry_va_size() - 1) == 0
-    }
-
-    pub fn is_4kb_aligned(&self) -> bool {
-        let va: u64 = self.0;
-        (va & (FRAME_SIZE_4KB - 1)) == 0
-    }
-
-    pub fn min(lhs: VirtualAddress, rhs: VirtualAddress) -> VirtualAddress {
-        VirtualAddress(core::cmp::min(lhs.0, rhs.0))
-    }
-
-    /// This will return the range length between self and end (inclusive)
-    pub fn length_through(&self, end: VirtualAddress) -> u64 {
-        match end.0.checked_sub(self.0) {
-            None => panic!("Underflow occurred! {:x} {:x}", self.0, end.0),
-            Some(result) => result + 1,
-        }
-    }
-}
-
-impl From<u64> for VirtualAddress {
-    fn from(addr: u64) -> Self {
-        Self(addr)
-    }
-}
-
-impl From<VirtualAddress> for u64 {
-    fn from(addr: VirtualAddress) -> Self {
-        addr.0
-    }
-}
-
-impl From<PhysicalAddress> for VirtualAddress {
-    fn from(va: PhysicalAddress) -> Self {
-        Self(va.0)
-    }
-}
-
-impl Display for VirtualAddress {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        write!(fmt, "0x{:016X}", self.0)
-    }
-}
-
-impl Add<u64> for VirtualAddress {
-    type Output = Self;
-
-    fn add(self, rhs: u64) -> Self::Output {
-        match self.0.checked_add(rhs) {
-            Some(result) => VirtualAddress(result),
-            None => panic!("Overflow occurred!"),
-        }
-    }
-}
-
-impl VirtualAddress {
-    pub fn try_add(self, rhs: u64) -> PtResult<Self> {
-        self.0.checked_add(rhs).map(VirtualAddress).ok_or(PtError::InvalidMemoryRange)
-    }
-}
-
-impl Sub<u64> for VirtualAddress {
-    type Output = Self;
-
-    fn sub(self, rhs: u64) -> Self::Output {
-        match self.0.checked_sub(rhs) {
-            Some(result) => VirtualAddress(result),
-            None => panic!("Underflow occurred!"),
-        }
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Copy, Debug)]
-pub struct PhysicalAddress(u64);
-impl PhysicalAddress {
-    pub fn new(va: u64) -> Self {
-        Self(va)
-    }
-
-    pub fn is_4kb_aligned(&self) -> bool {
-        let va: u64 = self.0;
-        (va & (FRAME_SIZE_4KB - 1)) == 0
-    }
-}
-
-impl From<u64> for PhysicalAddress {
-    fn from(addr: u64) -> Self {
-        Self(addr)
-    }
-}
-
-impl From<PhysicalAddress> for u64 {
-    fn from(addr: PhysicalAddress) -> Self {
-        addr.0
-    }
-}
-
-impl Display for PhysicalAddress {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        write!(fmt, "0x{:016X}", self.0)
-    }
-}
-
-impl From<VirtualAddress> for PhysicalAddress {
-    fn from(va: VirtualAddress) -> Self {
-        Self(va.0)
     }
 }

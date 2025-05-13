@@ -1,96 +1,14 @@
-use super::{structs::*, SIZE_1GB, SIZE_2MB, SIZE_4KB, SIZE_512GB};
+use super::structs::*;
+use crate::structs::*;
 use crate::{MemoryAttributes, PagingType, PtResult};
 use alloc::string::String;
 
-/// Contains enough metadata to work with a single page table
-pub struct X64PageTableStore {
-    /// Physical page table base address
-    base: PhysicalAddress,
-
-    /// paging type is required to distinguish between PageTableEntry2MB vs
-    /// PageTableEntry4KB entries at the lowest page level. For example, For
-    /// Paging4KB4Level paging, at the lowest level(at Pt level), we use
-    /// PageTableEntry4KB entries, but for Paging2MB4Level paging(in future),
-    /// at the lowest level(at Pd level), we have to use PageTableEntry2MB
-    /// entries.
-    paging_type: PagingType,
-
-    /// page table's page level(Pml5/Pml4/Pdp/Pd/Pt)
-    level: PageLevel,
-
-    /// start of the virtual address manageable by this page table
-    start_va: VirtualAddress,
-
-    /// end of the virtual address manageable by this page table
-    end_va: VirtualAddress,
-
-    /// Whether the page table is installed and self-mapped
-    installed_and_self_mapped: bool,
-}
-
-impl X64PageTableStore {
-    pub fn new(
-        base: PhysicalAddress,
-        level: PageLevel,
-        paging_type: PagingType,
-        start_va: VirtualAddress,
-        end_va: VirtualAddress,
-        installed_and_self_mapped: bool,
-    ) -> Self {
-        Self { base, level, paging_type, start_va, end_va, installed_and_self_mapped }
-    }
-}
-
-/// Iterator for X64PageTableStore to facilitate iterating over entries of a
-/// page table
-pub struct X64PageTableStoreIter {
-    level: PageLevel,
-    start_index: u64,
-    end_index: u64,
-    base: PhysicalAddress,
-    paging_type: PagingType,
-    start_va: VirtualAddress,
-    installed_and_self_mapped: bool,
-}
-
-impl Iterator for X64PageTableStoreIter {
-    type Item = X64PageTableEntry;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.start_index <= self.end_index {
-            let index = self.start_index;
-            self.start_index += 1;
-            Some(X64PageTableEntry::new(
-                self.base,
-                index,
-                self.level,
-                self.paging_type,
-                self.start_va,
-                self.installed_and_self_mapped,
-            ))
-        } else {
-            None
-        }
-    }
-}
-
-impl IntoIterator for X64PageTableStore {
-    type Item = X64PageTableEntry;
-
-    type IntoIter = X64PageTableStoreIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        X64PageTableStoreIter {
-            level: self.level,
-            start_index: self.start_va.get_index(self.level),
-            end_index: self.end_va.get_index(self.level),
-            base: self.base,
-            paging_type: self.paging_type,
-            start_va: self.start_va,
-            installed_and_self_mapped: self.installed_and_self_mapped,
-        }
-    }
-}
+// Constants for page levels to conform to x64 standards.
+const PML5: PageLevel = PageLevel::Level5;
+const PML4: PageLevel = PageLevel::Level4;
+const PDP: PageLevel = PageLevel::Level3;
+const PD: PageLevel = PageLevel::Level2;
+const PT: PageLevel = PageLevel::Level1;
 
 /// This is a dummy page table entry that dispatches calls to the real page
 /// table entries by locating them with the page base. Implementing this as an
@@ -106,13 +24,13 @@ pub struct X64PageTableEntry {
     page_base: PhysicalAddress,
     index: u64,
     level: PageLevel,
-    _paging_type: PagingType,
+    paging_type: PagingType,
     start_va: VirtualAddress,
     installed_and_self_mapped: bool,
 }
 
-impl X64PageTableEntry {
-    pub fn new(
+impl crate::arch::PageTableEntry for X64PageTableEntry {
+    fn new(
         page_base: PhysicalAddress,
         index: u64,
         level: PageLevel,
@@ -120,24 +38,19 @@ impl X64PageTableEntry {
         start_va: VirtualAddress,
         installed_and_self_mapped: bool,
     ) -> Self {
-        Self { page_base, index, level, _paging_type: paging_type, start_va, installed_and_self_mapped }
+        Self { page_base, index, level, paging_type, start_va, installed_and_self_mapped }
     }
 
-    pub fn update_fields(
-        &mut self,
-        attributes: MemoryAttributes,
-        pa: PhysicalAddress,
-        leaf_entry: bool,
-    ) -> PtResult<()> {
+    fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, leaf_entry: bool) -> PtResult<()> {
         match self.level {
-            PageLevel::Pd | PageLevel::Pdp => {
+            PD | PDP => {
                 let entry = unsafe {
                     get_entry::<PageTableEntry>(
                         self.page_base,
                         self.index,
                         self.level,
                         self.start_va,
-                        self._paging_type,
+                        self.paging_type,
                         self.installed_and_self_mapped,
                     )
                 };
@@ -154,7 +67,7 @@ impl X64PageTableEntry {
                         self.index,
                         self.level,
                         self.start_va,
-                        self._paging_type,
+                        self.paging_type,
                         self.installed_and_self_mapped,
                     )
                 };
@@ -166,28 +79,28 @@ impl X64PageTableEntry {
         Ok(())
     }
 
-    pub fn present(&self) -> bool {
+    fn present(&self) -> bool {
         let entry = unsafe {
             get_entry::<PageTableEntry>(
                 self.page_base,
                 self.index,
                 self.level,
                 self.start_va,
-                self._paging_type,
+                self.paging_type,
                 self.installed_and_self_mapped,
             )
         };
         entry.present()
     }
 
-    pub fn set_present(&self, value: bool) {
+    fn set_present(&mut self, value: bool) {
         let entry = unsafe {
             get_entry::<PageTableEntry>(
                 self.page_base,
                 self.index,
                 self.level,
                 self.start_va,
-                self._paging_type,
+                self.paging_type,
                 self.installed_and_self_mapped,
             )
         };
@@ -196,59 +109,61 @@ impl X64PageTableEntry {
         entry.swap(&copy);
     }
 
-    pub fn get_canonical_page_table_base(&self) -> PhysicalAddress {
+    fn get_canonical_page_table_base(&self) -> PhysicalAddress {
         let entry = unsafe {
             get_entry::<PageTableEntry>(
                 self.page_base,
                 self.index,
                 self.level,
                 self.start_va,
-                self._paging_type,
+                self.paging_type,
                 self.installed_and_self_mapped,
             )
         };
         entry.get_canonical_page_table_base()
     }
 
-    pub fn get_attributes(&self) -> MemoryAttributes {
+    fn get_attributes(&self) -> MemoryAttributes {
         let entry = unsafe {
             get_entry::<PageTableEntry>(
                 self.page_base,
                 self.index,
                 self.level,
                 self.start_va,
-                self._paging_type,
+                self.paging_type,
                 self.installed_and_self_mapped,
             )
         };
         entry.get_attributes()
     }
 
-    pub fn dump_entry(&self) -> String {
+    fn dump_entry(&self) -> String {
         let entry = unsafe {
             get_entry::<PageTableEntry>(
                 self.page_base,
                 self.index,
                 self.level,
                 self.start_va,
-                self._paging_type,
+                self.paging_type,
                 self.installed_and_self_mapped,
             )
         };
         entry.dump_entry()
     }
 
-    pub fn points_to_pa(&self) -> bool {
+    fn points_to_pa(&self) -> bool {
         match self.level {
-            PageLevel::Pt => true,
-            PageLevel::Pd | PageLevel::Pdp => {
+            // PT always points to a PA
+            PT => true,
+            // PD and PDP can be large pages.
+            PD | PDP => {
                 let entry = unsafe {
                     get_entry::<PageTableEntry>(
                         self.page_base,
                         self.index,
                         self.level,
                         self.start_va,
-                        self._paging_type,
+                        self.paging_type,
                         self.installed_and_self_mapped,
                     )
                 };
@@ -258,22 +173,26 @@ impl X64PageTableEntry {
         }
     }
 
-    pub fn get_level(&self) -> PageLevel {
+    fn get_level(&self) -> PageLevel {
         self.level
     }
 
-    pub fn raw_address(&self) -> u64 {
+    fn raw_address(&self) -> u64 {
         let entry = unsafe {
             get_entry::<PageTableEntry>(
                 self.page_base,
                 self.index,
                 self.level,
                 self.start_va,
-                self._paging_type,
+                self.paging_type,
                 self.installed_and_self_mapped,
             )
         };
         entry as *mut _ as u64
+    }
+
+    fn supports_pa_entry(&self) -> bool {
+        todo!()
     }
 }
 
@@ -297,41 +216,33 @@ pub(crate) fn invalidate_self_map_va(_self_map_va: u64) {
 fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
     match paging_type {
         PagingType::Paging4Level => match level {
-            PageLevel::Pml4 => FOUR_LEVEL_PML4_SELF_MAP_BASE,
-            PageLevel::Pdp => FOUR_LEVEL_PDP_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PageLevel::Pml4)),
-            PageLevel::Pd => {
-                FOUR_LEVEL_PD_SELF_MAP_BASE
-                    + (SIZE_2MB * va.get_index(PageLevel::Pml4))
-                    + (SIZE_4KB * va.get_index(PageLevel::Pdp))
-            }
-            PageLevel::Pt => {
+            PML4 => FOUR_LEVEL_PML4_SELF_MAP_BASE,
+            PDP => FOUR_LEVEL_PDP_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PML4)),
+            PD => FOUR_LEVEL_PD_SELF_MAP_BASE + (SIZE_2MB * va.get_index(PML4)) + (SIZE_4KB * va.get_index(PDP)),
+            PT => {
                 FOUR_LEVEL_PT_SELF_MAP_BASE
-                    + (SIZE_1GB * va.get_index(PageLevel::Pml4))
-                    + (SIZE_2MB * va.get_index(PageLevel::Pdp))
-                    + (SIZE_4KB * va.get_index(PageLevel::Pd))
+                    + (SIZE_1GB * va.get_index(PML4))
+                    + (SIZE_2MB * va.get_index(PDP))
+                    + (SIZE_4KB * va.get_index(PD))
             }
             _ => panic!("unexpected page level"),
         },
         PagingType::Paging5Level => match level {
-            PageLevel::Pml5 => FIVE_LEVEL_PML5_SELF_MAP_BASE,
-            PageLevel::Pml4 => FIVE_LEVEL_PML4_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PageLevel::Pml5)),
-            PageLevel::Pdp => {
-                FIVE_LEVEL_PDP_SELF_MAP_BASE
-                    + (SIZE_2MB * va.get_index(PageLevel::Pml5))
-                    + (SIZE_4KB * va.get_index(PageLevel::Pml4))
-            }
-            PageLevel::Pd => {
+            PML5 => FIVE_LEVEL_PML5_SELF_MAP_BASE,
+            PML4 => FIVE_LEVEL_PML4_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PML5)),
+            PDP => FIVE_LEVEL_PDP_SELF_MAP_BASE + (SIZE_2MB * va.get_index(PML5)) + (SIZE_4KB * va.get_index(PML4)),
+            PD => {
                 FIVE_LEVEL_PD_SELF_MAP_BASE
-                    + (SIZE_1GB * va.get_index(PageLevel::Pml5))
-                    + (SIZE_2MB * va.get_index(PageLevel::Pml4))
-                    + (SIZE_4KB * va.get_index(PageLevel::Pdp))
+                    + (SIZE_1GB * va.get_index(PML5))
+                    + (SIZE_2MB * va.get_index(PML4))
+                    + (SIZE_4KB * va.get_index(PDP))
             }
-            PageLevel::Pt => {
+            PT => {
                 FIVE_LEVEL_PT_SELF_MAP_BASE
-                    + (SIZE_512GB * va.get_index(PageLevel::Pml5))
-                    + (SIZE_1GB * va.get_index(PageLevel::Pml4))
-                    + (SIZE_2MB * va.get_index(PageLevel::Pdp))
-                    + (SIZE_4KB * va.get_index(PageLevel::Pd))
+                    + (SIZE_512GB * va.get_index(PML5))
+                    + (SIZE_1GB * va.get_index(PML4))
+                    + (SIZE_2MB * va.get_index(PDP))
+                    + (SIZE_4KB * va.get_index(PD))
             }
         },
         _ => panic!("unexpected paging type"),
