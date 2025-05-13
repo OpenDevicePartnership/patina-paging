@@ -17,7 +17,7 @@ pub enum PtError {
     /// Out of resources
     OutOfResources,
 
-    /// No Mapping exists.
+    /// No mapping exists for the entire range.
     NoMapping,
 
     /// Incompatible Memory Attributes
