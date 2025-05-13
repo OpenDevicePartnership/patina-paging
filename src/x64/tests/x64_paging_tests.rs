@@ -122,7 +122,6 @@ fn num_page_tables_required(address: u64, size: u64, paging_type: PagingType) ->
     let (highest_page_level, lowest_page_level) = match paging_type {
         PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
         PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
-        _ => return Err(PtError::InvalidParameter),
     };
 
     let mut num_entries_at_parent_level = 0;
@@ -1536,7 +1535,6 @@ fn test_self_map() {
                 let zero_va_pa_level = unsafe { *(zero_va_real_pt_level as *const u64) & !0xFFF };
                 assert!(zero_va_pa_level == 0);
             }
-            _ => panic!("Invalid paging type"),
         }
 
         let self_map_top_level = root + SELF_MAP_INDEX * size_of::<PageTableEntry>() as u64;
