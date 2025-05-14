@@ -1,9 +1,9 @@
 use log::{Level, LevelFilter, Metadata, Record};
 
-use crate::x64::structs::{PageLevel, VirtualAddress, MAX_VA_4_LEVEL, MAX_VA_5_LEVEL};
 use crate::{
+    structs::{PageLevel, VirtualAddress},
     x64::{
-        structs::{PageTableEntry, CR3_PAGE_BASE_ADDRESS_MASK, FRAME_SIZE_4KB, SELF_MAP_INDEX, ZERO_VA_INDEX},
+        structs::{PageTableEntry, CR3_PAGE_BASE_ADDRESS_MASK},
         tests::x64_test_page_allocator::TestPageAllocator,
         X64PageTable,
     },
