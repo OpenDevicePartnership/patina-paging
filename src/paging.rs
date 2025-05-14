@@ -1,36 +1,54 @@
-///
-/// Implements x64 paging. Supports below modes
-/// - x64 4KB 5 level paging
-/// - x64 4KB 4 level paging
-///
-use super::{
-    pagetablestore::{invalidate_self_map_va, X64PageTableEntry, X64PageTableStore},
-    reg::{invalidate_tlb, write_cr3, zero_page},
-    structs::*,
-};
-use crate::{
-    page_allocator::PageAllocator, MemoryAttributes, PageTable, PagingType, PtError, PtResult, RangeMappingState,
-};
-use core::arch::asm;
+use core::marker::PhantomData;
 
-/// Below struct is used to manage the page table hierarchy. It keeps track of
-/// page table base and create any intermediate page tables required with
-/// allocator.
-pub struct X64PageTable<A: PageAllocator> {
-    // Points to the base of top level page table(always in canonical form)
-    base: PhysicalAddress,
-    page_allocator: A,
-    paging_type: PagingType,
-    highest_page_level: PageLevel,
-    lowest_page_level: PageLevel,
-    zero_va_pt_pa: Option<PhysicalAddress>,
+use crate::{
+    arch::PageTableEntry,
+    arch::PageTableHal,
+    page_allocator::PageAllocator,
+    structs::{PageLevel, PhysicalAddress, VirtualAddress, PAGE_SIZE, SELF_MAP_INDEX, ZERO_VA_INDEX},
+    MemoryAttributes, PagingType, PtError, PtResult, RangeMappingState,
+};
+
+/// Tracks the supported states of the page tables. Specifically, whether the page
+/// tables are actively installed and whether they are self-mapped. This will change
+/// behavior such as how the page tables are accessed and how caches are managed.
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum PageTableState {
+    /// The page table is not installed. It is assumed to be identity mapped.
+    Inactive,
+    /// The page table is installed but not self-mapped. It is assumed to be identity mapped.
+    ActiveIdentityMapped,
+    /// The page table is installed and self-mapped. Only the root is guaranteed to be identity mapped.
+    ActiveSelfMapped,
 }
 
-impl<A: PageAllocator> X64PageTable<A> {
-    pub fn new(mut page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
-        // Allocate the top level page table(PML5)
+impl PageTableState {
+    pub fn is_active(&self) -> bool {
+        matches!(self, Self::ActiveIdentityMapped | Self::ActiveSelfMapped)
+    }
+
+    pub fn self_map(&self) -> bool {
+        matches!(self, Self::ActiveSelfMapped)
+    }
+}
+
+pub struct PageTableInternal<P: PageAllocator, Arch: PageTableHal> {
+    base: PhysicalAddress,
+    page_allocator: P,
+    paging_type: PagingType,
+    zero_va_pt_pa: Option<PhysicalAddress>,
+    _arch: PhantomData<Arch>,
+}
+
+impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
+    pub fn new(mut page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
+        Arch::paging_type_supported(paging_type)?;
+        let root_level = PageLevel::root_level(paging_type);
+
+        // Allocate the top level page table
         let base = page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, true)?;
-        assert!(PhysicalAddress::new(base).is_4kb_aligned());
+        if !PhysicalAddress::new(base).is_page_aligned() {
+            return Err(PtError::UnalignedPageBase);
+        }
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
@@ -39,112 +57,45 @@ impl<A: PageAllocator> X64PageTable<A> {
 
         // we have not installed this page table, we can't use our VA range to zero page or
         // rely on self-map, so we have to rely on the identity mapping for the root page
-        unsafe { zero_page(base) };
+        unsafe { Arch::zero_page(base.into()) };
 
-        // allocate the pages to map the zero VA range and zero them
-        let pa_array = [
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-            page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?,
-        ];
+        // SAFETY: We just allocated the page and the top level is zeroed so it is safe to use it.
+        let mut pt = unsafe { Self::from_existing(base, page_allocator, paging_type)? };
 
-        pa_array.iter().for_each(|pa| {
-            unsafe { zero_page(*pa) };
-        });
+        // Setup the self-mapping for the top level page table.
+        let mut self_map_entry =
+            Arch::PTE::new(pt.base, SELF_MAP_INDEX, root_level, paging_type, pt.base.into(), PageTableState::Inactive);
 
-        let pa_array: [PhysicalAddress; 4] = pa_array.map(Into::into);
+        // create it with permissive attributes
+        self_map_entry.update_fields(Arch::DEFAULT_ATTRIBUTES, pt.base, false)?;
 
-        // SAFETY: We just allocated the page, so it is safe to use it.
-        match unsafe { Self::from_existing(base, page_allocator, paging_type) } {
-            Ok(mut pt) => {
-                // we choose the penultimate PML[4|5] entry to use as the zeroing range and the last PML[4|5] entry for
-                // the self-map entry. We need to map down to the 4k page for the zero page
-                let (level, zero_va) = match pt.paging_type {
-                    PagingType::Paging5Level => (PageLevel::Pml5, ZERO_VA_5_LEVEL),
-                    PagingType::Paging4Level => (PageLevel::Pml4, ZERO_VA_4_LEVEL),
-                };
+        // Setup the zero VA entry to allow for zeroing pages before putting them in the page table.
+        let mut table_base = pt.base;
+        let mut level = root_level;
+        let mut index = ZERO_VA_INDEX;
+        let zero_va = Arch::get_zero_va(paging_type)?;
+        while let Some(next_level) = level.next_level() {
+            let new_table = pt.borrow_allocator().allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
 
-                // create our self-map entry as the final entry
-                let mut self_map_entry =
-                    X64PageTableEntry::new(pt.base, SELF_MAP_INDEX, level, pt.paging_type, pt.base.into(), false);
+            // SAFETY: We just allocated the page, so it is safe to use it.
+            unsafe { Arch::zero_page(new_table.into()) };
 
-                // create it with permissive attributes
-                self_map_entry.update_fields(MemoryAttributes::empty(), pt.base, false)?;
+            let mut entry = Arch::PTE::new(table_base, index, level, paging_type, zero_va, PageTableState::Inactive);
+            entry.update_fields(Arch::DEFAULT_ATTRIBUTES, PhysicalAddress::new(new_table), false)?;
 
-                // now set up the zero VA range so that we can zero pages before installing them in the page table
-                // this will be at index 0x1FE for the top level page table.
-                let mut pml4_index = ZERO_VA_INDEX;
-                let mut pml4_base = pt.base;
-                if pt.paging_type == PagingType::Paging5Level {
-                    // assign PA to the penultimate PML5 entry
-                    let mut last_pml5_entry = X64PageTableEntry::new(
-                        pt.base,
-                        ZERO_VA_INDEX,
-                        PageLevel::Pml5,
-                        pt.paging_type,
-                        VirtualAddress::new(zero_va),
-                        false,
-                    );
-                    last_pml5_entry.update_fields(MemoryAttributes::empty(), pa_array[3], false)?;
-                    pml4_index = 0;
-                    pml4_base = pa_array[3];
-                }
-
-                // assign PA to the penultimate PML4 entry if 4 level paging, otherwise to the first index
-                let mut second_last_pml4_entry = X64PageTableEntry::new(
-                    pml4_base,
-                    pml4_index,
-                    PageLevel::Pml4,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                second_last_pml4_entry.update_fields(MemoryAttributes::empty(), pa_array[0], false)?;
-
-                // set up the PDP entry
-                let mut pdp_entry = X64PageTableEntry::new(
-                    pa_array[0],
-                    0,
-                    PageLevel::Pdp,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pdp_entry.update_fields(MemoryAttributes::empty(), pa_array[1], false)?;
-
-                // set up the PD entry next
-                let mut pd_entry = X64PageTableEntry::new(
-                    pa_array[1],
-                    0,
-                    PageLevel::Pd,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pd_entry.update_fields(MemoryAttributes::empty(), pa_array[2], false)?;
-
-                // set up an invalid PT entry that will get overridden by each page we allocate
-                let mut pt_entry = X64PageTableEntry::new(
-                    pa_array[2],
-                    0,
-                    PageLevel::Pt,
-                    pt.paging_type,
-                    VirtualAddress::new(zero_va),
-                    false,
-                );
-                pt_entry.update_fields(MemoryAttributes::empty(), PhysicalAddress::new(0), true)?;
-                pt_entry.set_present(false);
-
-                pt.zero_va_pt_pa = Some(pa_array[2]);
-                Ok(pt)
-            }
-            Err(e) => Err(e),
+            // After the first-level index, all other indexes are 0.
+            index = 0;
+            level = next_level;
+            table_base = PhysicalAddress::new(new_table);
         }
-    }
 
-    pub fn borrow_allocator(&mut self) -> &mut A {
-        &mut self.page_allocator
+        // Create the leaf zero VA entry.
+        let mut entry = Arch::PTE::new(table_base, 0, level, paging_type, zero_va, PageTableState::Inactive);
+        entry.update_fields(Arch::DEFAULT_ATTRIBUTES, PhysicalAddress::new(0), true)?;
+        entry.set_present(false);
+        pt.zero_va_pt_pa = Some(table_base);
+
+        Ok(pt)
     }
 
     /// Create a page table from existing page table base. This can be used to
@@ -156,20 +107,27 @@ impl<A: PageAllocator> X64PageTable<A> {
     /// PFNs in the provided base, so that caller is responsible for ensuring
     /// safety of that base.
     ///
-    pub unsafe fn from_existing(base: u64, page_allocator: A, paging_type: PagingType) -> PtResult<Self> {
+    pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
+        Arch::paging_type_supported(paging_type)?;
+
         let base = PhysicalAddress::new(base);
-        if !base.is_4kb_aligned() {
+        if !base.is_page_aligned() {
             return Err(PtError::UnalignedPageBase);
         }
 
-        // For the given paging type identify the highest and lowest page levels.
-        // This is used during page building to stop the recursion.
-        let (highest_page_level, lowest_page_level) = match paging_type {
-            PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
-            PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
-        };
+        Ok(Self { base, page_allocator, paging_type, zero_va_pt_pa: None, _arch: PhantomData })
+    }
 
-        Ok(Self { base, page_allocator, paging_type, highest_page_level, lowest_page_level, zero_va_pt_pa: None })
+    /// Function to borrow the allocator from the page table instance.
+    /// This is done this way to allow the page table to return a concrete
+    /// type instead of the dyn ref. This is required to allow the page allocator to
+    /// be managed by the caller, while the page table can still allocate pages from
+    /// the allocator
+    ///
+    /// ## Returns
+    /// * `&mut Self::ALLOCATOR` - Borrowed allocator
+    pub fn borrow_allocator(&mut self) -> &mut P {
+        &mut self.page_allocator
     }
 
     /// Consumes the page table structure and returns the page table root.
@@ -177,19 +135,20 @@ impl<A: PageAllocator> X64PageTable<A> {
         self.base.into()
     }
 
-    pub fn allocate_page(&mut self) -> PtResult<PhysicalAddress> {
+    pub fn allocate_page(&mut self, state: PageTableState) -> PtResult<PhysicalAddress> {
         let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
+        let base_pa = PhysicalAddress::new(base);
+        if !base_pa.is_page_aligned() {
+            return Err(PtError::UnalignedPageBase);
+        }
 
         // SAFETY: We just allocated the page, so it is safe to use it.
         // We always need to zero any pages, as our contract with the page_allocator does not specify that we will
         // get zeroed pages. Random data in the page could confuse this code and make us believe there are existing
         // entries in the page table.
-        let zero_va = match self.is_installed_and_self_mapped() {
-            true => {
-                let va = match self.paging_type {
-                    PagingType::Paging5Level => ZERO_VA_5_LEVEL,
-                    PagingType::Paging4Level => ZERO_VA_4_LEVEL,
-                };
+        let zero_va = match state {
+            PageTableState::ActiveSelfMapped => {
+                let va = Arch::get_zero_va(self.paging_type)?;
 
                 // we don't actually need this currently, but if it isn't set and we think the self map is set up,
                 // something has gone very wrong
@@ -203,91 +162,78 @@ impl<A: PageAllocator> X64PageTable<A> {
                 // semantics.
                 // the page_base doesn't matter here because we don't use it in self-map mode, but let's still set
                 // the right address in case it gets used in the future and it is easy to persist
-                let mut zero_entry = X64PageTableEntry::new(
-                    zero_va_pt_pa,
-                    0,
-                    PageLevel::Pt,
-                    self.paging_type,
-                    VirtualAddress::new(va),
-                    true,
-                );
+                let mut zero_entry = Arch::PTE::new(zero_va_pt_pa, 0, PageLevel::Level1, self.paging_type, va, state);
 
                 zero_entry.update_fields(
-                    MemoryAttributes::empty() | MemoryAttributes::ExecuteProtect,
+                    Arch::DEFAULT_ATTRIBUTES | MemoryAttributes::ExecuteProtect,
                     PhysicalAddress::new(base),
                     true,
                 )?;
 
-                // invalidate the TLB entry for the zero VA to ensure we are zeroing our newly placed page
-                unsafe { asm!("mfence", "invlpg [{}]", in(reg) va) };
+                Arch::invalidate_tlb(va);
 
                 va
             }
             // If we have not installed this page table, we can't use our VA range to zero pages yet and have to go on
             // the assumption that the caller has this page mapped
-            false => base,
+            _ => base.into(),
         };
 
-        unsafe { zero_page(zero_va) };
-        let base = PhysicalAddress::new(base);
-        if !base.is_4kb_aligned() {
-            return Err(PtError::UnalignedPageBase);
-        }
+        unsafe { Arch::zero_page(zero_va) };
 
-        Ok(base)
+        Ok(base_pa)
     }
 
     // For a given memory range, the number of intermediate page table entries
-    // can span across multiple pages(as shown below), here PML4E is spread
+    // can span across multiple pages(as shown below), here Lvl4E is spread
     // across 3 pages(first and last page not fully occupied), the reason for
-    // this spread is because of number of parent entries(PML5E). For example,
+    // this spread is because of number of parent entries(Lvl5E). For example,
     // when processing the offsets in 0x301D600000000 - 0x602AC00000000 VA
     // range, we will have 4 entries([3-6]) for PML5 and 5 entries for
-    // PML4([3-7]). But the actual number of PML4 entires required are [3-511] +
+    // Lvl4([3-7]). But the actual number of Lvl4 entries required are [3-511] +
     // [0-511] + [0-511] + [0-7] = 1541 entries.
-
+    //
     // 0x000301D600000000 :
-    //       |      PML5|     PML4| PDP/PML3|  PD/PML2|  PT/PML1|    Physical
+    //       |      Lvl5|     Lvl4|     Lvl3|     Lvl2|     Lvl1|    Physical
     // 000000|0000000011|000000011|101011000|000000000|000000000|000000000000
     //      0|         3|        3|      344|        0|        0|           0 Decimal
-
     // 0x000603ABFFFFFFFF :
-    //       |      PML5|     PML4| PDP/PML3|  PD/PML2|  PT/PML1|    Physical
+    //       |      Lvl5|     Lvl4|     Lvl3|     Lvl2|     Lvl1|    Physical
     // 000000|0000000110|000000111|010101111|111111111|111111111|111111111111
     //      0|         6|        7|      175|      511|      511|        4095 Decimal
-
+    //
     // Because of this, the page walking logic should appropriately split the
     // memory ranges when jumping to next level page tables. Just relying on
     // indices at the current level do not work! Below is a recursive
     // implementation of it.
-
+    //
     //  │               │  ┌─────┐       │
     //  │               │  │     │       │
     //  │               │  ├─────┤       │
     //  │               │  │     │       │
     //  │               │  ├─────┤       │
-    //  │               └─►│PML4E│       │
+    //  │               └─►│Lvl4E│       │
     //  │               │  ├─────┤       │
-    //  │               │  │PML4E|       │
+    //  │               │  │Lvl4E|       │
     //  │          ┌──────►└─────┘       │
     //  │          │    │  ┌─────┐       │  ┌─────┐
-    //  │          │    │  │PML4E│       │  │     │
+    //  │          │    │  │Lvl4E│       │  │     │
     //  │          │    │  ├─────┤       │  ├─────┤
-    //  │          │    │  │PML4E│       │  │     │
+    //  │          │    │  │Lvl4E│       │  │     │
     //  │          │    │  ├─────┤       │  ├─────┤
-    //  │          │    └─►│PML4E│       │  │PDPE │
+    //  │          │    └─►│Lvl4E│       │  |Lvl2E│
     //  │          │    │  ├─────┤       │  ├─────┤
-    //  │          │    │  │PML4E|       |  │PDPE |
+    //  │          │    │  │Lvl4E|       |  |Lvl2E|
     //  │          │ ┌────►└─────┘   ┌─────►└─────┘
     //  │  ┌─────┐ │ │  │  ┌─────┐   │   │  ┌─────┐
-    //  │  │PML5E│─┘ │  │  │PML4E|───┘   │  │PDPE |
+    //  │  │Lvl5E│─┘ │  │  │Lvl4E|───┘   │  |Lvl2E|
     //  │  ├─────┤   │  │  ├─────┤       │  ├─────┤
-    //  │  │PML5E│───┘  └─►│PML4E│───┐   │  │PDPE │
+    //  │  │Lvl5E│───┘  └─►│Lvl4E│───┐   │  |Lvl2E│
     //  │  ├─────┤         ├─────┤   │   │  ├─────┤
-    //  └─►│PML5E├───┐     │     │   │   └─►│PDPE │───┐
+    //  └─►│Lvl5E├───┐     │     │   │   └─►|Lvl2E│───┐
     //     ├─────┤   │     ├─────┤   │      ├─────┤   │
     //     │     │   │     │     │   │      │     │   │
-    //     └─────┘   └────►└─────┘   └─────►└─────┘   └───►
+    //     └─────┘   └────►└─────┘   └─────►└─────┘   └────►
 
     fn map_memory_region_internal(
         &mut self,
@@ -296,21 +242,15 @@ impl<A: PageAllocator> X64PageTable<A> {
         level: PageLevel,
         base: PhysicalAddress,
         attributes: MemoryAttributes,
+        state: PageTableState,
     ) -> PtResult<()> {
         let mut va = start_va;
 
-        let table = X64PageTableStore::new(
-            base,
-            level,
-            self.paging_type,
-            start_va,
-            end_va,
-            self.is_installed_and_self_mapped(),
-        );
+        let table = PageTableRange::<Arch>::new(base, level, start_va, end_va, self.paging_type, state);
 
         for mut entry in table {
             if !entry.present()
-                && level.supports_pa_entry()
+                && Arch::level_supports_pa_entry(level)
                 && va.is_level_aligned(level)
                 && va.length_through(end_va) >= level.entry_va_size()
             {
@@ -318,21 +258,25 @@ impl<A: PageAllocator> X64PageTable<A> {
                 // so we can map the whole range in one go.
                 entry.update_fields(attributes, va.into(), true)?;
             } else {
-                if level == self.lowest_page_level {
-                    // We are trying to map a page but it is already mapped. The caller has an inconsistent state
-                    // of the page table
-                    log::error!(
-                        "Paging crate failed to map memory region at VA {:#x?} as the entry is already valid",
-                        va
-                    );
-                    return Err(PtError::InconsistentMappingAcrossRange);
-                }
+                let next_level = match level.next_level() {
+                    Some(next_level) => next_level,
+                    None => {
+                        // We are trying to map a page but it is already mapped. The caller has an inconsistent state
+                        // of the page table
+                        log::error!(
+                            "Paging crate failed to map memory region at VA {:#x?} as the entry is already valid",
+                            va
+                        );
+                        return Err(PtError::InconsistentMappingAcrossRange);
+                    }
+                };
+
                 if !entry.present() {
-                    let pa = self.allocate_page()?;
+                    let pa = self.allocate_page(state)?;
                     // non-leaf pages should always have the most permissive memory attributes.
-                    entry.update_fields(MemoryAttributes::empty(), pa, false)?;
+                    entry.update_fields(Arch::DEFAULT_ATTRIBUTES, pa, false)?;
                 }
-                let next_base = entry.get_canonical_page_table_base();
+                let next_base = entry.get_address();
 
                 // split the va range appropriately for the next level pages
 
@@ -348,9 +292,10 @@ impl<A: PageAllocator> X64PageTable<A> {
                 self.map_memory_region_internal(
                     next_level_start_va,
                     next_level_end_va,
-                    (level as u64 - 1).into(),
+                    next_level,
                     next_base,
                     attributes,
+                    state,
                 )?;
             }
 
@@ -366,30 +311,28 @@ impl<A: PageAllocator> X64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
+        state: PageTableState,
     ) -> PtResult<()> {
         let mut va = start_va;
 
-        let table = X64PageTableStore::new(
-            base,
-            level,
-            self.paging_type,
-            start_va,
-            end_va,
-            self.is_installed_and_self_mapped(),
-        );
+        let table = PageTableRange::<Arch>::new(base, level, start_va, end_va, self.paging_type, state);
+
         for mut entry in table {
             // Check if this is a large page in need of splitting.
             if entry.points_to_pa()
                 && (!va.is_level_aligned(level) || va.length_through(end_va) < level.entry_va_size())
             {
-                self.split_large_page(va, &mut entry)?;
+                self.split_large_page(va, &mut entry, state)?;
             }
 
+            // This is at least either the entirety of a large page or a single page.
             if entry.present() {
                 if entry.points_to_pa() {
                     entry.set_present(false);
                 } else {
-                    let next_base = entry.get_canonical_page_table_base();
+                    // This should always have another level if this is not a PA entry.
+                    let next_level = level.next_level().unwrap();
+                    let next_base = entry.get_address();
 
                     // split the va range appropriately for the next level pages
 
@@ -405,8 +348,9 @@ impl<A: PageAllocator> X64PageTable<A> {
                     self.unmap_memory_region_internal(
                         next_level_start_va,
                         next_level_end_va,
-                        (level as u64 - 1).into(),
+                        next_level,
                         next_base,
+                        state,
                     )?;
                 }
             }
@@ -423,17 +367,11 @@ impl<A: PageAllocator> X64PageTable<A> {
         level: PageLevel,
         base: PhysicalAddress,
         attributes: MemoryAttributes,
+        state: PageTableState,
     ) -> PtResult<()> {
         let mut va = start_va;
 
-        let table = X64PageTableStore::new(
-            base,
-            level,
-            self.paging_type,
-            start_va,
-            end_va,
-            self.is_installed_and_self_mapped(),
-        );
+        let table = PageTableRange::<Arch>::new(base, level, start_va, end_va, self.paging_type, state);
 
         for mut entry in table {
             if !entry.present() {
@@ -444,13 +382,14 @@ impl<A: PageAllocator> X64PageTable<A> {
             if entry.points_to_pa()
                 && (!va.is_level_aligned(level) || va.length_through(end_va) < level.entry_va_size())
             {
-                self.split_large_page(va, &mut entry)?;
+                self.split_large_page(va, &mut entry, state)?;
             }
 
             if entry.points_to_pa() {
                 entry.update_fields(attributes, va.into(), true)?;
             } else {
-                let next_base = entry.get_canonical_page_table_base();
+                let next_level = level.next_level().unwrap();
+                let next_base = entry.get_address();
 
                 // split the va range appropriately for the next level pages
 
@@ -466,9 +405,10 @@ impl<A: PageAllocator> X64PageTable<A> {
                 self.remap_memory_region_internal(
                     next_level_start_va,
                     next_level_end_va,
-                    (level as u64 - 1).into(),
+                    next_level,
                     next_base,
                     attributes,
+                    state,
                 )?;
             }
 
@@ -485,17 +425,11 @@ impl<A: PageAllocator> X64PageTable<A> {
         level: PageLevel,
         base: PhysicalAddress,
         prev_attributes: &mut RangeMappingState,
+        state: PageTableState,
     ) -> PtResult<MemoryAttributes> {
         let mut va = start_va;
 
-        let table = X64PageTableStore::new(
-            base,
-            level,
-            self.paging_type,
-            start_va,
-            end_va,
-            self.is_installed_and_self_mapped(),
-        );
+        let table = PageTableRange::<Arch>::new(base, level, start_va, end_va, self.paging_type, state);
         let mut entries = table.into_iter().peekable();
         while let Some(entry) = entries.next() {
             if !entry.present() {
@@ -524,7 +458,8 @@ impl<A: PageAllocator> X64PageTable<A> {
                     }
                 }
             } else {
-                let next_base = entry.get_canonical_page_table_base();
+                let next_level = level.next_level().unwrap();
+                let next_base = entry.get_address();
 
                 // split the va range appropriately for the next level pages
 
@@ -543,9 +478,10 @@ impl<A: PageAllocator> X64PageTable<A> {
                 match self.query_memory_region_internal(
                     next_level_start_va,
                     next_level_end_va,
-                    (level as u64 - 1).into(),
+                    next_level,
                     next_base,
                     prev_attributes,
+                    state,
                 ) {
                     Ok(_) | Err(PtError::NoMapping) => {}
                     Err(e) => return Err(e),
@@ -570,21 +506,22 @@ impl<A: PageAllocator> X64PageTable<A> {
     /// Splits a large page into the next page level pages. This done by
     /// creating a new page table for the full range and then swapping the PA
     /// and mapping to the new page table.
-    fn split_large_page(&mut self, va: VirtualAddress, entry: &mut X64PageTableEntry) -> PtResult<()> {
+    fn split_large_page(&mut self, va: VirtualAddress, entry: &mut Arch::PTE, state: PageTableState) -> PtResult<()> {
         let level = entry.get_level();
-        debug_assert!(level != self.lowest_page_level && entry.points_to_pa());
+        let next_level = level.next_level().unwrap();
+        debug_assert!(entry.points_to_pa());
 
         // Round down to the nearest page boundary at the current level.
         let large_page_start: u64 = va.into();
         let large_page_start = large_page_start & !(level.entry_va_size() - 1);
         let large_page_end: u64 = large_page_start + level.entry_va_size() - 1;
 
-        if level == self.lowest_page_level || !entry.points_to_pa() {
+        if !entry.points_to_pa() {
             return Err(PtError::InvalidParameter);
         }
 
         let attributes = entry.get_attributes();
-        let pa = self.allocate_page()?;
+        let pa = self.allocate_page(state)?;
 
         // in order to use the self map, we have to add the PA to the page table, otherwise it is not part of
         // the self map. This means we will temporarily unmap the large page entry that was here, but as soon as
@@ -595,30 +532,33 @@ impl<A: PageAllocator> X64PageTable<A> {
         // not a likely scenario. We do not need to invalidate the TLB here, because this is a new mapping with a
         // unique address in the self map that has not been referenced before. We do invalidate the TLB after finishing
         // whichever operation called this function.
-        entry.update_fields(MemoryAttributes::empty(), pa, false)?;
+        entry.update_fields(Arch::DEFAULT_ATTRIBUTES, pa, false)?;
 
-        // invalidate the self map VA for the region covered by the large page
-        // this function gets called multiple times to split from larger pages to smaller pages, so we only invalidate
-        // once for the new page table we created
-        let table = X64PageTableStore::new(
-            pa,
-            level - 1,
-            self.paging_type,
-            large_page_start.into(),
-            large_page_end.into(),
-            true,
-        );
+        if matches!(state, PageTableState::ActiveSelfMapped) {
+            // invalidate the self map VA for the region covered by the large page
+            // this function gets called multiple times to split from larger pages to smaller pages, so we only invalidate
+            // once for the new page table we created
+            let table = PageTableRange::<Arch>::new(
+                pa,
+                next_level,
+                large_page_start.into(),
+                large_page_end.into(),
+                self.paging_type,
+                state,
+            );
 
-        if let Some(tb_entry) = table.into_iter().next() {
-            invalidate_self_map_va(tb_entry.raw_address());
+            if let Some(tb_entry) = table.into_iter().next() {
+                Arch::invalidate_tlb(tb_entry.entry_ptr_address().into());
+            }
         }
 
         self.map_memory_region_internal(
             large_page_start.into(),
             large_page_end.into(),
-            (level as u64 - 1).into(),
+            next_level,
             pa,
             attributes,
+            state,
         )
     }
 
@@ -628,19 +568,13 @@ impl<A: PageAllocator> X64PageTable<A> {
         end_va: VirtualAddress,
         level: PageLevel,
         base: PhysicalAddress,
+        state: PageTableState,
     ) {
         let mut va = start_va;
 
-        let table = X64PageTableStore::new(
-            base,
-            level,
-            self.paging_type,
-            start_va,
-            end_va,
-            self.is_installed_and_self_mapped(),
-        );
+        let table = PageTableRange::<Arch>::new(base, level, start_va, end_va, self.paging_type, state);
         for entry in table {
-            if !entry.present() && level != self.lowest_page_level {
+            if !entry.present() && !level.is_lowest_level() {
                 return;
             }
 
@@ -655,17 +589,15 @@ impl<A: PageAllocator> X64PageTable<A> {
             // end of next level va. It will be minimum of next va and end va
             let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
 
-            let l: u64 = level.into();
-            let range = format!("{}[{} {}]", "  ".repeat(5 - l as usize), next_level_start_va, next_level_end_va);
-            log::info!("{}|{:48}{}", level, range, entry.dump_entry());
-
+            entry.dump_entry();
             if entry.present() && !entry.points_to_pa() {
-                let next_base = entry.get_canonical_page_table_base();
+                let next_base = entry.get_address();
                 self.dump_page_tables_internal(
                     next_level_start_va,
                     next_level_end_va,
-                    (level as u64 - 1).into(),
+                    level.next_level().unwrap(),
                     next_base,
+                    state,
                 );
             }
 
@@ -678,25 +610,20 @@ impl<A: PageAllocator> X64PageTable<A> {
             return Err(PtError::InvalidMemoryRange);
         }
 
-        let max_va = match self.paging_type {
-            PagingType::Paging5Level => VirtualAddress::new(MAX_VA_5_LEVEL),
-            PagingType::Paging4Level => VirtualAddress::new(MAX_VA_4_LEVEL),
-        };
-
-        if address + size - 1 > max_va {
-            return Err(PtError::InvalidMemoryRange);
-        }
-
-        // Overflow check, size is 0-based
-        address.try_add(size - 1)?;
-
-        if size == 0 || !address.is_4kb_aligned() {
+        if !address.is_page_aligned() {
             return Err(PtError::UnalignedAddress);
         }
 
-        // Check the memory range is aligned
-        if !VirtualAddress::new(size).is_4kb_aligned() {
+        if !VirtualAddress::new(size).is_page_aligned() {
             return Err(PtError::UnalignedMemoryRange);
+        }
+
+        let max_va = Arch::get_max_va(self.paging_type)?;
+
+        // Overflow check, size is 0-based
+        let top_va = address.try_add(size - 1)?;
+        if top_va > max_va {
+            return Err(PtError::InvalidMemoryRange);
         }
 
         Ok(())
@@ -706,39 +633,30 @@ impl<A: PageAllocator> X64PageTable<A> {
     /// This is used to determine if we can use the self-map to zero pages and reference the page table pages.
     /// If our page table base is not in cr3, self-mapped entries won't work for this page table. Similarly, if the
     /// expected self-map entry is not present or does not point to the page table base, we can't use the self-map.
-    fn is_installed_and_self_mapped(&self) -> bool {
-        let cr3 = unsafe { crate::x64::reg::read_cr3() };
-        if cr3 != self.base.into() {
-            return false;
+    fn get_state(&self) -> PageTableState {
+        if !Arch::is_table_active(self.base.into()) {
+            return PageTableState::Inactive;
         }
 
         // this is always read from the physical address of the page table, because we are trying to determine whether
-        // we are self-mapped or not
-        let self_map_entry = X64PageTableEntry::new(
+        // we are self-mapped or not. The root should always be accessible, only assume active for now.
+        let self_map_entry = Arch::PTE::new(
             self.base,
             SELF_MAP_INDEX,
-            self.highest_page_level,
+            PageLevel::root_level(self.paging_type),
             self.paging_type,
             self.base.into(),
-            false,
+            PageTableState::ActiveIdentityMapped,
         );
 
-        if !self_map_entry.present() || self_map_entry.get_canonical_page_table_base() != self.base {
-            return false;
+        if !self_map_entry.present() || self_map_entry.get_address() != self.base {
+            PageTableState::ActiveIdentityMapped
+        } else {
+            PageTableState::ActiveSelfMapped
         }
-
-        true
-    }
-}
-
-impl<A: PageAllocator> PageTable for X64PageTable<A> {
-    type ALLOCATOR = A;
-
-    fn borrow_allocator(&mut self) -> &mut A {
-        self.borrow_allocator()
     }
 
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
+    pub fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -747,14 +665,17 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        let result = self.map_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes);
-
-        unsafe { invalidate_tlb(self.base.into()) };
-
-        result
+        self.map_memory_region_internal(
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            self.base,
+            attributes,
+            self.get_state(),
+        )
     }
 
-    fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
+    pub fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -762,41 +683,51 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let start_va = address;
         let end_va = address + size - 1;
 
-        let result = self.unmap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base);
-
-        unsafe { invalidate_tlb(self.base.into()) };
-
-        result
+        self.unmap_memory_region_internal(
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            self.base,
+            self.get_state(),
+        )
     }
 
-    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
+    pub fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
 
         let start_va = address;
         let end_va = address + size - 1;
+        let state = self.get_state();
 
         // make sure the memory region has same attributes set
         let mut prev_attributes = RangeMappingState::Uninitialized;
-        self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)?;
+        self.query_memory_region_internal(
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            self.base,
+            &mut prev_attributes,
+            state,
+        )?;
 
-        let result =
-            self.remap_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, attributes);
-
-        unsafe { invalidate_tlb(self.base.into()) };
-
-        result
+        self.remap_memory_region_internal(
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            self.base,
+            attributes,
+            state,
+        )
     }
 
-    fn install_page_table(&mut self) -> PtResult<()> {
-        let value: u64 = self.base.into();
-        unsafe { write_cr3(value) };
-
-        Ok(())
+    pub fn install_page_table(&mut self) -> PtResult<()> {
+        // The page table structure should guarantee that the page table is correct.
+        unsafe { Arch::install_page_table(self.base.into()) }
     }
 
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes> {
+    pub fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -805,25 +736,116 @@ impl<A: PageAllocator> PageTable for X64PageTable<A> {
         let end_va = address + (size - 1);
 
         let mut prev_attributes = RangeMappingState::Uninitialized;
-        self.query_memory_region_internal(start_va, end_va, self.highest_page_level, self.base, &mut prev_attributes)
+        self.query_memory_region_internal(
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            self.base,
+            &mut prev_attributes,
+            self.get_state(),
+        )
     }
 
-    fn dump_page_tables(&self, address: u64, size: u64) {
+    pub fn dump_page_tables(&self, address: u64, size: u64) {
+        if self.validate_address_range(address.into(), size).is_err() {
+            log::error!("Invalid address range for page table dump! Address: {:#x?}, Size: {:#x?}", address, size);
+            return;
+        }
+
         let address = VirtualAddress::new(address);
-
-        self.validate_address_range(address, size).unwrap();
-
         let start_va = address;
         let end_va = address + size - 1;
 
-        log::info!("{}[{} {}]{}", "-".repeat(45), start_va, end_va, "-".repeat(48));
-        log::info!("                                                      6362        52 51                                   12 11 9 8 7 6 5 4 3 2 1 0 ");
-        log::info!("                                                      |N|           |                                        |   |M|P|I| |P|P|U|R| |");
-        log::info!("                                                      |X| Available |     Page-Map Level-4 Base Address      |AVL|B|G|G|A|C|W|/|/|P|");
-        log::info!("                                                      | |           |                                        |   |Z|S|N| |D|T|S|W| |");
-        log::info!("{}", "-".repeat(132));
-        // uses current cr3 base
-        self.dump_page_tables_internal(start_va, end_va, self.highest_page_level, self.base);
-        log::info!("{}", "-".repeat(132));
+        log::info!("Page Table Range: {} - {}", start_va, end_va);
+        Arch::PTE::dump_entry_header();
+        self.dump_page_tables_internal(
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            self.base,
+            self.get_state(),
+        );
+    }
+}
+
+struct PageTableRange<Arch: PageTableHal> {
+    /// Physical page table base address
+    base: PhysicalAddress,
+
+    /// Page table's page level
+    level: PageLevel,
+
+    /// Start of the virtual address manageable by this page table
+    start_va: VirtualAddress,
+
+    /// End of the virtual address manageable by this page table
+    end_va: VirtualAddress,
+
+    /// Paging type of the page table
+    paging_type: PagingType,
+
+    /// Whether the page table is installed and self-mapped
+    state: PageTableState,
+
+    // Phantom data to allow for compile time use of static architecture routines.
+    _arch: PhantomData<Arch>,
+}
+
+impl<Arch: PageTableHal> PageTableRange<Arch> {
+    pub fn new(
+        base: PhysicalAddress,
+        level: PageLevel,
+        start_va: VirtualAddress,
+        end_va: VirtualAddress,
+        paging_type: PagingType,
+        state: PageTableState,
+    ) -> Self {
+        Self { base, level, start_va, end_va, paging_type, state, _arch: PhantomData }
+    }
+}
+
+impl<Arch: PageTableHal> IntoIterator for PageTableRange<Arch> {
+    type Item = Arch::PTE;
+
+    type IntoIter = EntryIterator<Arch>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        EntryIterator::<Arch> {
+            level: self.level,
+            start_index: self.start_va.get_index(self.level),
+            end_index: self.end_va.get_index(self.level),
+            base: self.base,
+            start_va: self.start_va,
+            paging_type: self.paging_type,
+            state: self.state,
+            _arch: PhantomData,
+        }
+    }
+}
+
+struct EntryIterator<Arch: PageTableHal> {
+    level: PageLevel,
+    start_index: u64,
+    end_index: u64,
+    base: PhysicalAddress,
+    start_va: VirtualAddress,
+    paging_type: PagingType,
+    state: PageTableState,
+    _arch: PhantomData<Arch>,
+}
+
+impl<Arch: PageTableHal> Iterator for EntryIterator<Arch> {
+    type Item = Arch::PTE;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.start_index <= self.end_index {
+            let index = self.start_index;
+            let va = self.start_va;
+            self.start_index += 1;
+            self.start_va = self.start_va.get_next_va(self.level);
+            Some(Arch::PTE::new(self.base, index, self.level, self.paging_type, va, self.state))
+        } else {
+            None
+        }
     }
 }
