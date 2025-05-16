@@ -1,8 +1,5 @@
 #![cfg_attr(not(test), no_std)]
 
-#[allow(unused_imports)] // Temporary.
-#[macro_use]
-extern crate alloc;
 pub mod aarch64;
 pub(crate) mod arch;
 pub mod page_allocator;

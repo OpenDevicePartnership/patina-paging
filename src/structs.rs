@@ -9,7 +9,13 @@ use crate::{PagingType, PtError, PtResult};
 pub const SIZE_4KB: u64 = 0x1000;
 pub const SIZE_2MB: u64 = 0x200000;
 pub const SIZE_1GB: u64 = 0x40000000;
+pub const SIZE_4GB: u64 = 0x100000000;
+pub const SIZE_64GB: u64 = 0x1000000000;
 pub const SIZE_512GB: u64 = 0x8000000000;
+pub const SIZE_1TB: u64 = 0x10000000000;
+pub const SIZE_4TB: u64 = 0x400000000000;
+pub const SIZE_16TB: u64 = 0x100000000000;
+pub const SIZE_256TB: u64 = 0x1000000000000;
 
 /// Size of a page in bytes. This assumes a 4KB page size which is currently all
 /// that is supported by this crate.
