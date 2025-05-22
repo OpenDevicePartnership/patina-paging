@@ -3,6 +3,8 @@ use core::arch::asm;
 
 mod pagetablestore;
 mod structs;
+#[cfg(test)]
+mod tests;
 
 use pagetablestore::X64PageTableEntry;
 use structs::{CR3_PAGE_BASE_ADDRESS_MASK, MAX_VA_4_LEVEL, MAX_VA_5_LEVEL, ZERO_VA_4_LEVEL, ZERO_VA_5_LEVEL};

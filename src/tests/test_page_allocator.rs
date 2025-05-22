@@ -1,5 +1,7 @@
+use crate::arch::{PageTableEntry, PageTableHal};
 use crate::page_allocator::PageAllocator;
-use crate::x64::structs::{PageLevel, PageTableEntry, VirtualAddress, PAGE_SIZE};
+use crate::paging::PageTableState;
+use crate::structs::{PageLevel, VirtualAddress, PAGE_SIZE};
 use crate::{MemoryAttributes, PagingType};
 use crate::{PtError, PtResult};
 use std::alloc::{GlobalAlloc, Layout, System};
@@ -11,27 +13,12 @@ use std::rc::Rc;
 #[derive(Clone)]
 pub struct TestPageAllocator {
     ref_impl: Rc<RefCell<TestPageAllocatorImpl>>,
-    _paging_type: PagingType,
-
-    highest_page_level: PageLevel,
-    _lowest_page_level: PageLevel,
+    paging_type: PagingType,
 }
 
 impl TestPageAllocator {
     pub fn new(num_pages: u64, paging_type: PagingType) -> Self {
-        // For the given paging type identify the highest and lowest page levels.
-        // This is used during page building to stop the recursion.
-        let (highest_page_level, lowest_page_level) = match paging_type {
-            PagingType::Paging5Level => (PageLevel::Pml5, PageLevel::Pt),
-            PagingType::Paging4Level => (PageLevel::Pml4, PageLevel::Pt),
-        };
-
-        Self {
-            ref_impl: Rc::new(RefCell::new(TestPageAllocatorImpl::new(num_pages))),
-            _paging_type: paging_type,
-            highest_page_level,
-            _lowest_page_level: lowest_page_level,
-        }
+        Self { ref_impl: Rc::new(RefCell::new(TestPageAllocatorImpl::new(num_pages))), paging_type }
     }
 
     pub fn pages_allocated(&self) -> u64 {
@@ -56,27 +43,27 @@ impl TestPageAllocator {
     //        │     │                         ├─────┤                               │
     //        │     │                         │     │                               │
     // Page 3 ├─────┤◄──────────────────────┐ ├─────┤                               │
-    //        │     │                       │ │PML4E│                               │
+    //        │     │                       │ │LVL4E│                               │
     //        │     │                       │ ├─────┤                               │
-    //        │     │                       │ │PML4E|                               │
+    //        │     │                       │ │LVL4E|                               │
     //        │     │                       │ └─────┘                               │
     //        │     │                       └─────────────────────────┐             │
     //        │     │                         ┌─────┐       ┌─────┐   │   ┌─────┐   │   ┌─────┐
-    //        │     │                         │PML4E│       │     │   │   │     │   │   │     │
+    //        │     │                         │LVL4E│       │     │   │   │     │   │   │     │
     // Page 2 ├─────┤◄──────────────────────┐ ├─────┤       ├─────┤   │   ├─────┤   │   ├─────┤
-    //        │     │                       │ │PML4E│       │     │   │   │     │   │   │     │
+    //        │     │                       │ │LVL4E│       │     │   │   │     │   │   │     │
     //        │     │                       │ ├─────┤       ├─────┤   │   ├─────┤   │   ├─────┤
-    //        │     │                       │ │PML4E│       │PDPE │   │   |     │   │   │PTE  │
+    //        │     │                       │ │LVL4E│       |LVL3E│   │   |     │   │   │LVL1E│
     //        │     │                       │ ├─────┤       ├─────┤   │   ├─────┤   │   ├─────┤
-    //        │     │                       │ │PML4E|       │PDPE |   │   │PDE  |   │   │PTE  |
+    //        │     │                       │ │LVL4E|       |LVL3E|   │   │LVL2E|   │   │LVL1E|
     //        │     │                       │ └─────┘       └─────┘   │   └─────┘   │   └─────┘
     //        │     │     ┌───────────────┐ └───────────┐             │             │
     // Page 1 ├─────┤◄────┘     ┌─────┐   │   ┌─────┐   │   ┌─────┐   │   ┌─────┐   │   ┌─────┐
-    //        │     │           │     │   │   │PML4E|   │   │PDPE |   │   │PDE  |   │   │PTE  |
+    //        │     │           │     │   │   │LVL4E|   │   |LVL3E|   │   │LVL2E|   │   │LVL1E|
     //        │     │           ├─────┤   │   ├─────┤   │   ├─────┤   │   ├─────┤   │   ├─────┤
-    //        │     │           │PML5E│   │   │PML4E│   │   │PDPE │   │   │PDE  │   │   │     │
+    //        │     │           │LVL5E│   │   │LVL4E│   │   |LVL3E│   │   │LVL2E│   │   │     │
     //        │     │           ├─────┤   │   ├─────┤   │   ├─────┤   │   ├─────┤   │   ├─────┤
-    //        │     │           │PML5E│   │   │     │   │   │PDPE │   │   │     │   │   │     │
+    //        │     │           │LVL5E│   │   │     │   │   |LVL3E│   │   │     │   │   │     │
     //        │     │           ├─────┤   │   ├─────┤   │   ├─────┤   │   ├─────┤   │   ├─────┤
     //        │     │           │     │   │   │     │   │   │     │   │   │     │   │   │     │
     // Page 0 └─────┘◄──────────└─────┘   └───└─────┘   └───└─────┘   └───└─────┘   └───└─────┘
@@ -84,7 +71,7 @@ impl TestPageAllocator {
     //  TestPageAllocator                         Page Tables
     //       Memory
     //
-    pub fn validate_pages(&self, address: u64, size: u64, attributes: MemoryAttributes) {
+    pub fn validate_pages<Arch: PageTableHal>(&self, address: u64, size: u64, attributes: MemoryAttributes) {
         log::info!("Validating pages from {:#x} to {:#x}", address, address + size);
         let address = VirtualAddress::new(address);
         let start_va = address;
@@ -94,10 +81,16 @@ impl TestPageAllocator {
         // This needed for the recursive page walk logic
         let mut page_index = 0;
 
-        self.validate_pages_internal(start_va, end_va, self.highest_page_level, &mut page_index, attributes);
+        self.validate_pages_internal::<Arch>(
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            &mut page_index,
+            attributes,
+        );
     }
 
-    fn validate_pages_internal(
+    fn validate_pages_internal<Arch: PageTableHal>(
         &self,
         start_va: VirtualAddress,
         end_va: VirtualAddress,
@@ -105,28 +98,33 @@ impl TestPageAllocator {
         page_index: &mut u64,
         attributes: MemoryAttributes,
     ) {
+        log::info!("Validating pages from {} to {} level: {:?} page_index: {}", start_va, end_va, level, page_index);
         let start_index = start_va.get_index(level);
         let end_index = end_va.get_index(level);
         let page = self.get_page(*page_index).unwrap();
         let mut va = start_va;
+        let zero_pages = PageLevel::root_level(self.paging_type).height() as u64;
         for index in start_index..=end_index {
             let page_base = unsafe {
-                // this is a little weird, the 0th page is allocated as the root, then the next three pages are
+                // this is a little weird, the 0th page is allocated as the root, then the next N pages are
                 // allocated to support the zero VA range, which we don't validate here (a separate test validates)
                 match page_index {
-                    0 => self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 5)) as u64,
+                    0 => {
+                        let zero_pages = PageLevel::root_level(self.paging_type).height();
+                        self.get_memory_base().add((PAGE_SIZE as usize) * (1 + zero_pages)) as u64
+                    }
                     _ => self.get_memory_base().add((PAGE_SIZE as usize) * (*page_index as usize + 1)) as u64,
                 }
             };
             let leaf =
-                unsafe { self.validate_page_entry(page.add(index as usize), va.into(), page_base, level, attributes) };
+                unsafe { self.validate_page_entry::<Arch>(page, index, va.into(), page_base, level, attributes) };
 
             // We only consume further pages from PageAllocator memory
             // for page tables higher than PT type
             if !leaf {
                 match page_index {
-                    // skip over the zero VA pages
-                    0 => *page_index += 5,
+                    // skip over the root and zero VA pages
+                    0 => *page_index += 1 + zero_pages,
                     _ => *page_index += 1,
                 }
             }
@@ -136,8 +134,8 @@ impl TestPageAllocator {
             let next_level_end_va = VirtualAddress::min(curr_va_ceiling, end_va);
 
             if !leaf {
-                let next_level = level - 1;
-                self.validate_pages_internal(
+                let next_level = level.next_level().unwrap();
+                self.validate_pages_internal::<Arch>(
                     next_level_start_va,
                     next_level_end_va,
                     next_level,
@@ -150,44 +148,46 @@ impl TestPageAllocator {
         }
     }
 
-    fn validate_page_entry(
+    unsafe fn validate_page_entry<Arch: PageTableHal>(
         &self,
-        entry_ptr: *const u64,
+        page_table_ptr: *const u64,
+        index: u64,
         virtual_address: u64,
         next_page_table_address: u64,
         level: PageLevel,
         expected_attributes: MemoryAttributes,
     ) -> bool {
-        unsafe {
-            let table_base = *entry_ptr;
-            let pte = PageTableEntry::from_bits(table_base);
-            let page_base: u64 = pte.get_canonical_page_table_base().into();
-            let attributes = pte.get_attributes();
-            let leaf = match level {
-                PageLevel::Pt => true,
-                PageLevel::Pd | PageLevel::Pdp => pte.page_size(),
-                _ => false,
-            };
+        let pte = Arch::PTE::new(
+            (page_table_ptr as u64).into(),
+            index,
+            level,
+            self.paging_type,
+            virtual_address.into(),
+            PageTableState::Inactive,
+        );
 
-            log::info!(
-                "Level: {:?} PageBase: {:#x}, virtual_address: {:#x} next_pt {:x} leaf: {}",
-                level,
-                page_base,
-                virtual_address,
-                next_page_table_address,
-                leaf
-            );
+        let page_base: u64 = pte.get_address().into();
+        let attributes = pte.get_attributes();
+        let leaf = pte.points_to_pa();
 
-            if leaf {
-                assert_eq!(page_base, virtual_address);
-                assert_eq!(attributes, expected_attributes);
-            } else {
-                assert_eq!(page_base, next_page_table_address);
-                assert_eq!(attributes, MemoryAttributes::empty()); // we don't set any attributes on higher level page table entries
-            }
-
+        log::info!(
+            "Level: {:?} PageBase: {:#x}, virtual_address: {:#x} next_pt {:x} leaf: {}",
+            level,
+            page_base,
+            virtual_address,
+            next_page_table_address,
             leaf
+        );
+
+        if leaf {
+            assert_eq!(page_base, virtual_address);
+            assert_eq!(attributes, expected_attributes);
+        } else {
+            assert_eq!(page_base, next_page_table_address);
+            assert_eq!(attributes, Arch::DEFAULT_ATTRIBUTES); // We use default attributes for page tables
         }
+
+        leaf
     }
 
     fn get_memory_base(&self) -> *const u8 {
@@ -201,6 +201,7 @@ impl TestPageAllocator {
 
 impl PageAllocator for TestPageAllocator {
     fn allocate_page(&mut self, align: u64, size: u64, _is_root: bool) -> PtResult<u64> {
+        assert!(size == PAGE_SIZE);
         self.ref_impl.borrow_mut().allocate_page(align, size)
     }
 }
