@@ -15,6 +15,8 @@ use crate::{
 mod pagetablestore;
 mod reg;
 mod structs;
+#[cfg(test)]
+mod tests;
 
 const MAX_VA_BITS: u64 = 48;
 

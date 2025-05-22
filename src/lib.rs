@@ -5,6 +5,8 @@ pub(crate) mod arch;
 pub mod page_allocator;
 pub(crate) mod paging;
 pub(crate) mod structs;
+#[cfg(test)]
+mod tests;
 pub mod x64;
 use bitflags::bitflags;
 
