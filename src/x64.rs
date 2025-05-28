@@ -10,11 +10,11 @@ use pagetablestore::X64PageTableEntry;
 use structs::{CR3_PAGE_BASE_ADDRESS_MASK, MAX_VA_4_LEVEL, MAX_VA_5_LEVEL, ZERO_VA_4_LEVEL, ZERO_VA_5_LEVEL};
 
 use crate::{
+    MemoryAttributes, PageTable, PagingType, PtResult,
     arch::PageTableHal,
     page_allocator::PageAllocator,
     paging::PageTableInternal,
     structs::{PageLevel, VirtualAddress},
-    MemoryAttributes, PageTable, PagingType, PtResult,
 };
 
 pub struct X64PageTable<P: PageAllocator> {
@@ -37,7 +37,7 @@ impl<P: PageAllocator> X64PageTable<P> {
     /// safety of that base.
     ///
     pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
-        let internal = PageTableInternal::from_existing(base, page_allocator, paging_type)?;
+        let internal = unsafe { PageTableInternal::from_existing(base, page_allocator, paging_type)? };
         Ok(Self { internal })
     }
 
@@ -140,7 +140,9 @@ impl PageTableHal for PageTableArchX64 {
     }
 
     unsafe fn install_page_table(base: u64) -> PtResult<()> {
-        write_cr3(base);
+        unsafe {
+            write_cr3(base);
+        }
         Ok(())
     }
 

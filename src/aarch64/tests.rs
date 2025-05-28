@@ -1,11 +1,11 @@
 use crate::{
+    MemoryAttributes, PageTable, PagingType, PtError,
     aarch64::{
-        structs::{AArch64Descriptor, FOUR_LEVEL_4_SELF_MAP_BASE, ZERO_VA_4_LEVEL},
         AArch64PageTable,
+        structs::{AArch64Descriptor, FOUR_LEVEL_4_SELF_MAP_BASE, ZERO_VA_4_LEVEL},
     },
     structs::{PAGE_SIZE, SELF_MAP_INDEX, ZERO_VA_INDEX},
     tests::test_page_allocator::TestPageAllocator,
-    MemoryAttributes, PageTable, PagingType, PtError,
 };
 
 #[test]

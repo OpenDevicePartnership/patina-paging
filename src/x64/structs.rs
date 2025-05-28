@@ -1,7 +1,7 @@
 use crate::{
+    MemoryAttributes, PtResult,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
     x64::pagetablestore::{PD, PDP, PML4, PML5, PT},
-    MemoryAttributes, PtResult,
 };
 use bitfield_struct::bitfield;
 use core::ptr::write_volatile;
