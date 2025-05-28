@@ -1,3 +1,65 @@
+//! Paging
+//!
+//! Implementation for identity mapped page table management for x64 and aarch64.
+//! This library provides structures that allow building, installing, and editing
+//! page tables in a no_std environment and without the use of Alloc.
+//!
+//! The [`PageTable`] trait provides the interface for managing page tables.
+//! The caller must provide an implementation of the [`PageAllocator`]
+//! trait which the page table implementation will use to allocate pages of physical
+//! memory for use in the page tables.
+//!
+//! This crate currently contains two concrete implementations of the [`PageTable`]
+//! trait: [`x64::X64PageTable`] and [`aarch64::AArch64PageTable`].
+//!
+//! ## Examples
+//!
+//! ``` rust
+//! use patina_paging::{aarch64, x64, MemoryAttributes, PageTable, PagingType, PtResult};
+//! use patina_paging::page_allocator::PageAllocator;
+//!
+//! struct MyPageAllocator;
+//! impl PageAllocator for MyPageAllocator {
+//!    fn allocate_page(&mut self, align: u64, size: u64, is_root: bool) -> PtResult<u64> {
+//!       // Return page aligned address of the allocated page, or an error.
+//!       Ok(0)
+//!    }
+//! }
+//!
+//! fn main_x64() -> PtResult<()> {
+//!     // Create a X64 page table.
+//!     let mut allocator = MyPageAllocator;
+//!     let mut page_table = x64::X64PageTable::new(allocator, PagingType::Paging4Level)?;
+//!
+//!     // Map a memory region with read-only and write-back attributes.
+//!     page_table.map_memory_region(0x1000, 0x2000, MemoryAttributes::ReadOnly | MemoryAttributes::Writeback)?;
+//!
+//!     // Install the page table.
+//!     page_table.install_page_table()?;
+//!     Ok(())
+//! }
+//!
+//! fn main_aarch64() -> PtResult<()> {
+//!     // Create a AArch64 page table.
+//!     let mut allocator = MyPageAllocator;
+//!     let mut page_table = aarch64::AArch64PageTable::new(allocator, PagingType::Paging4Level)?;
+//!
+//!     // Map a memory region with read-only and write-back attributes.
+//!     page_table.map_memory_region(0x1000, 0x2000, MemoryAttributes::ReadOnly | MemoryAttributes::Writeback).unwrap();
+//!
+//!     // Install the page table.
+//!     page_table.install_page_table()?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## License
+//!
+//! Copyright (C) Microsoft Corporation. All rights reserved.
+//!
+//! SPDX-License-Identifier: BSD-2-Clause-Patent
+//!
+
 #![cfg_attr(not(test), no_std)]
 
 pub mod aarch64;
@@ -12,36 +74,40 @@ use bitflags::bitflags;
 
 pub type PtResult<T> = Result<T, PtError>;
 
+/// Paging error codes. These are used to indicate errors that occur during
+/// paging operations. The errors are returned as a `Result` type, where
+/// `Ok(T)` indicates success and `Err(PtError)` indicates an error.
 #[derive(Debug, PartialEq)]
 pub enum PtError {
-    /// Invalid parameter
+    /// Invalid parameter.
     InvalidParameter,
 
-    /// Out of resources
+    /// Out of resources. Usually indicating that the page allocator ran out of
+    /// memory.
     OutOfResources,
 
     /// No mapping exists for the entire range.
     NoMapping,
 
-    /// Incompatible Memory Attributes
+    /// The memory range is mapped with different attributes.
     IncompatibleMemoryAttributes,
 
-    /// Unaligned Page Base
+    /// Provided base address is not aligned to the page size.
     UnalignedPageBase,
 
-    /// Unaligned Address
+    /// The provided address is not aligned to the page size.
     UnalignedAddress,
 
-    /// Unaligned Memory Range
+    /// The provided size is not aligned to the page size.
     UnalignedMemoryRange,
 
-    /// Invalid Memory Range
+    /// A memory range is not valid.
     InvalidMemoryRange,
 
-    /// The range specified contains some pages that are mapped and some that are unmapped
+    /// The range specified contains some pages that are mapped and some that are unmapped.
     InconsistentMappingAcrossRange,
 
-    /// Paging type not supported.
+    /// Paging type not supported by this implementation.
     UnsupportedPagingType,
 }
 
@@ -87,6 +153,8 @@ bitflags! {
 
 use page_allocator::PageAllocator;
 
+/// PageTable trait is implemented by all concrete page table implementations
+/// and provides the interface for managing page tables.
 pub trait PageTable {
     /// This type is used to allow the caller to borrow the allocator and get a concrete type back
     /// in the borrow_allocator function
@@ -175,6 +243,8 @@ pub trait PageTable {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PagingType {
+    // 5-level paging, only supported on x64.
     Paging5Level,
+    // 4-level paging.
     Paging4Level,
 }
