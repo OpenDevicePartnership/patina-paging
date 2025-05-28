@@ -5,7 +5,7 @@
 //! page tables in a no_std environment and without the use of Alloc.
 //!
 //! The [`PageTable`] trait provides the interface for managing page tables.
-//! The caller must provide an implementation of the [`PageAllocator`]
+//! The caller must provide an implementation of the [`page_allocator::PageAllocator`]
 //! trait which the page table implementation will use to allocate pages of physical
 //! memory for use in the page tables.
 //!
