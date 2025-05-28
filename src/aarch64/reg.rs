@@ -11,10 +11,47 @@ cfg_if::cfg_if! {
     }
 }
 
+macro_rules! read_sysreg {
+  ($reg:expr, $default:expr) => {{
+    let mut _value: u64 = $default;
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+      asm!(concat!("mrs {}, ", $reg), out(reg) _value);
+    }
+    _value
+  }};
+}
+
+macro_rules! write_sysreg {
+  ($reg:expr, $value:expr) => {{
+    let _value: u64 = $value;
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+      asm!(concat!("msr ", $reg, ", {}"), in(reg) _value);
+    }
+  }};
+}
+
 pub(crate) enum CpuFlushType {
     _EfiCpuFlushTypeWriteBackInvalidate,
     _EfiCpuFlushTypeWriteBack,
     EFiCpuFlushTypeInvalidate,
+}
+
+#[inline(always)]
+fn instruction_barrier() {
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        asm!("isb", options(nostack));
+    }
+}
+
+#[inline(always)]
+fn data_barrier() {
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        asm!("dsb sy", options(nostack));
+    }
 }
 
 pub(crate) fn get_phys_addr_bits() -> u64 {
@@ -26,16 +63,7 @@ pub(crate) fn get_phys_addr_bits() -> u64 {
     //
     // The value is encoded as 2^(n+1) where n is the number of bits
     // supported. So 0b0000 == 2^32 == 4GB, 0b0001 == 2^36 == 8GB, etc
-    #[allow(unused_assignments)]
-    let mut pa_bits: u64 = 0;
-
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        asm!(
-        "mrs {}, id_aa64mmfr0_el1",
-        out(reg) pa_bits
-        );
-    }
+    let mut pa_bits = read_sysreg!("id_aa64mmfr0_el1", 0);
 
     // Mask off the bits we care about
     pa_bits &= 0xf;
@@ -51,98 +79,60 @@ pub(crate) fn get_phys_addr_bits() -> u64 {
 
 pub(crate) fn get_current_el() -> u64 {
     // Default to EL2
-    let mut _current_el: u64 = 8;
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        asm!(
-        "mrs {}, CurrentEL",
-        out(reg) _current_el
-        );
-    }
+    let current_el: u64 = read_sysreg!("CurrentEL", 8);
 
-    match _current_el {
+    match current_el {
         0x0C => 3,
         0x08 => 2,
         0x04 => 1,
-        _ => panic!("Invalid current EL {}", _current_el),
+        _ => panic!("Invalid current EL {}", current_el),
     }
 }
 
-pub(crate) fn set_tcr(_tcr: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            asm!(
-            "msr tcr_el2, {}",
-            in(reg) _tcr
-            );
-        } else if current_el == 1 {
-            asm!(
-            "msr tcr_el1, {}",
-            in(reg) _tcr
-            );
-        } else {
-            panic!("Invalid current EL {}", current_el);
-        }
-        asm!("isb", options(nostack));
+pub(crate) fn set_tcr(tcr: u64) {
+    let current_el = get_current_el();
+    if current_el == 2 {
+        write_sysreg!("tcr_el2", tcr);
+    } else if current_el == 1 {
+        write_sysreg!("tcr_el1", tcr);
+    } else {
+        panic!("Invalid current EL {}", current_el);
     }
+    instruction_barrier();
 }
 
-pub(crate) fn set_ttbr0(_ttbr0: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            asm!(
-              "msr ttbr0_el2, {}",
-              in(reg) _ttbr0
-            );
-        } else if current_el == 1 {
-            asm!(
-            "msr ttbr0_el1, {}",
-            in(reg) _ttbr0
-            );
-        } else {
-            panic!("Invalid current EL {}", current_el);
-        }
-        asm!("isb", options(nostack));
+pub(crate) fn set_ttbr0(ttbr0: u64) {
+    let current_el = get_current_el();
+    if current_el == 2 {
+        write_sysreg!("ttbr0_el2", ttbr0);
+    } else if current_el == 1 {
+        write_sysreg!("ttbr0_el1", ttbr0);
+    } else {
+        panic!("Invalid current EL {}", current_el);
     }
+    instruction_barrier();
 }
 
-pub(crate) fn set_mair(_mair: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            asm!(
-              "msr mair_el2, {}",
-              in(reg) _mair
-            );
-        } else if current_el == 1 {
-            asm!(
-            "msr mair_el1, {}",
-            in(reg) _mair
-            );
-        } else {
-            panic!("Invalid current EL {}", current_el);
-        }
-        asm!("isb", options(nostack));
+pub(crate) fn set_mair(mair: u64) {
+    let current_el = get_current_el();
+    if current_el == 2 {
+        write_sysreg!("mair_el2", mair);
+    } else if current_el == 1 {
+        write_sysreg!("mair_el1", mair);
+    } else {
+        panic!("Invalid current EL {}", current_el);
     }
+    instruction_barrier();
 }
 
 pub(crate) fn is_mmu_enabled() -> bool {
-    let mut _sctlr: u64 = 0x1;
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        match get_current_el() {
-            2 => asm!("mrs {}, sctlr_el2", out(reg) _sctlr),
-            1 => asm!("mrs {}, sctlr_el1", out(reg) _sctlr),
-            invalid_el => panic!("Invalid current EL {}", invalid_el),
-        }
-    }
+    let sctlr: u64 = match get_current_el() {
+        2 => read_sysreg!("sctlr_el2", 0x1),
+        1 => read_sysreg!("sctlr_el1", 0x1),
+        invalid_el => panic!("Invalid current EL {}", invalid_el),
+    };
 
-    _sctlr & 0x1 == 1
+    sctlr & 0x1 == 1
 }
 
 pub(crate) fn enable_mmu() {
@@ -151,22 +141,24 @@ pub(crate) fn enable_mmu() {
         let current_el = get_current_el();
         if current_el == 2 {
             asm!(
-                "mrs x0, sctlr_el2",
-                "orr x0, x0, #0x1",
+                "mrs {val}, sctlr_el2",
+                "orr {val}, {val}, #0x1",
                 "tlbi alle2",
                 "dsb nsh",
                 "isb",
-                "msr sctlr_el2, x0",
+                "msr sctlr_el2, {val}",
+                val = out(reg) _,
                 options(nostack)
             );
         } else if current_el == 1 {
             asm!(
-                "mrs x0, sctlr_el1",
-                "orr x0, x0, #0x1",
+                "mrs {val}, sctlr_el1",
+                "orr {val}, {val}, #0x1",
                 "tlbi vmalle1",
                 "dsb nsh",
                 "isb",
-                "msr sctlr_el1, x0",
+                "msr sctlr_el1, {val}",
+                val = out(reg) _,
                 options(nostack)
             );
         } else {
@@ -176,84 +168,76 @@ pub(crate) fn enable_mmu() {
     }
 }
 
-pub(crate) fn set_stack_alignment_check(_enable: bool) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            if _enable {
-                asm!("mrs x0, sctlr_el2", "orr x0, x0, #8", "msr sctlr_el2, x0", options(nostack));
-            } else {
-                asm!("mrs x0, sctlr_el2", "bic x0, x0, #8", "msr sctlr_el2, x0", options(nostack));
-            }
-        } else if current_el == 1 {
-            if _enable {
-                asm!("mrs x0, sctlr_el1", "orr x0, x0, #8", "msr sctlr_el1, x0", options(nostack));
-            } else {
-                asm!("mrs x0, sctlr_el1", "bic x0, x0, #8", "msr sctlr_el1, x0", options(nostack));
-            }
-        } else {
-            panic!("Invalid current EL {}", current_el);
+pub(crate) fn set_stack_alignment_check(enable: bool) {
+    let current_el = get_current_el();
+    if current_el == 2 {
+        let sctlr = read_sysreg!("sctlr_el2", 0);
+        match enable {
+            true => write_sysreg!("sctlr_el2", sctlr | 0x8),
+            false => write_sysreg!("sctlr_el2", sctlr & !0x8),
         }
-        asm!("dsb sy", options(nostack));
-        asm!("isb", options(nostack));
+    } else if current_el == 1 {
+        let sctlr = read_sysreg!("sctlr_el1", 0);
+        match enable {
+            true => write_sysreg!("sctlr_el1", sctlr | 0x8),
+            false => write_sysreg!("sctlr_el1", sctlr & !0x8),
+        }
+    } else {
+        panic!("Invalid current EL {}", current_el);
     }
+    data_barrier();
+    instruction_barrier();
 }
 
-pub(crate) fn set_alignment_check(_enable: bool) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            if _enable {
-                asm!("mrs x0, sctlr_el2", "orr x0, x0, #2", "msr sctlr_el2, x0", options(nostack));
-            } else {
-                asm!("mrs x0, sctlr_el2", "bic x0, x0, #2", "msr sctlr_el2, x0", options(nostack));
-            }
-        } else if current_el == 1 {
-            if _enable {
-                asm!("mrs x0, sctlr_el1", "orr x0, x0, #2", "msr sctlr_el1, x0", options(nostack));
-            } else {
-                asm!("mrs x0, sctlr_el1", "bic x0, x0, #2", "msr sctlr_el1, x0", options(nostack));
-            }
-        } else {
-            panic!("Invalid current EL {}", current_el);
+pub(crate) fn set_alignment_check(enable: bool) {
+    let current_el = get_current_el();
+    if current_el == 2 {
+        let sctlr = read_sysreg!("sctlr_el2", 0);
+        match enable {
+            true => write_sysreg!("sctlr_el2", sctlr | 0x2),
+            false => write_sysreg!("sctlr_el2", sctlr & !0x2),
         }
-        asm!("dsb sy", options(nostack));
-        asm!("isb", options(nostack));
+    } else if current_el == 1 {
+        let sctlr = read_sysreg!("sctlr_el1", 0);
+        match enable {
+            true => write_sysreg!("sctlr_el1", sctlr | 0x2),
+            false => write_sysreg!("sctlr_el1", sctlr & !0x2),
+        }
+    } else {
+        panic!("Invalid current EL {}", current_el);
     }
+    data_barrier();
+    instruction_barrier();
 }
 
 pub(crate) fn enable_instruction_cache() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            asm!("mrs x0, sctlr_el2", "orr x0, x0, #0x1000", "msr sctlr_el2, x0", options(nostack));
-        } else if current_el == 1 {
-            asm!("mrs x0, sctlr_el1", "orr x0, x0, #0x1000", "msr sctlr_el1, x0", options(nostack));
-        } else {
-            panic!("Invalid current EL {}", current_el);
-        }
-        asm!("dsb sy", options(nostack));
-        asm!("isb", options(nostack));
+    let current_el = get_current_el();
+    if current_el == 2 {
+        let sctlr = read_sysreg!("sctlr_el2", 0);
+        write_sysreg!("sctlr_el2", sctlr | 0x1000);
+    } else if current_el == 1 {
+        let sctlr = read_sysreg!("sctlr_el1", 0);
+        write_sysreg!("sctlr_el1", sctlr | 0x1000);
+    } else {
+        panic!("Invalid current EL {}", current_el);
     }
+    data_barrier();
+    instruction_barrier();
 }
 
 pub(crate) fn enable_data_cache() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            asm!("mrs x0, sctlr_el2", "orr x0, x0, #0x4", "msr sctlr_el2, x0", options(nostack));
-        } else if current_el == 1 {
-            asm!("mrs x0, sctlr_el1", "orr x0, x0, #0x4", "msr sctlr_el1, x0", options(nostack));
-        } else {
-            panic!("Invalid current EL {}", current_el);
-        }
-        asm!("dsb sy", options(nostack));
-        asm!("isb", options(nostack));
+    let current_el = get_current_el();
+    if current_el == 2 {
+        let sctlr = read_sysreg!("sctlr_el2", 0);
+        write_sysreg!("sctlr_el2", sctlr | 0x4);
+    } else if current_el == 1 {
+        let sctlr = read_sysreg!("sctlr_el1", 0);
+        write_sysreg!("sctlr_el1", sctlr | 0x4);
+    } else {
+        panic!("Invalid current EL {}", current_el);
     }
+    data_barrier();
+    instruction_barrier();
 }
 
 pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
@@ -313,24 +297,13 @@ pub(crate) fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
         }
     }
 
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        asm!("dsb sy", options(nostack));
-    }
+    data_barrier();
 }
 
 fn data_cache_line_len() -> u64 {
-    let mut _res = 64_u64;
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    {
-        let ctr_el0 = unsafe {
-            let ctr_el0: u64;
-            asm!("mrs {}, ctr_el0", out(reg) ctr_el0);
-            ctr_el0
-        };
-        _res = 4 << ((ctr_el0 >> 16) & 0xf);
-    }
-    _res
+    // Default to 64 bytes
+    let ctr_el0 = read_sysreg!("ctr_el0", 0x1000000);
+    4 << ((ctr_el0 >> 16) & 0xf)
 }
 
 fn clean_data_entry_by_mva(_mva: u64) {
@@ -359,32 +332,18 @@ pub(crate) fn is_this_page_table_active(page_table_base: PhysicalAddress) -> boo
     // Check the TTBR0 register to see if this page table matches
     // our base
     let mut _ttbr0: u64 = 0;
-    let _current_el = get_current_el();
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        match _current_el {
-            2 => asm!("mrs {}, ttbr0_el2", out(reg) _ttbr0),
-            1 => asm!("mrs {}, ttbr0_el1", out(reg) _ttbr0),
-            invalid_el => panic!("Invalid current EL {}", invalid_el),
-        }
-    }
+    let current_el = get_current_el();
+    let ttbr0 = match current_el {
+        2 => read_sysreg!("ttbr0_el2", 0),
+        1 => read_sysreg!("ttbr0_el1", 0),
+        invalid_el => panic!("Invalid current EL {}", invalid_el),
+    };
 
-    if _ttbr0 != u64::from(page_table_base) {
+    if ttbr0 != u64::from(page_table_base) {
         false
     } else {
         // Check to see if MMU is enabled
-        #[cfg(all(not(test), target_arch = "aarch64"))]
-        unsafe {
-            let sctlr: u64;
-            match _current_el {
-                2 => asm!("mrs {}, sctlr_el2", out(reg) sctlr),
-                1 => asm!("mrs {}, sctlr_el1", out(reg) sctlr),
-                invalid_el => panic!("Invalid current EL {}", invalid_el),
-            }
-            return sctlr & 0x1 == 1;
-        }
-        #[allow(unreachable_code)]
-        false
+        is_mmu_enabled()
     }
 }
 
@@ -405,15 +364,16 @@ pub(crate) unsafe fn zero_page(page: u64) {
     }
 
     #[cfg(all(not(test), target_arch = "aarch64"))]
-    asm!(
-        "mov x0, {}",               // Address of the page
-        "mov x1, #0",               // Zero value
-        "mov x2, #256",             // 256 iterations of 16 bytes each
-        "1:",
-        "stp x1, x1, [x0], #16",    // Store 0 to the next 16 bytes of the page
-        "subs x2, x2, #1",          // Decrement the counter
-        "bne 1b",                   // Loop back if we haven't done 256 iterations
-        in(reg) page,
-        options(nostack, preserves_flags)
-    );
+    {
+        let mut addr = page;
+        for i in 0..256 {
+            debug_assert!(addr == page + (i * 16)); // remove for PR.
+            asm!(
+                "stp {zero}, {zero}, [{addr}], #16",    // Store 0 to the next 16 bytes of the page
+                addr = inout(reg) addr,
+                zero = in(reg) 0_u64,
+                options(nostack, preserves_flags)
+            );
+        }
+    }
 }
