@@ -1,7 +1,7 @@
 use crate::{
+    MemoryAttributes, PagingType, PtResult,
     paging::PageTableState,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
-    MemoryAttributes, PagingType, PtResult,
 };
 
 pub(crate) trait PageTableHal {

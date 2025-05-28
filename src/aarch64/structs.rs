@@ -1,6 +1,6 @@
 use crate::{
-    structs::{PageLevel, PhysicalAddress, VirtualAddress},
     MemoryAttributes, PtError, PtResult,
+    structs::{PageLevel, PhysicalAddress, VirtualAddress},
 };
 use bitfield_struct::bitfield;
 
@@ -204,25 +204,25 @@ impl AArch64Descriptor {
             va,
             va + level.entry_va_size() - 1,
             "",
-            ns_table,            // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
-            ap_table,            // 2 bits -  Hierarchical permissions.
-            uxn_table,           // 1 bit  -  Hierarchical permissions.
-            pxn_table,           // 1 bit  -  Hierarchical permissions.
-            reserved0,           // 4 bits -  Reserved for software use
-            uxn,                 // 1 bit  -  User execute never
-            pxn,                 // 1 bit  -  Privileged execute never
-            contiguous,          // 1 bit  -  Contiguous
-            dirty_bit_modifier,  // 1 bit  -  DBM
-            guarded_page,        // 1 bit  -  GP
-            page_frame_number,   // 38 bits - Page frame number
-            not_global,          // 1 bit  -  Not global
-            access_flag,         // 1 bit  -  Access flag
-            shareable,           // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
-            access_permission,   // 2 bits -  Access permissions
-            non_secure,          // 1 bit  -  Non-secure
+            ns_table,           // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
+            ap_table,           // 2 bits -  Hierarchical permissions.
+            uxn_table,          // 1 bit  -  Hierarchical permissions.
+            pxn_table,          // 1 bit  -  Hierarchical permissions.
+            reserved0,          // 4 bits -  Reserved for software use
+            uxn,                // 1 bit  -  User execute never
+            pxn,                // 1 bit  -  Privileged execute never
+            contiguous,         // 1 bit  -  Contiguous
+            dirty_bit_modifier, // 1 bit  -  DBM
+            guarded_page,       // 1 bit  -  GP
+            page_frame_number,  // 38 bits - Page frame number
+            not_global,         // 1 bit  -  Not global
+            access_flag,        // 1 bit  -  Access flag
+            shareable,          // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
+            access_permission,  // 2 bits -  Access permissions
+            non_secure,         // 1 bit  -  Non-secure
             attribute_index,    // 3 bits -  Used for caching attributes
-            table_desc,          // 1 bit  -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
-            valid,               // 1 bit  -  Valid descriptor
+            table_desc,         // 1 bit  -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
+            valid,              // 1 bit  -  Valid descriptor
         )
     }
 
