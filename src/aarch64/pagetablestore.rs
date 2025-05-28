@@ -1,7 +1,7 @@
 #[cfg(all(not(test), target_arch = "aarch64"))]
 use super::reg;
 use super::structs::*;
-use crate::{arch::PageTableEntry, paging::PageTableState, structs::*, MemoryAttributes, PagingType, PtResult};
+use crate::{MemoryAttributes, PagingType, PtResult, arch::PageTableEntry, paging::PageTableState, structs::*};
 
 /// This is a dummy page table entry that dispatches calls to the real page
 /// table entries by locating them with the page base. Implementing this as an
@@ -106,7 +106,9 @@ impl PageTableEntry for AArch64PageTableEntry {
     }
 
     fn dump_entry_header() {
-        log::info!("----------------------------------------------------------------------------------------------------------------------------------");
+        log::info!(
+            "----------------------------------------------------------------------------------------------------------------------------------"
+        );
     }
 
     fn dump_entry(&self) {

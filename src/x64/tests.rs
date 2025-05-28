@@ -1,11 +1,11 @@
 use crate::{
+    MemoryAttributes, PageTable, PagingType, PtError,
     structs::{PAGE_SIZE, SELF_MAP_INDEX, ZERO_VA_INDEX},
     tests::test_page_allocator::TestPageAllocator,
     x64::{
-        structs::{PageTableEntryX64, CR3_PAGE_BASE_ADDRESS_MASK},
         X64PageTable,
+        structs::{CR3_PAGE_BASE_ADDRESS_MASK, PageTableEntryX64},
     },
-    MemoryAttributes, PageTable, PagingType, PtError,
 };
 
 #[test]

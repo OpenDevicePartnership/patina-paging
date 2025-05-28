@@ -1,11 +1,11 @@
-use crate::structs::{PhysicalAddress, PAGE_SIZE};
+use crate::structs::{PAGE_SIZE, PhysicalAddress};
 
 cfg_if::cfg_if! {
     if #[cfg(all(not(test), target_arch = "aarch64"))] {
         use core::arch::{asm, global_asm};
         global_asm!(include_str!("replace_table_entry.asm"));
         // Use efiapi for the consistent calling convention.
-        extern "efiapi" {
+        unsafe extern "efiapi" {
             pub(crate) fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
         }
     }
@@ -405,15 +405,17 @@ pub(crate) unsafe fn zero_page(page: u64) {
     }
 
     #[cfg(all(not(test), target_arch = "aarch64"))]
-    asm!(
-        "mov x0, {}",               // Address of the page
-        "mov x1, #0",               // Zero value
-        "mov x2, #256",             // 256 iterations of 16 bytes each
-        "1:",
-        "stp x1, x1, [x0], #16",    // Store 0 to the next 16 bytes of the page
-        "subs x2, x2, #1",          // Decrement the counter
-        "bne 1b",                   // Loop back if we haven't done 256 iterations
-        in(reg) page,
-        options(nostack, preserves_flags)
-    );
+    unsafe {
+        asm!(
+            "mov x0, {}",               // Address of the page
+            "mov x1, #0",               // Zero value
+            "mov x2, #256",             // 256 iterations of 16 bytes each
+            "1:",
+            "stp x1, x1, [x0], #16",    // Store 0 to the next 16 bytes of the page
+            "subs x2, x2, #1",          // Decrement the counter
+            "bne 1b",                   // Loop back if we haven't done 256 iterations
+            in(reg) page,
+            options(nostack, preserves_flags)
+        )
+    };
 }

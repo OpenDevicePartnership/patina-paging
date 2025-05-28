@@ -5,11 +5,11 @@ use pagetablestore::AArch64PageTableEntry;
 use structs::{MAX_VA_4_LEVEL, ZERO_VA_4_LEVEL};
 
 use crate::{
+    MemoryAttributes, PageTable, PagingType, PtError, PtResult,
     arch::PageTableHal,
     page_allocator::PageAllocator,
     paging::PageTableInternal,
     structs::{VirtualAddress, *},
-    MemoryAttributes, PageTable, PagingType, PtError, PtResult,
 };
 
 mod pagetablestore;
@@ -82,7 +82,7 @@ impl<P: PageAllocator> AArch64PageTable<P> {
     /// safety of that base.
     ///
     pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
-        let internal = PageTableInternal::from_existing(base, page_allocator, paging_type)?;
+        let internal = unsafe { PageTableInternal::from_existing(base, page_allocator, paging_type)? };
         Ok(Self { internal })
     }
 
@@ -141,7 +141,7 @@ impl PageTableHal for PageTableArchAArch64 {
     const DEFAULT_ATTRIBUTES: MemoryAttributes = MemoryAttributes::Writeback;
 
     unsafe fn zero_page(base: VirtualAddress) {
-        reg::zero_page(base.into());
+        unsafe { reg::zero_page(base.into()) };
     }
 
     fn paging_type_supported(paging_type: crate::PagingType) -> crate::PtResult<()> {
@@ -231,7 +231,7 @@ impl PageTableHal for PageTableArchAArch64 {
         // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
         // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
         // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
-        reg::set_mair(0x44 << 8 | 0xBB << 16 | 0xFF << 24);
+        reg::set_mair((0x44 << 8) | (0xBB << 16) | (0xFF << 24));
 
         // Set TTBR0
         reg::set_ttbr0(base);

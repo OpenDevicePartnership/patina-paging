@@ -1,12 +1,12 @@
 use log::{Level, LevelFilter, Metadata, Record};
 
 use crate::{
+    MemoryAttributes, PageTable, PagingType, PtError, PtResult,
     aarch64::{AArch64PageTable, PageTableArchAArch64},
     arch::PageTableHal,
-    structs::{PageLevel, VirtualAddress, PAGE_SIZE},
+    structs::{PAGE_SIZE, PageLevel, VirtualAddress},
     tests::test_page_allocator::TestPageAllocator,
     x64::{PageTableArchX64, X64PageTable},
-    MemoryAttributes, PageTable, PagingType, PtError, PtResult,
 };
 
 macro_rules! all_archs {
