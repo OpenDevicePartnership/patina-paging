@@ -1,5 +1,8 @@
 use crate::structs::{PhysicalAddress, PAGE_SIZE};
 
+/// SCTLR Bit 0 (M) indicates stage 1 address translation is enabled.
+const SCTLR_M_ENABLE: u64 = 0x1;
+
 cfg_if::cfg_if! {
     if #[cfg(all(not(test), target_arch = "aarch64"))] {
         use core::arch::{asm, global_asm};
@@ -17,7 +20,7 @@ macro_rules! read_sysreg {
     let _ = $reg; // Helps prevent identical code being generated in tests.
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-      asm!(concat!("mrs {}, ", $reg), out(reg) _value);
+      asm!(concat!("mrs {}, ", $reg), out(reg) _value, options(nostack, preserves_flags));
     }
     _value
   }};
@@ -29,7 +32,7 @@ macro_rules! write_sysreg {
     let _ = $reg; // Helps prevent identical code being generated in tests.
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-      asm!(concat!("msr ", $reg, ", {}"), in(reg) _value);
+      asm!(concat!("msr ", $reg, ", {}"), in(reg) _value, options(nostack, preserves_flags));
     }
   }};
 }
@@ -44,7 +47,7 @@ pub(crate) enum CpuFlushType {
 fn instruction_barrier() {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        asm!("isb", options(nostack));
+        asm!("isb", options(nostack, preserves_flags));
     }
 }
 
@@ -52,7 +55,7 @@ fn instruction_barrier() {
 fn data_barrier() {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        asm!("dsb sy", options(nostack));
+        asm!("dsb sy", options(nostack, preserves_flags));
     }
 }
 
@@ -92,49 +95,40 @@ pub(crate) fn get_current_el() -> u64 {
 }
 
 pub(crate) fn set_tcr(tcr: u64) {
-    let current_el = get_current_el();
-    if current_el == 2 {
-        write_sysreg!("tcr_el2", tcr);
-    } else if current_el == 1 {
-        write_sysreg!("tcr_el1", tcr);
-    } else {
-        panic!("Invalid current EL {}", current_el);
+    match get_current_el() {
+        2 => write_sysreg!("tcr_el2", tcr),
+        1 => write_sysreg!("tcr_el1", tcr),
+        invalid_el => panic!("Invalid current EL {}", invalid_el),
     }
     instruction_barrier();
 }
 
 pub(crate) fn set_ttbr0(ttbr0: u64) {
-    let current_el = get_current_el();
-    if current_el == 2 {
-        write_sysreg!("ttbr0_el2", ttbr0);
-    } else if current_el == 1 {
-        write_sysreg!("ttbr0_el1", ttbr0);
-    } else {
-        panic!("Invalid current EL {}", current_el);
+    match get_current_el() {
+        2 => write_sysreg!("ttbr0_el2", ttbr0),
+        1 => write_sysreg!("ttbr0_el1", ttbr0),
+        invalid_el => panic!("Invalid current EL {}", invalid_el),
     }
     instruction_barrier();
 }
 
 pub(crate) fn set_mair(mair: u64) {
-    let current_el = get_current_el();
-    if current_el == 2 {
-        write_sysreg!("mair_el2", mair);
-    } else if current_el == 1 {
-        write_sysreg!("mair_el1", mair);
-    } else {
-        panic!("Invalid current EL {}", current_el);
+    match get_current_el() {
+        2 => write_sysreg!("mair_el2", mair),
+        1 => write_sysreg!("mair_el1", mair),
+        invalid_el => panic!("Invalid current EL {}", invalid_el),
     }
     instruction_barrier();
 }
 
 pub(crate) fn is_mmu_enabled() -> bool {
     let sctlr: u64 = match get_current_el() {
-        2 => read_sysreg!("sctlr_el2", 0x1),
-        1 => read_sysreg!("sctlr_el1", 0x1),
+        2 => read_sysreg!("sctlr_el2", SCTLR_M_ENABLE),
+        1 => read_sysreg!("sctlr_el1", SCTLR_M_ENABLE),
         invalid_el => panic!("Invalid current EL {}", invalid_el),
     };
 
-    sctlr & 0x1 == 1
+    sctlr & SCTLR_M_ENABLE == SCTLR_M_ENABLE
 }
 
 pub(crate) fn enable_mmu() {
@@ -368,7 +362,7 @@ pub(crate) unsafe fn zero_page(page: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     {
         let mut addr = page;
-        for i in 0..256 {
+        for _ in 0..256 {
             asm!(
                 "stp {zero}, {zero}, [{addr}], #16",    // Store 0 to the next 16 bytes of the page
                 addr = inout(reg) addr,
