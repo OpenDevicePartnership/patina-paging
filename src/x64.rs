@@ -48,12 +48,6 @@ impl<P: PageAllocator> X64PageTable<P> {
 }
 
 impl<P: PageAllocator> PageTable for X64PageTable<P> {
-    type ALLOCATOR = P;
-
-    fn borrow_allocator(&mut self) -> &mut Self::ALLOCATOR {
-        self.internal.borrow_allocator()
-    }
-
     fn map_memory_region(
         &mut self,
         address: u64,

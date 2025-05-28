@@ -75,7 +75,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let mut index = ZERO_VA_INDEX;
         let zero_va = Arch::get_zero_va(paging_type)?;
         while let Some(next_level) = level.next_level() {
-            let new_table = pt.borrow_allocator().allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
+            let new_table = pt.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
 
             // SAFETY: We just allocated the page, so it is safe to use it.
             unsafe { Arch::zero_page(new_table.into()) };
@@ -116,18 +116,6 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         }
 
         Ok(Self { base, page_allocator, paging_type, zero_va_pt_pa: None, _arch: PhantomData })
-    }
-
-    /// Function to borrow the allocator from the page table instance.
-    /// This is done this way to allow the page table to return a concrete
-    /// type instead of the dyn ref. This is required to allow the page allocator to
-    /// be managed by the caller, while the page table can still allocate pages from
-    /// the allocator
-    ///
-    /// ## Returns
-    /// * `&mut Self::ALLOCATOR` - Borrowed allocator
-    pub fn borrow_allocator(&mut self) -> &mut P {
-        &mut self.page_allocator
     }
 
     /// Consumes the page table structure and returns the page table root.
