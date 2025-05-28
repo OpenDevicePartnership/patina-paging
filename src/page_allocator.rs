@@ -16,10 +16,10 @@ pub trait PageAllocator {
     ///
     /// Prior to the page table being installed, the implementation of this function is
     /// responsible for ensuring that the provided address is valid and accessible
-    /// through it's identity mapped virtual address.
+    /// through its identity mapped virtual address.
     ///
     /// After the `install_page_table()` method is called, the implementor of this
-    /// trait is only resposible for ensuring that the physical address is valid,
+    /// trait is only responsible for ensuring that the physical address is valid,
     /// but the identity mapped virtual address does not need to be accessible.
     ///
     /// ## Returns
