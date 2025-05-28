@@ -14,6 +14,7 @@ cfg_if::cfg_if! {
 macro_rules! read_sysreg {
   ($reg:expr, $default:expr) => {{
     let mut _value: u64 = $default;
+    let _ = $reg; // Helps prevent identical code being generated in tests.
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
       asm!(concat!("mrs {}, ", $reg), out(reg) _value);
@@ -25,6 +26,7 @@ macro_rules! read_sysreg {
 macro_rules! write_sysreg {
   ($reg:expr, $value:expr) => {{
     let _value: u64 = $value;
+    let _ = $reg; // Helps prevent identical code being generated in tests.
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
       asm!(concat!("msr ", $reg, ", {}"), in(reg) _value);
@@ -367,7 +369,6 @@ pub(crate) unsafe fn zero_page(page: u64) {
     {
         let mut addr = page;
         for i in 0..256 {
-            debug_assert!(addr == page + (i * 16)); // remove for PR.
             asm!(
                 "stp {zero}, {zero}, [{addr}], #16",    // Store 0 to the next 16 bytes of the page
                 addr = inout(reg) addr,
