@@ -618,14 +618,6 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             return Err(PtError::UnalignedMemoryRange);
         }
 
-        let max_va = Arch::get_max_va(self.paging_type)?;
-
-        // Overflow check, size is 0-based
-        let top_va = address.try_add(size - 1)?;
-        if top_va > max_va {
-            return Err(PtError::InvalidMemoryRange);
-        }
-
         Ok(())
     }
 
@@ -661,6 +653,14 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
         self.validate_address_range(address, size)?;
 
+        let max_va = Arch::get_max_va(self.paging_type)?;
+
+        // Overflow check, size is 0-based
+        let top_va = address.try_add(size - 1)?;
+        if top_va > max_va {
+            return Err(PtError::InvalidMemoryRange);
+        }
+
         // We map until next alignment
         let start_va = address;
         let end_va = address + size - 1;
@@ -680,6 +680,14 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
         self.validate_address_range(address, size)?;
 
+        let max_va = Arch::get_max_va(self.paging_type)?;
+
+        // Overflow check, size is 0-based
+        let top_va = address.try_add(size - 1)?;
+        if top_va > max_va {
+            return Err(PtError::InvalidMemoryRange);
+        }
+
         let start_va = address;
         let end_va = address + size - 1;
 
@@ -696,6 +704,14 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
+
+        let max_va = Arch::get_max_va(self.paging_type)?;
+
+        // Overflow check, size is 0-based
+        let top_va = address.try_add(size - 1)?;
+        if top_va > max_va {
+            return Err(PtError::InvalidMemoryRange);
+        }
 
         let start_va = address;
         let end_va = address + size - 1;

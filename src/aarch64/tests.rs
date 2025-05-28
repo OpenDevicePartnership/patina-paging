@@ -60,10 +60,9 @@ fn test_self_map() {
         assert!(pt.is_ok());
         let pt = pt.unwrap();
 
-        // we can't query PML4 self map base address(with FOUR_LEVEL_PML4_SELF_MAP_BASE VA), as that
-        // va is exclusively reserved for use by the self-map system.
+        // ensure the self map is present
         let res = pt.query_memory_region(FOUR_LEVEL_4_SELF_MAP_BASE, PAGE_SIZE);
-        assert!(res.is_err());
+        assert!(res.is_ok());
 
         // we can't query the zero VA because in new() it is not mapped on purpose, so we just check we mapped
         // down to the PTE level
