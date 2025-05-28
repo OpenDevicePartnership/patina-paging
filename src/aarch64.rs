@@ -231,7 +231,7 @@ impl PageTableHal for PageTableArchAArch64 {
         // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
         // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
         // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
-        reg::set_mair(0x44 << 8 | 0xBB << 16 | 0xFF << 24);
+        reg::set_mair((0x44 << 8) | (0xBB << 16) | (0xFF << 24));
 
         // Set TTBR0
         reg::set_ttbr0(base);
