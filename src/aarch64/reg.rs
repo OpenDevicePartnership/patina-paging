@@ -363,12 +363,14 @@ pub(crate) unsafe fn zero_page(page: u64) {
     {
         let mut addr = page;
         for _ in 0..256 {
-            asm!(
-                "stp {zero}, {zero}, [{addr}], #16",    // Store 0 to the next 16 bytes of the page
-                addr = inout(reg) addr,
-                zero = in(reg) 0_u64,
-                options(nostack, preserves_flags)
-            );
+            unsafe {
+                asm!(
+                    "stp {zero}, {zero}, [{addr}], #16",    // Store 0 to the next 16 bytes of the page
+                    addr = inout(reg) addr,
+                    zero = in(reg) 0_u64,
+                    options(nostack, preserves_flags)
+                )
+            };
         }
     }
 }
