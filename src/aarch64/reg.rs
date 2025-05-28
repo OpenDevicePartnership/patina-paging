@@ -1,4 +1,4 @@
-use crate::structs::{PhysicalAddress, PAGE_SIZE};
+use crate::structs::{PAGE_SIZE, PhysicalAddress};
 
 /// SCTLR Bit 0 (M) indicates stage 1 address translation is enabled.
 const SCTLR_M_ENABLE: u64 = 0x1;
@@ -8,7 +8,7 @@ cfg_if::cfg_if! {
         use core::arch::{asm, global_asm};
         global_asm!(include_str!("replace_table_entry.asm"));
         // Use efiapi for the consistent calling convention.
-        extern "efiapi" {
+        unsafe extern "efiapi" {
             pub(crate) fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
         }
     }

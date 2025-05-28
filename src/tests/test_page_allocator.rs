@@ -1,7 +1,7 @@
 use crate::arch::{PageTableEntry, PageTableHal};
 use crate::page_allocator::PageAllocator;
 use crate::paging::PageTableState;
-use crate::structs::{PageLevel, VirtualAddress, PAGE_SIZE};
+use crate::structs::{PAGE_SIZE, PageLevel, VirtualAddress};
 use crate::{MemoryAttributes, PagingType};
 use crate::{PtError, PtResult};
 use std::alloc::{GlobalAlloc, Layout, System};

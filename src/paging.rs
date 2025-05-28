@@ -1,11 +1,11 @@
 use core::marker::PhantomData;
 
 use crate::{
+    MemoryAttributes, PagingType, PtError, PtResult, RangeMappingState,
     arch::PageTableEntry,
     arch::PageTableHal,
     page_allocator::PageAllocator,
-    structs::{PageLevel, PhysicalAddress, VirtualAddress, PAGE_SIZE, SELF_MAP_INDEX, ZERO_VA_INDEX},
-    MemoryAttributes, PagingType, PtError, PtResult, RangeMappingState,
+    structs::{PAGE_SIZE, PageLevel, PhysicalAddress, SELF_MAP_INDEX, VirtualAddress, ZERO_VA_INDEX},
 };
 
 /// Tracks the supported states of the page tables. Specifically, whether the page
