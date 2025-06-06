@@ -64,7 +64,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
         // Setup the self-mapping for the top level page table.
         let mut self_map_entry =
-            Arch::PTE::new(pt.base, SELF_MAP_INDEX, root_level, paging_type, pt.base.into(), PageTableState::Inactive);
+            Arch::PTE::new(pt.base, SELF_MAP_INDEX, root_level, paging_type, pt.base.into(), PageTableState::Inactive)?;
 
         // create it with permissive attributes
         self_map_entry.update_fields(Arch::DEFAULT_ATTRIBUTES, pt.base, false)?;
@@ -80,7 +80,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             // SAFETY: We just allocated the page, so it is safe to use it.
             unsafe { Arch::zero_page(new_table.into()) };
 
-            let mut entry = Arch::PTE::new(table_base, index, level, paging_type, zero_va, PageTableState::Inactive);
+            let mut entry = Arch::PTE::new(table_base, index, level, paging_type, zero_va, PageTableState::Inactive)?;
             entry.update_fields(Arch::DEFAULT_ATTRIBUTES, PhysicalAddress::new(new_table), false)?;
 
             // After the first-level index, all other indexes are 0.
@@ -90,7 +90,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         }
 
         // Create the leaf zero VA entry.
-        let mut entry = Arch::PTE::new(table_base, 0, level, paging_type, zero_va, PageTableState::Inactive);
+        let mut entry = Arch::PTE::new(table_base, 0, level, paging_type, zero_va, PageTableState::Inactive)?;
         entry.update_fields(Arch::DEFAULT_ATTRIBUTES, PhysicalAddress::new(0), true)?;
         entry.set_present(false);
         pt.zero_va_pt_pa = Some(table_base);
@@ -150,7 +150,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                 // semantics.
                 // the page_base doesn't matter here because we don't use it in self-map mode, but let's still set
                 // the right address in case it gets used in the future and it is easy to persist
-                let mut zero_entry = Arch::PTE::new(zero_va_pt_pa, 0, PageLevel::Level1, self.paging_type, va, state);
+                let mut zero_entry = Arch::PTE::new(zero_va_pt_pa, 0, PageLevel::Level1, self.paging_type, va, state)?;
 
                 zero_entry.update_fields(
                     Arch::DEFAULT_ATTRIBUTES | MemoryAttributes::ExecuteProtect,
@@ -240,7 +240,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             if !entry.present()
                 && Arch::level_supports_pa_entry(level)
                 && va.is_level_aligned(level)
-                && va.length_through(end_va) >= level.entry_va_size()
+                && va.length_through(end_va)? >= level.entry_va_size()
             {
                 // This entry is large enough to be a whole entry for this supporting level,
                 // so we can map the whole range in one go.
@@ -287,7 +287,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                 )?;
             }
 
-            va = va.get_next_va(level);
+            va = va.get_next_va(level)?;
         }
 
         Ok(())
@@ -308,7 +308,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         for mut entry in table {
             // Check if this is a large page in need of splitting.
             if entry.points_to_pa()
-                && (!va.is_level_aligned(level) || va.length_through(end_va) < level.entry_va_size())
+                && (!va.is_level_aligned(level) || va.length_through(end_va)? < level.entry_va_size())
             {
                 self.split_large_page(va, &mut entry, state)?;
             }
@@ -342,7 +342,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     )?;
                 }
             }
-            va = va.get_next_va(level);
+            va = va.get_next_va(level)?;
         }
 
         Ok(())
@@ -368,7 +368,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
             // Check if this is a large page in need of splitting.
             if entry.points_to_pa()
-                && (!va.is_level_aligned(level) || va.length_through(end_va) < level.entry_va_size())
+                && (!va.is_level_aligned(level) || va.length_through(end_va)? < level.entry_va_size())
             {
                 self.split_large_page(va, &mut entry, state)?;
             }
@@ -400,7 +400,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                 )?;
             }
 
-            va = va.get_next_va(level);
+            va = va.get_next_va(level)?;
         }
 
         Ok(())
@@ -479,7 +479,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             // only calculate the next VA if there is another entry in the table we are processing
             // when processing the self map, always calculating the next VA can result in overflow needlessly
             if entries.peek().is_some() {
-                va = va.get_next_va(level);
+                va = va.get_next_va(level)?;
             }
         }
 
@@ -497,7 +497,13 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
     fn split_large_page(&mut self, va: VirtualAddress, entry: &mut Arch::PTE, state: PageTableState) -> PtResult<()> {
         let level = entry.get_level();
         let next_level = level.next_level().unwrap();
-        debug_assert!(entry.points_to_pa());
+        if !entry.points_to_pa() {
+            log::error!(
+                "Failed to split large page at VA {:#x?} as the entry does not point to a physical address",
+                va
+            );
+            return Err(PtError::InvalidParameter);
+        }
 
         // Round down to the nearest page boundary at the current level.
         let large_page_start: u64 = va.into();
@@ -557,13 +563,13 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         level: PageLevel,
         base: PhysicalAddress,
         state: PageTableState,
-    ) {
+    ) -> PtResult<()> {
         let mut va = start_va;
 
         let table = PageTableRange::<Arch>::new(base, level, start_va, end_va, self.paging_type, state);
         for entry in table {
             if !entry.present() && !level.is_lowest_level() {
-                return;
+                return Err(PtError::NoMapping);
             }
 
             // split the va range appropriately for the next level pages
@@ -577,7 +583,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             // end of next level va. It will be minimum of next va and end va
             let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
 
-            entry.dump_entry();
+            entry.dump_entry()?;
             if entry.present() && !entry.points_to_pa() {
                 let next_base = entry.get_address();
                 self.dump_page_tables_internal(
@@ -586,11 +592,13 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     level.next_level().unwrap(),
                     next_base,
                     state,
-                );
+                )?;
             }
 
-            va = va.get_next_va(level);
+            va = va.get_next_va(level)?;
         }
+
+        Ok(())
     }
 
     fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
@@ -620,14 +628,17 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
         // this is always read from the physical address of the page table, because we are trying to determine whether
         // we are self-mapped or not. The root should always be accessible, only assume active for now.
-        let self_map_entry = Arch::PTE::new(
+        let self_map_entry = match Arch::PTE::new(
             self.base,
             SELF_MAP_INDEX,
             PageLevel::root_level(self.paging_type),
             self.paging_type,
             self.base.into(),
             PageTableState::ActiveIdentityMapped,
-        );
+        ) {
+            Ok(entry) => entry,
+            Err(_) => return PageTableState::ActiveIdentityMapped, // if we can't read the entry, assume identity mapped
+        };
 
         if !self_map_entry.present() || self_map_entry.get_address() != self.base {
             PageTableState::ActiveIdentityMapped
@@ -644,14 +655,14 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let max_va = Arch::get_max_va(self.paging_type)?;
 
         // Overflow check, size is 0-based
-        let top_va = address.try_add(size - 1)?;
+        let top_va = (address + (size - 1))?;
         if top_va > max_va {
             return Err(PtError::InvalidMemoryRange);
         }
 
         // We map until next alignment
         let start_va = address;
-        let end_va = address + size - 1;
+        let end_va = (address + (size - 1))?;
 
         self.map_memory_region_internal(
             start_va,
@@ -671,13 +682,13 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let max_va = Arch::get_max_va(self.paging_type)?;
 
         // Overflow check, size is 0-based
-        let top_va = address.try_add(size - 1)?;
+        let top_va = (address + (size - 1))?;
         if top_va > max_va {
             return Err(PtError::InvalidMemoryRange);
         }
 
         let start_va = address;
-        let end_va = address + size - 1;
+        let end_va = (address + (size - 1))?;
 
         self.unmap_memory_region_internal(
             start_va,
@@ -696,13 +707,13 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let max_va = Arch::get_max_va(self.paging_type)?;
 
         // Overflow check, size is 0-based
-        let top_va = address.try_add(size - 1)?;
+        let top_va = (address + (size - 1))?;
         if top_va > max_va {
             return Err(PtError::InvalidMemoryRange);
         }
 
         let start_va = address;
-        let end_va = address + size - 1;
+        let end_va = (address + (size - 1))?;
         let state = self.get_state();
 
         // make sure the memory region has same attributes set
@@ -737,7 +748,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         self.validate_address_range(address, size)?;
 
         let start_va = address;
-        let end_va = address + (size - 1);
+        let end_va = (address + (size - 1))?;
 
         let mut prev_attributes = RangeMappingState::Uninitialized;
         self.query_memory_region_internal(
@@ -750,15 +761,15 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         )
     }
 
-    pub fn dump_page_tables(&self, address: u64, size: u64) {
+    pub fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()> {
         if self.validate_address_range(address.into(), size).is_err() {
             log::error!("Invalid address range for page table dump! Address: {:#x?}, Size: {:#x?}", address, size);
-            return;
+            return Err(PtError::InvalidMemoryRange);
         }
 
         let address = VirtualAddress::new(address);
         let start_va = address;
-        let end_va = address + size - 1;
+        let end_va = (address + (size - 1))?;
 
         log::info!("Page Table Range: {} - {}", start_va, end_va);
         Arch::PTE::dump_entry_header();
@@ -768,7 +779,9 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             PageLevel::root_level(self.paging_type),
             self.base,
             self.get_state(),
-        );
+        )?;
+
+        Ok(())
     }
 }
 
@@ -846,8 +859,19 @@ impl<Arch: PageTableHal> Iterator for EntryIterator<Arch> {
             let index = self.start_index;
             let va = self.start_va;
             self.start_index += 1;
-            self.start_va = self.start_va.get_next_va(self.level);
-            Some(Arch::PTE::new(self.base, index, self.level, self.paging_type, va, self.state))
+
+            // only calculate the next VA if we are not at the end of the range otherwise we can needlessly overflow
+            // for a VA we would never try to use
+            if self.start_index < self.end_index {
+                self.start_va = match self.start_va.get_next_va(self.level) {
+                    Ok(next_va) => next_va,
+                    Err(_) => return None, // If we can't get the next VA, we stop iterating.
+                };
+            }
+            match Arch::PTE::new(self.base, index, self.level, self.paging_type, va, self.state) {
+                Ok(entry) => Some(entry),
+                Err(_) => None, // If we can't create the entry, we just skip it.
+            }
         } else {
             None
         }

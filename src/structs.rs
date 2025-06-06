@@ -118,8 +118,11 @@ impl VirtualAddress {
         Self(va)
     }
 
-    pub fn get_next_va(&self, level: PageLevel) -> VirtualAddress {
-        self.round_up(level) + 1
+    /// This will return the next virtual address that is aligned to the current entry.
+    /// If the next address overflows, it will return the maximum virtual address, which occurs when querying the
+    /// self map.
+    pub fn get_next_va(&self, level: PageLevel) -> PtResult<VirtualAddress> {
+        self.round_up(level).add(1)
     }
 
     /// This will return the index at the current entry.
@@ -143,10 +146,11 @@ impl VirtualAddress {
     }
 
     /// This will return the range length between self and end (inclusive)
-    pub fn length_through(&self, end: VirtualAddress) -> u64 {
+    /// In the case of underflow, it will return 0
+    pub fn length_through(&self, end: VirtualAddress) -> PtResult<u64> {
         match end.0.checked_sub(self.0) {
-            None => panic!("Underflow occurred! {:x} {:x}", self.0, end.0),
-            Some(result) => result + 1,
+            Some(result) => Ok(result + 1),
+            None => Err(PtError::SubtractionUnderflow),
         }
     }
 }
@@ -170,29 +174,23 @@ impl Display for VirtualAddress {
 }
 
 impl Add<u64> for VirtualAddress {
-    type Output = Self;
+    type Output = PtResult<Self>;
 
     fn add(self, rhs: u64) -> Self::Output {
         match self.0.checked_add(rhs) {
-            Some(result) => VirtualAddress(result),
-            None => panic!("Overflow occurred! {:x} {:x}", self.0, rhs),
+            Some(result) => Ok(VirtualAddress(result)),
+            None => Err(PtError::AdditionOverflow),
         }
     }
 }
 
-impl VirtualAddress {
-    pub fn try_add(self, rhs: u64) -> PtResult<Self> {
-        self.0.checked_add(rhs).map(VirtualAddress).ok_or(PtError::InvalidMemoryRange)
-    }
-}
-
 impl Sub<u64> for VirtualAddress {
-    type Output = Self;
+    type Output = PtResult<Self>;
 
     fn sub(self, rhs: u64) -> Self::Output {
         match self.0.checked_sub(rhs) {
-            Some(result) => VirtualAddress(result),
-            None => panic!("Underflow occurred! {:x} {:x}", self.0, rhs),
+            Some(result) => Ok(VirtualAddress(result)),
+            None => Err(PtError::SubtractionUnderflow),
         }
     }
 }

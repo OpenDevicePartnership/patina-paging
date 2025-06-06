@@ -2,6 +2,7 @@
 use core::arch::asm;
 
 use pagetablestore::AArch64PageTableEntry;
+use reg::ExceptionLevel;
 use structs::{MAX_VA_4_LEVEL, ZERO_VA_4_LEVEL};
 
 use crate::{
@@ -123,7 +124,7 @@ impl<P: PageAllocator> PageTable for AArch64PageTable<P> {
         self.internal.query_memory_region(address, size)
     }
 
-    fn dump_page_tables(&self, address: u64, size: u64) {
+    fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()> {
         self.internal.dump_page_tables(address, size)
     }
 }
@@ -183,7 +184,7 @@ impl PageTableHal for PageTableArchAArch64 {
 
         // Log a warning for EL1 support until it is properly tested.
         let exception_level = reg::get_current_el();
-        if exception_level == 1 {
+        if exception_level == ExceptionLevel::EL1 {
             log::warn!("EL1 paging support is untested!");
         }
 
@@ -208,12 +209,8 @@ impl PageTableHal for PageTableArchAArch64 {
         };
 
         let tcr = match exception_level {
-            2 => TCR_EL2_DEFAULTS | (tcr_ps << TCR_EL2_PS_SHIFT),
-            1 => TCR_EL1_DEFAULTS | (tcr_ps << TCR_EL1_IPS_SHIFT),
-            _ => {
-                log::error!("Unsupported exception level: {}", exception_level);
-                return Err(PtError::InvalidParameter);
-            }
+            ExceptionLevel::EL2 => TCR_EL2_DEFAULTS | (tcr_ps << TCR_EL2_PS_SHIFT),
+            ExceptionLevel::EL1 => TCR_EL1_DEFAULTS | (tcr_ps << TCR_EL1_IPS_SHIFT),
         };
 
         log::info!("Setting TCR: {:#x}", tcr);

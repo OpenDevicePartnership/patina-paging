@@ -3,6 +3,13 @@ use crate::structs::{PAGE_SIZE, PhysicalAddress};
 /// SCTLR Bit 0 (M) indicates stage 1 address translation is enabled.
 const SCTLR_M_ENABLE: u64 = 0x1;
 
+/// This crate only support AArch64 exception levels EL1 and EL2.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum ExceptionLevel {
+    EL1,
+    EL2,
+}
+
 cfg_if::cfg_if! {
     if #[cfg(all(not(test), target_arch = "aarch64"))] {
         use core::arch::{asm, global_asm};
@@ -82,50 +89,48 @@ pub(crate) fn get_phys_addr_bits() -> u64 {
     (pa_bits << 2) + 32
 }
 
-pub(crate) fn get_current_el() -> u64 {
+/// Get the current exception level (EL) of the CPU
+/// This crate only supports EL1 and EL2, so it will panic if the current EL is not one of those.
+/// And only EL2 is tested :)
+pub(crate) fn get_current_el() -> ExceptionLevel {
     // Default to EL2
     let current_el: u64 = read_sysreg!("CurrentEL", 8);
 
     match current_el {
-        0x0C => 3,
-        0x08 => 2,
-        0x04 => 1,
-        _ => panic!("Invalid current EL {}", current_el),
+        0x08 => ExceptionLevel::EL2,
+        0x04 => ExceptionLevel::EL1,
+        _ => unimplemented!("Unsupported exception level: {:#x}", current_el),
     }
 }
 
 pub(crate) fn set_tcr(tcr: u64) {
     match get_current_el() {
-        2 => write_sysreg!("tcr_el2", tcr),
-        1 => write_sysreg!("tcr_el1", tcr),
-        invalid_el => panic!("Invalid current EL {}", invalid_el),
+        ExceptionLevel::EL2 => write_sysreg!("tcr_el2", tcr),
+        ExceptionLevel::EL1 => write_sysreg!("tcr_el1", tcr),
     }
     instruction_barrier();
 }
 
 pub(crate) fn set_ttbr0(ttbr0: u64) {
     match get_current_el() {
-        2 => write_sysreg!("ttbr0_el2", ttbr0),
-        1 => write_sysreg!("ttbr0_el1", ttbr0),
-        invalid_el => panic!("Invalid current EL {}", invalid_el),
+        ExceptionLevel::EL2 => write_sysreg!("ttbr0_el2", ttbr0),
+        ExceptionLevel::EL1 => write_sysreg!("ttbr0_el1", ttbr0),
     }
     instruction_barrier();
 }
 
 pub(crate) fn set_mair(mair: u64) {
     match get_current_el() {
-        2 => write_sysreg!("mair_el2", mair),
-        1 => write_sysreg!("mair_el1", mair),
-        invalid_el => panic!("Invalid current EL {}", invalid_el),
+        ExceptionLevel::EL2 => write_sysreg!("mair_el2", mair),
+        ExceptionLevel::EL1 => write_sysreg!("mair_el1", mair),
     }
     instruction_barrier();
 }
 
 pub(crate) fn is_mmu_enabled() -> bool {
     let sctlr: u64 = match get_current_el() {
-        2 => read_sysreg!("sctlr_el2", SCTLR_M_ENABLE),
-        1 => read_sysreg!("sctlr_el1", SCTLR_M_ENABLE),
-        invalid_el => panic!("Invalid current EL {}", invalid_el),
+        ExceptionLevel::EL2 => read_sysreg!("sctlr_el2", SCTLR_M_ENABLE),
+        ExceptionLevel::EL1 => read_sysreg!("sctlr_el1", SCTLR_M_ENABLE),
     };
 
     sctlr & SCTLR_M_ENABLE == SCTLR_M_ENABLE
@@ -134,104 +139,109 @@ pub(crate) fn is_mmu_enabled() -> bool {
 pub(crate) fn enable_mmu() {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        let current_el = get_current_el();
-        if current_el == 2 {
-            asm!(
-                "mrs {val}, sctlr_el2",
-                "orr {val}, {val}, #0x1",
-                "tlbi alle2",
-                "dsb nsh",
-                "isb",
-                "msr sctlr_el2, {val}",
-                val = out(reg) _,
-                options(nostack)
-            );
-        } else if current_el == 1 {
-            asm!(
-                "mrs {val}, sctlr_el1",
-                "orr {val}, {val}, #0x1",
-                "tlbi vmalle1",
-                "dsb nsh",
-                "isb",
-                "msr sctlr_el1, {val}",
-                val = out(reg) _,
-                options(nostack)
-            );
-        } else {
-            panic!("Invalid current EL {}", current_el);
+        match get_current_el() {
+            ExceptionLevel::EL2 => {
+                asm!(
+                    "mrs {val}, sctlr_el2",
+                    "orr {val}, {val}, #0x1",
+                    "tlbi alle2",
+                    "dsb nsh",
+                    "isb",
+                    "msr sctlr_el2, {val}",
+                    val = out(reg) _,
+                    options(nostack)
+                );
+            }
+            ExceptionLevel::EL1 => {
+                asm!(
+                    "mrs {val}, sctlr_el1",
+                    "orr {val}, {val}, #0x1",
+                    "tlbi vmalle1",
+                    "dsb nsh",
+                    "isb",
+                    "msr sctlr_el1, {val}",
+                    val = out(reg) _,
+                    options(nostack)
+                );
+            }
         }
+
         asm!("isb", options(nostack));
     }
 }
 
 pub(crate) fn set_stack_alignment_check(enable: bool) {
-    let current_el = get_current_el();
-    if current_el == 2 {
-        let sctlr = read_sysreg!("sctlr_el2", 0);
-        match enable {
-            true => write_sysreg!("sctlr_el2", sctlr | 0x8),
-            false => write_sysreg!("sctlr_el2", sctlr & !0x8),
+    match get_current_el() {
+        ExceptionLevel::EL2 => {
+            let sctlr = read_sysreg!("sctlr_el2", 0);
+            match enable {
+                true => write_sysreg!("sctlr_el2", sctlr | 0x8),
+                false => write_sysreg!("sctlr_el2", sctlr & !0x8),
+            }
         }
-    } else if current_el == 1 {
-        let sctlr = read_sysreg!("sctlr_el1", 0);
-        match enable {
-            true => write_sysreg!("sctlr_el1", sctlr | 0x8),
-            false => write_sysreg!("sctlr_el1", sctlr & !0x8),
+        ExceptionLevel::EL1 => {
+            let sctlr = read_sysreg!("sctlr_el1", 0);
+            match enable {
+                true => write_sysreg!("sctlr_el1", sctlr | 0x8),
+                false => write_sysreg!("sctlr_el1", sctlr & !0x8),
+            }
         }
-    } else {
-        panic!("Invalid current EL {}", current_el);
     }
+
     data_barrier();
     instruction_barrier();
 }
 
 pub(crate) fn set_alignment_check(enable: bool) {
-    let current_el = get_current_el();
-    if current_el == 2 {
-        let sctlr = read_sysreg!("sctlr_el2", 0);
-        match enable {
-            true => write_sysreg!("sctlr_el2", sctlr | 0x2),
-            false => write_sysreg!("sctlr_el2", sctlr & !0x2),
+    match get_current_el() {
+        ExceptionLevel::EL2 => {
+            let sctlr = read_sysreg!("sctlr_el2", 0);
+            match enable {
+                true => write_sysreg!("sctlr_el2", sctlr | 0x2),
+                false => write_sysreg!("sctlr_el2", sctlr & !0x2),
+            }
         }
-    } else if current_el == 1 {
-        let sctlr = read_sysreg!("sctlr_el1", 0);
-        match enable {
-            true => write_sysreg!("sctlr_el1", sctlr | 0x2),
-            false => write_sysreg!("sctlr_el1", sctlr & !0x2),
+        ExceptionLevel::EL1 => {
+            let sctlr = read_sysreg!("sctlr_el1", 0);
+            match enable {
+                true => write_sysreg!("sctlr_el1", sctlr | 0x2),
+                false => write_sysreg!("sctlr_el1", sctlr & !0x2),
+            }
         }
-    } else {
-        panic!("Invalid current EL {}", current_el);
     }
+
     data_barrier();
     instruction_barrier();
 }
 
 pub(crate) fn enable_instruction_cache() {
-    let current_el = get_current_el();
-    if current_el == 2 {
-        let sctlr = read_sysreg!("sctlr_el2", 0);
-        write_sysreg!("sctlr_el2", sctlr | 0x1000);
-    } else if current_el == 1 {
-        let sctlr = read_sysreg!("sctlr_el1", 0);
-        write_sysreg!("sctlr_el1", sctlr | 0x1000);
-    } else {
-        panic!("Invalid current EL {}", current_el);
+    match get_current_el() {
+        ExceptionLevel::EL2 => {
+            let sctlr = read_sysreg!("sctlr_el2", 0);
+            write_sysreg!("sctlr_el2", sctlr | 0x1000);
+        }
+        ExceptionLevel::EL1 => {
+            let sctlr = read_sysreg!("sctlr_el1", 0);
+            write_sysreg!("sctlr_el1", sctlr | 0x1000);
+        }
     }
+
     data_barrier();
     instruction_barrier();
 }
 
 pub(crate) fn enable_data_cache() {
-    let current_el = get_current_el();
-    if current_el == 2 {
-        let sctlr = read_sysreg!("sctlr_el2", 0);
-        write_sysreg!("sctlr_el2", sctlr | 0x4);
-    } else if current_el == 1 {
-        let sctlr = read_sysreg!("sctlr_el1", 0);
-        write_sysreg!("sctlr_el1", sctlr | 0x4);
-    } else {
-        panic!("Invalid current EL {}", current_el);
+    match get_current_el() {
+        ExceptionLevel::EL2 => {
+            let sctlr = read_sysreg!("sctlr_el2", 0);
+            write_sysreg!("sctlr_el2", sctlr | 0x4);
+        }
+        ExceptionLevel::EL1 => {
+            let sctlr = read_sysreg!("sctlr_el1", 0);
+            write_sysreg!("sctlr_el1", sctlr | 0x4);
+        }
     }
+
     data_barrier();
     instruction_barrier();
 }
@@ -239,29 +249,32 @@ pub(crate) fn enable_data_cache() {
 pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
-        let current_el = get_current_el();
         let pfn = _mva >> 12;
         let mut sctlr: u64;
         asm!("dsb     nshst", options(nostack));
-        if current_el == 2 {
-            asm!(
-                "tlbi vae2, {}",
-                "mrs {}, sctlr_el2",
-                in(reg) pfn,
-                out(reg) sctlr,
-                options(nostack)
-            );
-        } else if current_el == 1 {
-            asm!(
-                "tlbi vaae1, {}",
-                "mrs {}, sctlr_el1",
-                in(reg) pfn,
-                out(reg) sctlr,
-                options(nostack)
-            );
-        } else {
-            panic!("Invalid current EL {}", current_el);
+
+        match get_current_el() {
+            ExceptionLevel::EL2 => {
+                asm!(
+                    "tlbi vae2, {}",
+                    "mrs {}, sctlr_el2",
+                    in(reg) pfn,
+                    out(reg) sctlr,
+                    options(nostack)
+                );
+            }
+            ExceptionLevel::EL1 => {
+                asm!(
+                    "tlbi vaae1, {}",
+                    "mrs {}, sctlr_el1",
+                    in(reg) pfn,
+                    out(reg) sctlr,
+                    options(nostack)
+                );
+            }
         }
+
+        // If the MMU is disabled, we need to invalidate the cache
         if sctlr & 1 == 0 {
             asm!(
                 "dc ivac, {}",
@@ -330,9 +343,8 @@ pub(crate) fn is_this_page_table_active(page_table_base: PhysicalAddress) -> boo
     let mut _ttbr0: u64 = 0;
     let current_el = get_current_el();
     let ttbr0 = match current_el {
-        2 => read_sysreg!("ttbr0_el2", 0),
-        1 => read_sysreg!("ttbr0_el1", 0),
-        invalid_el => panic!("Invalid current EL {}", invalid_el),
+        ExceptionLevel::EL2 => read_sysreg!("ttbr0_el2", 0),
+        ExceptionLevel::EL1 => read_sysreg!("ttbr0_el1", 0),
     };
 
     if ttbr0 != u64::from(page_table_base) {

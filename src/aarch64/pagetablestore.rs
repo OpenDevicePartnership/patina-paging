@@ -1,7 +1,12 @@
 #[cfg(all(not(test), target_arch = "aarch64"))]
 use super::reg;
 use super::structs::*;
-use crate::{MemoryAttributes, PagingType, PtResult, arch::PageTableEntry, paging::PageTableState, structs::*};
+use crate::{
+    MemoryAttributes, PagingType, PtError, PtResult, arch::PageTableEntry, paging::PageTableState, structs::*,
+};
+
+// Maximum number of entries in a page table (512)
+const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize;
 
 /// This is a dummy page table entry that dispatches calls to the real page
 /// table entries by locating them with the page base. Implementing this as an
@@ -58,9 +63,11 @@ impl PageTableEntry for AArch64PageTableEntry {
         paging_type: PagingType,
         start_va: VirtualAddress,
         state: PageTableState,
-    ) -> Self {
-        assert!(paging_type == PagingType::Paging4Level);
-        Self { page_base, index, level, _paging_type: paging_type, start_va, state }
+    ) -> PtResult<Self> {
+        if paging_type != PagingType::Paging4Level || index >= MAX_ENTRIES as u64 {
+            return Err(PtError::InvalidParameter);
+        }
+        Ok(Self { page_base, index, level, _paging_type: paging_type, start_va, state })
     }
 
     fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, block: bool) -> PtResult<()> {
@@ -111,12 +118,10 @@ impl PageTableEntry for AArch64PageTableEntry {
         );
     }
 
-    fn dump_entry(&self) {
-        self.get_entry().dump_entry(self.start_va, self.level);
+    fn dump_entry(&self) -> PtResult<()> {
+        self.get_entry().dump_entry(self.start_va, self.level)
     }
 }
-
-const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
 
 /// This function returns the base address of the self-mapped page table at the given level for this VA
 /// It is used in the get_entry function to determine the base address in the self map in which to apply
@@ -128,6 +133,7 @@ const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
 /// each entry covers to be the size of the next level down for each recursion into the self map we did.
 fn get_self_mapped_base(level: PageLevel, va: VirtualAddress) -> u64 {
     match level {
+        // AArch64 does not support 5-level paging, so we return an unimplemented error.
         PageLevel::Level5 => unimplemented!(),
         PageLevel::Level4 => FOUR_LEVEL_4_SELF_MAP_BASE,
         PageLevel::Level3 => FOUR_LEVEL_3_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PageLevel::Level4)),
@@ -154,10 +160,8 @@ unsafe fn get_entry<'a, T>(
     table_va: VirtualAddress,
     state: PageTableState,
 ) -> &'a mut T {
-    if index >= MAX_ENTRIES as u64 {
-        panic!("index {} cannot be greater than {}", index, MAX_ENTRIES - 1);
-    }
-
+    // we don't check the index here, as it is guaranteed to be within bounds
+    // based on the new function of the AArch64PageTableEntry
     let base = match state.self_map() {
         true => get_self_mapped_base(level, table_va),
         false => base.into(),

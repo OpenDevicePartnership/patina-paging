@@ -86,13 +86,13 @@ impl AArch64Descriptor {
         self.set_valid(true);
 
         // update the memory attributes irrespective of new or old page table
-        self.set_attributes(attributes);
+        self.set_attributes(attributes)?;
 
         // TODO: need to flush the cache if operating on the active page table
         Ok(())
     }
 
-    fn set_attributes(&mut self, attributes: MemoryAttributes) {
+    fn set_attributes(&mut self, attributes: MemoryAttributes) -> PtResult<()> {
         // This change pretty much follows the GcdAttributeToPageAttribute
         match attributes & MemoryAttributes::CacheAttributesMask {
             MemoryAttributes::Uncacheable => {
@@ -112,7 +112,8 @@ impl AArch64Descriptor {
                 self.set_shareable(3);
             }
             _ => {
-                panic!("Invalid memory attributes: {:?}", attributes);
+                log::error!("Invalid memory attributes: {:?}", attributes);
+                return Err(PtError::InvalidParameter);
             }
         }
 
@@ -137,6 +138,7 @@ impl AArch64Descriptor {
             self.set_valid(true);
             self.set_access_flag(true);
         }
+        Ok(())
     }
 
     /// return all the memory attributes for the current entry
@@ -167,7 +169,7 @@ impl AArch64Descriptor {
         attributes
     }
 
-    pub fn dump_entry(&self, va: VirtualAddress, level: PageLevel) {
+    pub fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()> {
         let valid = self.valid() as u64;
         let table_desc = self.table_desc() as u64;
         let attribute_index = self.attribute_index();
@@ -202,7 +204,7 @@ impl AArch64Descriptor {
             level_name,
             "",
             va,
-            va + level.entry_va_size() - 1,
+            ((va + level.entry_va_size())? - 1)?,
             "",
             ns_table,           // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
             ap_table,           // 2 bits -  Hierarchical permissions.
@@ -223,7 +225,9 @@ impl AArch64Descriptor {
             attribute_index,    // 3 bits -  Used for caching attributes
             table_desc,         // 1 bit  -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
             valid,              // 1 bit  -  Valid descriptor
-        )
+        );
+
+        Ok(())
     }
 
     pub fn get_u64(&self) -> u64 {

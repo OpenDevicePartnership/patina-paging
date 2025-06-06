@@ -100,7 +100,7 @@ fn subtree_num_pages<Arch: PageTableHal>(
         let prefix_size: u64 = size.min(entry_size - (u64::from(address) & size_mask));
         pages += 1;
         pages += subtree_num_pages::<Arch>(address, prefix_size, next_level)?;
-        address = address + prefix_size;
+        address = (address + prefix_size)?;
         size -= prefix_size;
     };
 
@@ -114,7 +114,7 @@ fn subtree_num_pages<Arch: PageTableHal>(
             pages += subtree_num_pages::<Arch>(address, mid_size, next_level)?;
         }
 
-        address = address + mid_size;
+        address = (address + mid_size)?;
         size -= mid_size;
     }
 
@@ -133,7 +133,7 @@ fn num_page_tables_required<Arch: PageTableHal>(address: u64, size: u64, paging_
     }
 
     // Check the memory range is aligned
-    if !(address + size).is_page_aligned() {
+    if !(address + size)?.is_page_aligned() {
         return Err(PtError::UnalignedAddress);
     }
 
@@ -265,7 +265,7 @@ fn test_map_memory_address_0_to_ffff_ffff() {
             assert!(res.is_ok());
 
             log::info!("allocated: {} expected: {}", page_allocator.pages_allocated(), num_pages);
-            pt.dump_page_tables(address, size);
+            pt.dump_page_tables(address, size).unwrap();
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
             page_allocator.validate_pages::<Arch>(address, size, attributes);
@@ -960,7 +960,7 @@ fn test_dump_page_tables() {
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
 
-        pt.dump_page_tables(address, size);
+        pt.dump_page_tables(address, size).unwrap();
     });
 }
 

@@ -26,7 +26,9 @@ pub(crate) trait PageTableEntry {
         paging_type: PagingType,
         start_va: VirtualAddress,
         state: PageTableState,
-    ) -> Self;
+    ) -> PtResult<Self>
+    where
+        Self: Sized;
 
     fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, leaf_entry: bool) -> PtResult<()>;
     fn present(&self) -> bool;
@@ -34,7 +36,7 @@ pub(crate) trait PageTableEntry {
     fn get_address(&self) -> PhysicalAddress;
     fn get_attributes(&self) -> MemoryAttributes;
     fn dump_entry_header();
-    fn dump_entry(&self);
+    fn dump_entry(&self) -> PtResult<()>;
     fn points_to_pa(&self) -> bool;
     fn get_level(&self) -> PageLevel;
     fn entry_ptr_address(&self) -> u64;

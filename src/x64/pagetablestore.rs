@@ -1,7 +1,7 @@
 use super::structs::*;
 use crate::paging::PageTableState;
 use crate::structs::*;
-use crate::{MemoryAttributes, PagingType, PtResult};
+use crate::{MemoryAttributes, PagingType, PtError, PtResult};
 
 // Constants for page levels to conform to x64 standards.
 pub const PML5: PageLevel = PageLevel::Level5;
@@ -9,6 +9,9 @@ pub const PML4: PageLevel = PageLevel::Level4;
 pub const PDP: PageLevel = PageLevel::Level3;
 pub const PD: PageLevel = PageLevel::Level2;
 pub const PT: PageLevel = PageLevel::Level1;
+
+// Maximum number of entries in a page table (512)
+const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize;
 
 /// This is a dummy page table entry that dispatches calls to the real page
 /// table entries by locating them with the page base. Implementing this as an
@@ -86,8 +89,11 @@ impl crate::arch::PageTableEntry for X64PageTableEntry {
         paging_type: PagingType,
         start_va: VirtualAddress,
         state: PageTableState,
-    ) -> Self {
-        Self { page_base, index, level, _paging_type: paging_type, start_va, state }
+    ) -> PtResult<Self> {
+        if index >= MAX_ENTRIES as u64 {
+            return Err(PtError::InvalidParameter);
+        }
+        Ok(Self { page_base, index, level, _paging_type: paging_type, start_va, state })
     }
 
     fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress, leaf_entry: bool) -> PtResult<()> {
@@ -147,8 +153,8 @@ impl crate::arch::PageTableEntry for X64PageTableEntry {
         );
     }
 
-    fn dump_entry(&self) {
-        self.get_entry().dump_entry(self.start_va, self.level);
+    fn dump_entry(&self) -> PtResult<()> {
+        self.get_entry().dump_entry(self.start_va, self.level)
     }
 
     fn points_to_pa(&self) -> bool {
@@ -175,8 +181,6 @@ pub(crate) fn invalidate_tlb(_va: u64) {
     };
 }
 
-const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
-
 /// This function returns the base address of the self-mapped page table at the given level for this VA
 /// It is used in the get_entry function to determine the base address in the self map in which to apply
 /// the index within the page table to get the entry we are intending to operate on.
@@ -188,6 +192,8 @@ const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize; // 512 entries
 fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
     match paging_type {
         PagingType::Paging4Level => match level {
+            // PML5 is not used in 4-level paging, so we return an unimplemented error.
+            PML5 => unimplemented!(),
             PML4 => FOUR_LEVEL_PML4_SELF_MAP_BASE,
             PDP => FOUR_LEVEL_PDP_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PML4)),
             PD => FOUR_LEVEL_PD_SELF_MAP_BASE + (SIZE_2MB * va.get_index(PML4)) + (SIZE_4KB * va.get_index(PDP)),
@@ -197,7 +203,6 @@ fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: Pagin
                     + (SIZE_2MB * va.get_index(PDP))
                     + (SIZE_4KB * va.get_index(PD))
             }
-            _ => panic!("unexpected page level"),
         },
         PagingType::Paging5Level => match level {
             PML5 => FIVE_LEVEL_PML5_SELF_MAP_BASE,
@@ -230,10 +235,8 @@ unsafe fn get_entry<'a, T>(
     paging_type: PagingType,
     state: PageTableState,
 ) -> &'a mut T {
-    if index >= MAX_ENTRIES as u64 {
-        panic!("index {} cannot be greater than {}", index, MAX_ENTRIES - 1);
-    }
-
+    // we don't check the index here, as it is guaranteed to be within bounds
+    // based on the new function of the X64PageTableEntry
     let base = match state.self_map() {
         true => get_self_mapped_base(level, va, paging_type),
         false => base.into(),

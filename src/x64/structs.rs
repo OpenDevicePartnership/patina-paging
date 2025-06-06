@@ -131,7 +131,7 @@ impl PageTableEntryX64 {
         page_table_base_address.into()
     }
 
-    pub fn dump_entry(&self, va: VirtualAddress, level: PageLevel) {
+    pub fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()> {
         let nx = self.nx() as u64;
         let available_high = self.available_high() as u64;
         let page_table_base_address = self.page_table_base_address();
@@ -160,7 +160,7 @@ impl PageTableEntryX64 {
             level_name,
             "",
             va,
-            va + level.entry_va_size() - 1,
+            ((va + level.entry_va_size())? - 1)?,
             "",
             nx,                      // 1 bit -  0 = Execute Code, 1 = No Code Execution
             available_high & 0x7FF,  // 11 bits -  Available for use by system software
@@ -177,7 +177,9 @@ impl PageTableEntryX64 {
             present,                 // 1 bit -  0 = Not present in memory, 1 = Present in memory
             depth = depth,
             inv_depth = inv_depth,
-        )
+        );
+
+        Ok(())
     }
 
     /// Performs an overwrite of the table entry. This ensures that all fields
