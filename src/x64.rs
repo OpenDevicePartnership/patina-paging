@@ -78,7 +78,7 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
         self.internal.query_memory_region(address, size)
     }
 
-    fn dump_page_tables(&self, address: u64, size: u64) {
+    fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()> {
         self.internal.dump_page_tables(address, size)
     }
 }

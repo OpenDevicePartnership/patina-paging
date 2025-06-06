@@ -109,6 +109,12 @@ pub enum PtError {
 
     /// Paging type not supported by this implementation.
     UnsupportedPagingType,
+
+    /// The base address and range would cause an overflow when performing page table operations.
+    AdditionOverflow,
+
+    /// The base address and range would cause an underflow when performing page table operations.
+    SubtractionUnderflow,
 }
 
 #[derive(Debug, PartialEq)]
@@ -222,7 +228,7 @@ pub trait PageTable {
     /// ## Arguments
     /// * `address` - The memory address to map.
     /// * `size` - The memory size to map.
-    fn dump_page_tables(&self, address: u64, size: u64);
+    fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

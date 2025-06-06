@@ -75,7 +75,7 @@ impl TestPageAllocator {
         log::info!("Validating pages from {:#x} to {:#x}", address, address + size);
         let address = VirtualAddress::new(address);
         let start_va = address;
-        let end_va = address + size - 1;
+        let end_va = ((address + size).unwrap() - 1).unwrap();
 
         // page index keep track of the global page being used from the memory.
         // This needed for the recursive page walk logic
@@ -144,7 +144,7 @@ impl TestPageAllocator {
                 );
             }
 
-            va = va.get_next_va(level);
+            va = va.get_next_va(level).unwrap();
         }
     }
 
@@ -164,7 +164,8 @@ impl TestPageAllocator {
             self.paging_type,
             virtual_address.into(),
             PageTableState::Inactive,
-        );
+        )
+        .unwrap();
 
         let page_base: u64 = pte.get_address().into();
         let attributes = pte.get_attributes();
