@@ -44,6 +44,23 @@ clear = true
 command = "cargo"
 args = ["check", "--message-format=json"]
 
+[tasks.check_no_std]
+description = "Checks rust code for no_std build errors with results."
+private = true
+command = "cargo"
+args = ["check", "--target", "x86_64-unknown-uefi", "@@split(NO_STD_FLAGS, )", "@@split(CARGO_MAKE_TASK_ARGS, )"]
+
+[tasks.check_std]
+description = "Checks rust code for std build errors with results."
+private = true
+command = "cargo"
+args = ["check", "@@split(STD_FLAGS, )", "@@split(CARGO_MAKE_TASK_ARGS, )"]
+
+[tasks.check]
+description = "Checks rust code for errors. Example `cargo make check`"
+clear = true
+run_task = [{ name = ["check_no_std", "check_std"], parallel = true }]
+
 [tasks.test]
 description = "Builds all rust tests in the workspace. Example `cargo make test`"
 clear = true
