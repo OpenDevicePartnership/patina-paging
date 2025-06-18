@@ -16,7 +16,7 @@ on:
 jobs:
   release:
     name: Release
-    uses: ./.github/workflows/ReleaseWorkflowPatinaFW.yml
+    uses: ./.github/workflows/ReleaseWorkflow.yml
     secrets: inherit
     permissions:
       contents: write
