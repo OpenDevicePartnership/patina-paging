@@ -360,13 +360,10 @@ pub(crate) fn is_this_page_table_active(page_table_base: PhysicalAddress) -> boo
 /// 1. Ensure that the compiler does not optimize out the zeroing
 /// 2. Ensure that the zeroing is done as quickly as possible as without this, the zero takes a long time on
 ///    non-optimized builds
-/// 3. This function must not be inlined to ensure that the register reads and writes don't affect the caller's
-///    registers.
 ///
 /// # Safety
 /// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
 /// is mapped.
-#[inline(never)]
 pub(crate) unsafe fn zero_page(page: u64) {
     // If the MMU is diabled, invalidate the cache so that any stale data does
     // not get later evicted to memory.
