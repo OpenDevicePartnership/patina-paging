@@ -89,6 +89,10 @@ impl PageTableHal for PageTableArchX64 {
     type PTE = X64PageTableEntry;
     const DEFAULT_ATTRIBUTES: MemoryAttributes = MemoryAttributes::empty();
 
+    // This function must not be inlined to ensure that the register reads and writes don't affect the
+    // caller's registers. It has been viewed that this function is inlined several layers up the stack and has
+    // corrupted the rdi register, causing a crash.
+    #[inline(never)]
     unsafe fn zero_page(base: VirtualAddress) {
         let _page: u64 = base.into();
         #[cfg(all(not(test), target_arch = "x86_64"))]
@@ -99,7 +103,7 @@ impl PageTableHal for PageTableArchX64 {
             in("rcx") 0x200,    // we write 512 qwords (4096 bytes)
             in("rdi") _page,    // start at the page
             in("rax") 0,        // store 0
-            options(nostack, preserves_flags)
+            options(nostack)
             );
         }
     }
