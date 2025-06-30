@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 use core::arch::asm;
+use core::ptr;
 
 mod pagetablestore;
 mod structs;
@@ -14,7 +15,7 @@ use crate::{
     arch::PageTableHal,
     page_allocator::PageAllocator,
     paging::PageTableInternal,
-    structs::{PageLevel, VirtualAddress},
+    structs::{PAGE_SIZE, PageLevel, VirtualAddress},
 };
 
 pub struct X64PageTable<P: PageAllocator> {
@@ -89,22 +90,15 @@ impl PageTableHal for PageTableArchX64 {
     type PTE = X64PageTableEntry;
     const DEFAULT_ATTRIBUTES: MemoryAttributes = MemoryAttributes::empty();
 
-    unsafe fn zero_page(base: VirtualAddress) {
-        let _page: u64 = base.into();
-        #[cfg(all(not(test), target_arch = "x86_64"))]
-        unsafe {
-            asm!(
-            "mov r8, rdi",      // r8 will hold the original address of the page
-            "cld",              // Clear the direction flag so that we increment rdi with each store
-            "rep stosq",        // Repeat the store of qword in rax to [rdi] rcx times
-            "mov rdi, r8",      // Restore the original address of the page
-            in("rcx") 0x200,    // we write 512 qwords (4096 bytes)
-            in("rdi") _page,    // start at the page
-            in("rax") 0,        // store 0
-            out("r8") _,        // r8 is used to hold the original address of the page
-            options(nostack)
-            );
-        }
+    /// Zero a page of memory
+    ///
+    /// # Safety
+    /// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
+    /// is mapped.
+    unsafe fn zero_page(page: VirtualAddress) {
+        // This cast must occur as a mutable pointer to a u8, as otherwise the compiler can optimize out the write,
+        // which must not happen as that would violate break before make and have garbage in the page table.
+        unsafe { ptr::write_bytes(Into::<u64>::into(page) as *mut u8, 0, PAGE_SIZE as usize) };
     }
 
     fn paging_type_supported(paging_type: PagingType) -> PtResult<()> {

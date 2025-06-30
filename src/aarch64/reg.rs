@@ -1,3 +1,5 @@
+use core::ptr;
+
 use crate::structs::{PAGE_SIZE, PhysicalAddress};
 
 /// SCTLR Bit 0 (M) indicates stage 1 address translation is enabled.
@@ -356,10 +358,6 @@ pub(crate) fn is_this_page_table_active(page_table_base: PhysicalAddress) -> boo
 }
 
 /// Zero a page of memory
-/// This is done in asm to:
-/// 1. Ensure that the compiler does not optimize out the zeroing
-/// 2. Ensure that the zeroing is done as quickly as possible as without this, the zero takes a long time on
-///    non-optimized builds
 ///
 /// # Safety
 /// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
@@ -371,18 +369,7 @@ pub(crate) unsafe fn zero_page(page: u64) {
         cache_range_operation(page, PAGE_SIZE, CpuFlushType::EFiCpuFlushTypeInvalidate);
     }
 
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    {
-        let mut addr = page;
-        for _ in 0..256 {
-            unsafe {
-                asm!(
-                    "stp {zero}, {zero}, [{addr}], #16",    // Store 0 to the next 16 bytes of the page
-                    addr = inout(reg) addr,
-                    zero = in(reg) 0_u64,
-                    options(nostack, preserves_flags)
-                )
-            };
-        }
-    }
+    // This cast must occur as a mutable pointer to a u8, as otherwise the compiler can optimize out the write,
+    // which must not happen as that would violate break before make and have garbage in the page table.
+    unsafe { ptr::write_bytes(page as *mut u8, 0, PAGE_SIZE as usize) };
 }
