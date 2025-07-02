@@ -858,7 +858,6 @@ impl<Arch: PageTableHal> Iterator for EntryIterator<Arch> {
         if self.start_index <= self.end_index {
             let index = self.start_index;
             let va = self.start_va;
-            self.start_index += 1;
 
             // only calculate the next VA if we are not at the end of the range otherwise we can needlessly overflow
             // for a VA we would never try to use
@@ -868,6 +867,8 @@ impl<Arch: PageTableHal> Iterator for EntryIterator<Arch> {
                     Err(_) => return None, // If we can't get the next VA, we stop iterating.
                 };
             }
+            self.start_index += 1;
+
             match Arch::PTE::new(self.base, index, self.level, self.paging_type, va, self.state) {
                 Ok(entry) => Some(entry),
                 Err(_) => None, // If we can't create the entry, we just skip it.
