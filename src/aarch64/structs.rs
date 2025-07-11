@@ -4,7 +4,7 @@ use crate::{
 };
 use bitfield_struct::bitfield;
 
-// This is the maximum virtual address that can be used in the system because of our artifical restriction to use
+// This is the maximum virtual address that can be used in the system because of our artificial restriction to use
 // the zero VA and self map index in the top level page table. This is a temporary restriction
 pub(crate) const MAX_VA_4_LEVEL: u64 = 0x0000_FEFF_FFFF_FFFF;
 

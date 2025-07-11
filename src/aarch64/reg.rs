@@ -363,7 +363,7 @@ pub(crate) fn is_this_page_table_active(page_table_base: PhysicalAddress) -> boo
 /// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
 /// is mapped.
 pub(crate) unsafe fn zero_page(page: u64) {
-    // If the MMU is diabled, invalidate the cache so that any stale data does
+    // If the MMU is disabled, invalidate the cache so that any stale data does
     // not get later evicted to memory.
     if !is_mmu_enabled() {
         cache_range_operation(page, PAGE_SIZE, CpuFlushType::EFiCpuFlushTypeInvalidate);
