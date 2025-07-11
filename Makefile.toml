@@ -84,6 +84,12 @@ args = ["clippy", "--all-targets", "--all-features", "--", "-D", "warnings"]
 env = { RUSTDOCFLAGS = "-D warnings"}
 description = "Builds all rust documentation in the workspace. Example `cargo make doc`"
 command = "cargo"
+args = ["doc", "@@split(INDIVIDUAL_PACKAGE_TARGETS, )", "--features", "doc"]
+
+[tasks.doc-open]
+env = { RUSTDOCFLAGS = "-D warnings"}
+description = "Builds all rust documentation in the workspace and opens the documentation Example `cargo make doc-open`"
+command = "cargo"
 args = ["doc", "@@split(INDIVIDUAL_PACKAGE_TARGETS, )", "--features", "doc", "--open"]
 
 [tasks.fmt]

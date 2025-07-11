@@ -2,7 +2,8 @@
 
 ## Introduction
 
-This repo include the X64/AArch64 paging logic.
+This repo include the X64/AArch64 paging logic. You can generate API documentation by running `cargo make doc`. To
+have the documentation open in your browser, you can run `cargo make doc-open`.
 
 ## Public API
 
