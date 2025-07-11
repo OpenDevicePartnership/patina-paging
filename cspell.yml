@@ -9,32 +9,25 @@
 version: "0.2"
 language: en
 dictionaries:
-  - "companies"
-  - "cpp"
-  - "cpp-legacy"
-  - "java"
   - "makefile"
-  - "python"
   - "rust"
-  - "softwareTerms"
 ignorePaths:
   - "**/target/**"
   - "**/book/**"
   - "**/*.asm"
   - "Makefile.toml"
-ignoreRegExpList: ["/0x[0-9a-fA-F]+/"]
+  - "deny.toml"
+ignoreRegExpList: ["/0x[0-9a-fA-F]+/", ".*asm!\\(.*?\\);"]
 minWordLength: 5
 caseSensitive: false
 allowCompoundWords: true
 words:
+  - archs
   - civac
-  - kbyte
-  - keccak
+  - efiapi
   - mfence
-  - mtrrs
-  - nshst
-  - qwords
   - sctlr
-  - stosq
+  - sysreg
+  - uncacheable
+  - unmapping
   - vmalle
-  - xffff
