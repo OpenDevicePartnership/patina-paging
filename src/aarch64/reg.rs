@@ -119,6 +119,9 @@ pub(crate) fn set_ttbr0(ttbr0: u64) {
         ExceptionLevel::EL1 => write_sysreg!("ttbr0_el1", ttbr0),
     }
     instruction_barrier();
+
+    // Invalidate the TLB after setting TTBR0
+    invalidate_tlb();
 }
 
 pub(crate) fn set_mair(mair: u64) {
@@ -136,6 +139,20 @@ pub(crate) fn is_mmu_enabled() -> bool {
     };
 
     sctlr & SCTLR_M_ENABLE == SCTLR_M_ENABLE
+}
+
+pub(crate) fn invalidate_tlb() {
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        match get_current_el() {
+            ExceptionLevel::EL2 => {
+                asm!("tlbi alle2", "dsb nsh", "isb", options(nostack));
+            }
+            ExceptionLevel::EL1 => {
+                asm!("tlbi alle1", "dsb nsh", "isb", options(nostack));
+            }
+        }
+    }
 }
 
 pub(crate) fn enable_mmu() {
