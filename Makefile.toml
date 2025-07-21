@@ -6,7 +6,7 @@ RUSTC_BOOTSTRAP = 1
 BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings=html"
 UEFI_CRATES = "-p patina_paging"
 BUILD_CRATES = "-p patina_paging"
-COV_FLAGS = { value = "--out html --exclude-files **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
+COV_FLAGS = { value = "--out html --out xml --exclude-files **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
 
 [env.development]
 RUSTC_PROFILE = "dev"
