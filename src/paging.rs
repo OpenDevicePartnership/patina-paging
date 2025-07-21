@@ -31,6 +31,7 @@ impl PageTableState {
     }
 }
 
+#[derive(Debug)]
 pub struct PageTableInternal<P: PageAllocator, Arch: PageTableHal> {
     base: PhysicalAddress,
     page_allocator: P,

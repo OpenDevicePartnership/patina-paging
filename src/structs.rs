@@ -35,7 +35,7 @@ pub(crate) const SELF_MAP_INDEX: u64 = 0x1FF;
 // address space and will not conflict with identity mapping.
 pub(crate) const ZERO_VA_INDEX: u64 = 0x1FE;
 
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug, Eq, Hash)]
 pub enum PageLevel {
     Level5,
     Level4,
@@ -149,6 +149,7 @@ impl VirtualAddress {
     /// In the case of underflow, it will return 0
     pub fn length_through(&self, end: VirtualAddress) -> PtResult<u64> {
         match end.0.checked_sub(self.0) {
+            Some(0) => Ok(0),
             Some(result) => Ok(result + 1),
             None => Err(PtError::SubtractionUnderflow),
         }
