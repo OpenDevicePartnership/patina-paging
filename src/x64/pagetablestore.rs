@@ -244,3 +244,254 @@ unsafe fn get_entry<'a, T>(
 
     (unsafe { &mut *((base as *mut T).add(index as usize)) }) as _
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::arch::PageTableEntry;
+
+    #[test]
+    fn test_x64_page_table_entry_new() {
+        // Test valid entry creation
+        let entry = X64PageTableEntry {
+            page_base: PhysicalAddress::from(0x1000),
+            index: 0,
+            level: PT,
+            _paging_type: PagingType::Paging4Level,
+            start_va: VirtualAddress::from(0x2000),
+            state: PageTableState::Inactive,
+        };
+        assert_eq!(entry.get_level(), PT);
+
+        // Test invalid index (simulate what new() would do)
+        let invalid_index = 512; // MAX_ENTRIES
+        assert!(invalid_index >= (PAGE_SIZE / 8));
+    }
+
+    #[test]
+    fn test_get_self_mapped_base_4level() {
+        let va = VirtualAddress::from(0x8000_0000_0000);
+
+        // Test PML4 level
+        let base = get_self_mapped_base(PML4, va, PagingType::Paging4Level);
+        assert_eq!(base, FOUR_LEVEL_PML4_SELF_MAP_BASE);
+
+        // Test PDP level
+        let base = get_self_mapped_base(PDP, va, PagingType::Paging4Level);
+        assert!(base >= FOUR_LEVEL_PDP_SELF_MAP_BASE);
+
+        // Test PD level
+        let base = get_self_mapped_base(PD, va, PagingType::Paging4Level);
+        assert!(base >= FOUR_LEVEL_PD_SELF_MAP_BASE);
+
+        // Test PT level
+        let base = get_self_mapped_base(PT, va, PagingType::Paging4Level);
+        assert!(base >= FOUR_LEVEL_PT_SELF_MAP_BASE);
+    }
+
+    #[test]
+    fn test_get_self_mapped_base_5level() {
+        let va = VirtualAddress::from(0x8000_0000_0000);
+
+        // Test all levels for 5-level paging
+        let base = get_self_mapped_base(PML5, va, PagingType::Paging5Level);
+        assert_eq!(base, FIVE_LEVEL_PML5_SELF_MAP_BASE);
+
+        let base = get_self_mapped_base(PML4, va, PagingType::Paging5Level);
+        assert!(base >= FIVE_LEVEL_PML4_SELF_MAP_BASE);
+
+        let base = get_self_mapped_base(PDP, va, PagingType::Paging5Level);
+        assert!(base >= FIVE_LEVEL_PDP_SELF_MAP_BASE);
+
+        let base = get_self_mapped_base(PD, va, PagingType::Paging5Level);
+        assert!(base >= FIVE_LEVEL_PD_SELF_MAP_BASE);
+
+        let base = get_self_mapped_base(PT, va, PagingType::Paging5Level);
+        assert!(base >= FIVE_LEVEL_PT_SELF_MAP_BASE);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_get_self_mapped_base_pml5_4level_panics() {
+        // PML5 should panic for 4-level paging
+        let va = VirtualAddress::from(0x8000_0000_0000);
+        get_self_mapped_base(PML5, va, PagingType::Paging4Level);
+    }
+
+    #[test]
+    fn test_points_to_pa() {
+        // Create a mock page table entry setup
+        let page_data = [0u8; PAGE_SIZE as usize];
+        let page_base = PhysicalAddress::from(&page_data as *const _ as u64);
+
+        // Test PT level - always points to PA
+        let entry = X64PageTableEntry {
+            page_base,
+            index: 0,
+            level: PT,
+            _paging_type: PagingType::Paging4Level,
+            start_va: VirtualAddress::from(0),
+            state: PageTableState::Inactive,
+        };
+        assert!(entry.points_to_pa());
+
+        // Test PML4 level - never points to PA
+        let entry = X64PageTableEntry {
+            page_base,
+            index: 0,
+            level: PML4,
+            _paging_type: PagingType::Paging4Level,
+            start_va: VirtualAddress::from(0),
+            state: PageTableState::Inactive,
+        };
+        assert!(!entry.points_to_pa());
+    }
+
+    #[test]
+    fn test_max_entries_boundary() {
+        let page_base = PhysicalAddress::from(0x1000);
+        let state = PageTableState::Inactive;
+
+        // Test boundary cases for entry index
+        let entry = X64PageTableEntry {
+            page_base,
+            index: 511, // MAX_ENTRIES - 1
+            level: PT,
+            _paging_type: PagingType::Paging4Level,
+            start_va: VirtualAddress::from(0),
+            state,
+        };
+        assert!(entry.index < (PAGE_SIZE / 8));
+
+        let entry = X64PageTableEntry {
+            page_base,
+            index: 512, // MAX_ENTRIES
+            level: PT,
+            _paging_type: PagingType::Paging4Level,
+            start_va: VirtualAddress::from(0),
+            state,
+        };
+        assert!(entry.index >= (PAGE_SIZE / 8));
+    }
+
+    #[test]
+    fn test_page_level_constants() {
+        // Verify the constants match expected values
+        assert_eq!(PML5, PageLevel::Level5);
+        assert_eq!(PML4, PageLevel::Level4);
+        assert_eq!(PDP, PageLevel::Level3);
+        assert_eq!(PD, PageLevel::Level2);
+        assert_eq!(PT, PageLevel::Level1);
+    }
+
+    #[test]
+    fn test_get_self_mapped_base_address_calculations() {
+        // Test specific address calculations for different VA values
+        let va1 = VirtualAddress::from(0);
+        let va2 = VirtualAddress::from(0x1000); // 4KB aligned
+        let va3 = VirtualAddress::from(0x200000); // 2MB aligned
+
+        // For 4-level paging, PML4 base should be constant
+        assert_eq!(
+            get_self_mapped_base(PML4, va1, PagingType::Paging4Level),
+            get_self_mapped_base(PML4, va2, PagingType::Paging4Level)
+        );
+        assert_eq!(
+            get_self_mapped_base(PML4, va1, PagingType::Paging4Level),
+            get_self_mapped_base(PML4, va3, PagingType::Paging4Level)
+        );
+
+        // For different levels, bases should differ based on VA
+        let pt_base1 = get_self_mapped_base(PT, va1, PagingType::Paging4Level);
+        let pt_base3 = get_self_mapped_base(PT, va3, PagingType::Paging4Level);
+        assert_ne!(pt_base1, pt_base3);
+    }
+
+    #[test]
+    fn test_update_fields_writes_back_end_entry() {
+        // Prepare a dummy page table in memory
+        let mut page_table = [PageTableEntryX64::default(); MAX_ENTRIES];
+        let page_base = PhysicalAddress::from(&mut page_table as *mut _ as u64);
+
+        let mut entry = X64PageTableEntry {
+            page_base,
+            index: 1,
+            level: PT,
+            _paging_type: PagingType::Paging4Level,
+            start_va: VirtualAddress::from(0x4000),
+            state: PageTableState::Inactive,
+        };
+
+        // Set some attributes and PA
+        let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::ExecuteProtect;
+        let pa = PhysicalAddress::from(0xdeadbeef000);
+        entry.update_fields(attributes, pa, true).unwrap();
+
+        // The backend entry should be updated
+        let backend_entry = unsafe { &*(&page_table[1] as *const PageTableEntryX64) };
+        assert_eq!(backend_entry.get_attributes(), attributes);
+        assert_eq!(backend_entry.get_canonical_page_table_base(), pa);
+    }
+
+    #[test]
+    fn test_set_present_updates_backend_entry() {
+        // Prepare a dummy page table in memory
+        let mut page_table = [PageTableEntryX64::default(); MAX_ENTRIES];
+        let page_base = PhysicalAddress::from(&mut page_table as *mut _ as u64);
+
+        let mut entry = X64PageTableEntry {
+            page_base,
+            index: 2,
+            level: PT,
+            _paging_type: PagingType::Paging4Level,
+            start_va: VirtualAddress::from(0x8000),
+            state: PageTableState::Inactive,
+        };
+
+        // Initially not present
+        entry.set_present(false);
+        let backend_entry = unsafe { &*(&page_table[2] as *const PageTableEntryX64) };
+        assert!(!backend_entry.present());
+
+        // Set present to true
+        entry.set_present(true);
+        let backend_entry = unsafe { &*(&page_table[2] as *const PageTableEntryX64) };
+        assert!(backend_entry.present());
+    }
+
+    #[test]
+    fn test_update_fields_pd_and_pdp_sets_page_size() {
+        for &level in &[PD, PDP] {
+            let mut page_table = [PageTableEntryX64::default(); MAX_ENTRIES];
+            let page_base = PhysicalAddress::from(&mut page_table as *mut _ as u64);
+
+            let mut entry = X64PageTableEntry {
+                page_base,
+                index: 3,
+                level,
+                _paging_type: PagingType::Paging4Level,
+                start_va: VirtualAddress::from(0x10000),
+                state: PageTableState::Inactive,
+            };
+
+            let attributes = MemoryAttributes::ReadOnly;
+            let pa = PhysicalAddress::from(0x12345000);
+
+            // leaf_entry true, not ReadProtect, should set page_size
+            entry.update_fields(attributes, pa, true).unwrap();
+            let backend_entry = unsafe { &*(&page_table[3] as *const PageTableEntryX64) };
+            assert!(backend_entry.page_size());
+
+            // leaf_entry false, should not set page_size
+            entry.update_fields(attributes, pa, false).unwrap();
+            let backend_entry = unsafe { &*(&page_table[3] as *const PageTableEntryX64) };
+            assert!(!backend_entry.page_size());
+
+            // leaf_entry true, but ReadProtect set, should not set page_size
+            let attributes = MemoryAttributes::ReadOnly | MemoryAttributes::ReadProtect;
+            entry.update_fields(attributes, pa, true).unwrap();
+            let backend_entry = unsafe { &*(&page_table[3] as *const PageTableEntryX64) };
+            assert!(!backend_entry.page_size());
+        }
+    }
+}

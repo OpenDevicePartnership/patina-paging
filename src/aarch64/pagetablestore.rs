@@ -168,3 +168,133 @@ unsafe fn get_entry<'a, T>(
     };
     unsafe { &mut *((base as *mut T).add(index as usize)) }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MemoryAttributes, PagingType, arch::PageTableEntry, paging::PageTableState};
+
+    // Helper to create a backing page table
+    fn make_backing_table() -> Box<[AArch64Descriptor; MAX_ENTRIES]> {
+        Box::new([AArch64Descriptor::default(); MAX_ENTRIES])
+    }
+
+    // Helper to get a PhysicalAddress from a pointer
+    fn ptr_to_pa<T>(ptr: *const T) -> PhysicalAddress {
+        PhysicalAddress::from(ptr as u64)
+    }
+
+    #[test]
+    fn test_entry_update_and_backing_check() {
+        let table = make_backing_table();
+        let table_pa = ptr_to_pa(table.as_ptr());
+
+        let index = 10;
+        let level = PageLevel::Level2;
+        let va = VirtualAddress::from(0x4000_0000u64);
+        let mut entry = AArch64PageTableEntry::new(
+            table_pa,
+            index as u64,
+            level,
+            PagingType::Paging4Level,
+            va,
+            PageTableState::Inactive,
+        )
+        .unwrap();
+
+        // Update entry fields
+        let attrs = MemoryAttributes::Writeback | MemoryAttributes::ReadOnly;
+        let pa = PhysicalAddress::from(0x1234_0000u64);
+        entry.update_fields(attrs, pa, false).unwrap();
+
+        // Check that the backing entry was updated
+        let backing_entry = &table[index];
+        assert_eq!(backing_entry.get_canonical_page_table_base(), pa);
+        assert_eq!(backing_entry.get_attributes(), attrs);
+        assert!(backing_entry.valid());
+    }
+
+    #[test]
+    fn test_set_present_and_backing_check() {
+        let table = make_backing_table();
+        let table_pa = ptr_to_pa(table.as_ptr());
+
+        let index = 5;
+        let level = PageLevel::Level3;
+        let va = VirtualAddress::from(0x8000_0000u64);
+        let mut entry = AArch64PageTableEntry::new(
+            table_pa,
+            index as u64,
+            level,
+            PagingType::Paging4Level,
+            va,
+            PageTableState::Inactive,
+        )
+        .unwrap();
+
+        // Initially not present
+        entry.set_present(false);
+        assert!(!table[index].valid());
+
+        // Set present
+        entry.set_present(true);
+        assert!(table[index].valid());
+    }
+
+    #[test]
+    fn test_points_to_pa_logic() {
+        let mut table = make_backing_table();
+        let table_pa = ptr_to_pa(table.as_ptr());
+
+        let va = VirtualAddress::from(0x1000_0000u64);
+
+        // Level1 always points to PA
+        let entry1 = AArch64PageTableEntry::new(
+            table_pa,
+            0,
+            PageLevel::Level1,
+            PagingType::Paging4Level,
+            va,
+            PageTableState::Inactive,
+        )
+        .unwrap();
+        assert!(entry1.points_to_pa());
+
+        // Level2 and Level3 depend on table_desc
+        let entry2 = AArch64PageTableEntry::new(
+            table_pa,
+            1,
+            PageLevel::Level2,
+            PagingType::Paging4Level,
+            va,
+            PageTableState::Inactive,
+        )
+        .unwrap();
+        // Set table_desc = false
+        table[1].set_table_desc(false);
+        assert!(entry2.points_to_pa());
+        // Set table_desc = true
+        table[1].set_table_desc(true);
+        assert!(!entry2.points_to_pa());
+    }
+
+    #[test]
+    fn test_entry_ptr_address_matches_backing() {
+        let table = make_backing_table();
+        let table_pa = ptr_to_pa(table.as_ptr());
+
+        let index = 7;
+        let va = VirtualAddress::from(0x2000_0000u64);
+        let entry = AArch64PageTableEntry::new(
+            table_pa,
+            index as u64,
+            PageLevel::Level3,
+            PagingType::Paging4Level,
+            va,
+            PageTableState::Inactive,
+        )
+        .unwrap();
+
+        let expected_addr = &table[index] as *const _ as u64;
+        assert_eq!(entry.entry_ptr_address(), expected_addr);
+    }
+}

@@ -189,3 +189,90 @@ impl PageTableEntryX64 {
         unsafe { write_volatile(&mut self.0, other.0) };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::MemoryAttributes;
+    use crate::structs::{PageLevel, PhysicalAddress, VirtualAddress};
+
+    #[test]
+    fn test_update_fields_sets_present_and_base_address() {
+        let mut entry = PageTableEntryX64::new();
+        let pa = PhysicalAddress::from(0x1234_5678_9000u64);
+        let attrs = MemoryAttributes::ExecuteProtect | MemoryAttributes::ReadOnly;
+
+        entry.update_fields(attrs, pa).unwrap();
+
+        assert!(entry.present());
+        assert_eq!(
+            entry.page_table_base_address() << PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT,
+            0x1234_5678_9000u64
+        );
+        assert_eq!(entry.get_attributes(), attrs);
+    }
+
+    #[test]
+    fn test_set_and_get_attributes() {
+        let mut entry = PageTableEntryX64::new();
+
+        // Test ReadProtect
+        entry.set_attributes(MemoryAttributes::ReadProtect);
+        assert!(!entry.present());
+        assert!(entry.get_attributes().contains(MemoryAttributes::ReadProtect));
+
+        // Test ReadOnly
+        entry.set_attributes(MemoryAttributes::ReadOnly);
+        assert!(!entry.read_write());
+        assert!(entry.get_attributes().contains(MemoryAttributes::ReadOnly));
+
+        // Test ExecuteProtect
+        entry.set_attributes(MemoryAttributes::ExecuteProtect);
+        assert!(entry.nx());
+        assert!(entry.get_attributes().contains(MemoryAttributes::ExecuteProtect));
+
+        // Test combination
+        let mut attrs = MemoryAttributes::empty();
+        attrs |= MemoryAttributes::ReadOnly | MemoryAttributes::ExecuteProtect;
+        entry.set_attributes(attrs);
+        assert!(!entry.read_write());
+        assert!(entry.nx());
+    }
+
+    #[test]
+    fn test_get_canonical_page_table_base() {
+        let mut entry = PageTableEntryX64::new();
+        let pa: u64 = PhysicalAddress::from(0xABC0_0000_0000u64).into();
+        entry.set_page_table_base_address(pa >> PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT);
+
+        let result: u64 = entry.get_canonical_page_table_base().into();
+        assert_eq!(result, 0xABC0_0000_0000u64);
+    }
+
+    #[test]
+    fn test_swap_overwrites_entry() {
+        let mut entry1 = PageTableEntryX64::new();
+        let mut entry2 = PageTableEntryX64::new();
+
+        entry1.set_present(true);
+        entry1.set_read_write(true);
+        entry2.set_present(false);
+        entry2.set_read_write(false);
+
+        entry1.swap(&entry2);
+
+        assert_eq!(entry1.present(), entry2.present());
+        assert_eq!(entry1.read_write(), entry2.read_write());
+    }
+
+    #[test]
+    fn test_dump_entry_runs() {
+        let mut entry = PageTableEntryX64::new();
+        entry.set_present(true);
+        entry.set_read_write(true);
+        let va = VirtualAddress::from(0x1000u64);
+        let level = PageLevel::Level1;
+        // Should not panic or error
+        let _ = entry.dump_entry(va, level);
+    }
+}
