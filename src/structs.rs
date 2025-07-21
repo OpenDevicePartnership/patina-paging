@@ -238,3 +238,199 @@ impl From<VirtualAddress> for PhysicalAddress {
         Self(va.0)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_page_level_next_level() {
+        assert_eq!(PageLevel::Level5.next_level(), Some(PageLevel::Level4));
+        assert_eq!(PageLevel::Level4.next_level(), Some(PageLevel::Level3));
+        assert_eq!(PageLevel::Level3.next_level(), Some(PageLevel::Level2));
+        assert_eq!(PageLevel::Level2.next_level(), Some(PageLevel::Level1));
+        assert_eq!(PageLevel::Level1.next_level(), None);
+    }
+
+    #[test]
+    fn test_page_level_is_lowest_level() {
+        assert!(!PageLevel::Level5.is_lowest_level());
+        assert!(!PageLevel::Level4.is_lowest_level());
+        assert!(!PageLevel::Level3.is_lowest_level());
+        assert!(!PageLevel::Level2.is_lowest_level());
+        assert!(PageLevel::Level1.is_lowest_level());
+    }
+
+    #[test]
+    fn test_page_level_start_bit_and_entry_va_size() {
+        assert_eq!(PageLevel::Level5.start_bit(), 48);
+        assert_eq!(PageLevel::Level4.start_bit(), 39);
+        assert_eq!(PageLevel::Level3.start_bit(), 30);
+        assert_eq!(PageLevel::Level2.start_bit(), 21);
+        assert_eq!(PageLevel::Level1.start_bit(), 12);
+
+        assert_eq!(PageLevel::Level5.entry_va_size(), 1 << 48);
+        assert_eq!(PageLevel::Level4.entry_va_size(), 1 << 39);
+        assert_eq!(PageLevel::Level3.entry_va_size(), 1 << 30);
+        assert_eq!(PageLevel::Level2.entry_va_size(), 1 << 21);
+        assert_eq!(PageLevel::Level1.entry_va_size(), 1 << 12);
+    }
+
+    #[test]
+    fn test_page_level_depth_and_height() {
+        assert_eq!(PageLevel::Level5.depth(), 0);
+        assert_eq!(PageLevel::Level4.depth(), 1);
+        assert_eq!(PageLevel::Level3.depth(), 2);
+        assert_eq!(PageLevel::Level2.depth(), 3);
+        assert_eq!(PageLevel::Level1.depth(), 4);
+
+        assert_eq!(PageLevel::Level5.height(), 4);
+        assert_eq!(PageLevel::Level4.height(), 3);
+        assert_eq!(PageLevel::Level3.height(), 2);
+        assert_eq!(PageLevel::Level2.height(), 1);
+        assert_eq!(PageLevel::Level1.height(), 0);
+    }
+
+    #[test]
+    fn test_virtual_address_get_next_va() {
+        let va = VirtualAddress::new(0x1000);
+        let next = va.get_next_va(PageLevel::Level1).unwrap();
+        assert_eq!(next, VirtualAddress::new(0x2000));
+
+        // Test overflow
+        let va = VirtualAddress::new(u64::MAX);
+        assert!(va.get_next_va(PageLevel::Level1).is_err());
+    }
+
+    #[test]
+    fn test_virtual_address_get_index() {
+        let va = VirtualAddress::new(0x1234_5678_9ABC_DEF0);
+        assert_eq!(va.get_index(PageLevel::Level1), 0x1CD);
+        assert_eq!(va.get_index(PageLevel::Level2), 0xD5);
+        assert_eq!(va.get_index(PageLevel::Level3), 0x1E2);
+        assert_eq!(va.get_index(PageLevel::Level4), 0xAC);
+        assert_eq!(va.get_index(PageLevel::Level5), 0x34);
+    }
+
+    #[test]
+    fn test_virtual_address_is_page_aligned() {
+        assert!(VirtualAddress::new(0x1000).is_page_aligned());
+        assert!(!VirtualAddress::new(0x1001).is_page_aligned());
+    }
+
+    #[test]
+    fn test_virtual_address_min() {
+        let a = VirtualAddress::new(0x1000);
+        let b = VirtualAddress::new(0x2000);
+        assert_eq!(VirtualAddress::min(a, b), a);
+        assert_eq!(VirtualAddress::min(b, a), a);
+    }
+
+    #[test]
+    fn test_virtual_address_length_through() {
+        let a = VirtualAddress::new(0x1000);
+        let b = VirtualAddress::new(0x1FFF);
+        assert_eq!(a.length_through(b).unwrap(), 0x1000);
+
+        // Test a longer range
+        let a = VirtualAddress::new(0x1000);
+        let b = VirtualAddress::new(0x1_0000_0000_0000);
+        assert_eq!(a.length_through(b).unwrap(), 0x1_0000_0000_0000 - 0x1000 + 1);
+
+        // Test a range where start == end
+        let a = VirtualAddress::new(0xABCDEF);
+        let b = VirtualAddress::new(0xABCDEF);
+        assert_eq!(a.length_through(b).unwrap(), 0);
+
+        // Test a range with start > end (should error)
+        let a = VirtualAddress::new(0x2000);
+        let b = VirtualAddress::new(0x1FFF);
+        assert!(a.length_through(b).is_err());
+    }
+
+    #[test]
+    fn test_virtual_address_add_sub() {
+        let a = VirtualAddress::new(0x1000);
+        assert_eq!(a + 0x1000, Ok(VirtualAddress::new(0x2000)));
+        assert_eq!(a - 0x1000, Ok(VirtualAddress::new(0x0)));
+        assert!(a - 0x2000 == Err(PtError::SubtractionUnderflow));
+        let max = VirtualAddress::new(u64::MAX);
+        assert!(max + 1 == Err(PtError::AdditionOverflow));
+    }
+
+    #[test]
+    fn test_virtual_physical_address_conversion() {
+        let va = VirtualAddress::new(0x1234_5678);
+        let pa: PhysicalAddress = va.into();
+        assert_eq!(pa.0, 0x1234_5678);
+
+        let pa = PhysicalAddress::new(0x8765_4321);
+        let va: VirtualAddress = pa.into();
+        assert_eq!(va.0, 0x8765_4321);
+
+        // Test conversion symmetry
+        let va2: VirtualAddress = pa.into();
+        assert_eq!(va, va2);
+        let pa2: PhysicalAddress = va.into();
+        assert_eq!(pa, pa2);
+    }
+
+    #[test]
+    fn test_physical_address_is_page_aligned() {
+        assert!(PhysicalAddress::new(0x1000).is_page_aligned());
+        assert!(!PhysicalAddress::new(0x1001).is_page_aligned());
+    }
+
+    #[test]
+    fn test_virtual_address_from_and_into_u64() {
+        let val = 0xDEADBEEF;
+        let va = VirtualAddress::from(val);
+        assert_eq!(va.0, val);
+        let back: u64 = va.into();
+        assert_eq!(back, val);
+    }
+
+    #[test]
+    fn test_physical_address_from_and_into_u64() {
+        let val = 0xCAFEBABE;
+        let pa = PhysicalAddress::from(val);
+        assert_eq!(pa.0, val);
+        let back: u64 = pa.into();
+        assert_eq!(back, val);
+    }
+
+    #[test]
+    fn test_virtual_address_round_up_alignment() {
+        let va = VirtualAddress::new(0x1234_5678_9ABC_DEF0);
+        let expected = [
+            0x1234_5678_9ABC_DFFF, // Level1: 4KB
+            0x1234_5678_9ABF_FFFF, // Level2: 2MB
+            0x1234_5678_BFFF_FFFF, // Level3: 1GB
+            0x1234_567F_FFFF_FFFF, // Level4: 512GB
+            0x1234_FFFF_FFFF_FFFF, // Level5: 256TB
+        ];
+        for (i, level) in
+            [PageLevel::Level1, PageLevel::Level2, PageLevel::Level3, PageLevel::Level4, PageLevel::Level5]
+                .iter()
+                .enumerate()
+        {
+            let rounded = va.round_up(*level);
+            assert_eq!(rounded.0 & (level.entry_va_size() - 1), level.entry_va_size() - 1);
+            assert_eq!(rounded.0, expected[i]);
+        }
+    }
+
+    #[test]
+    fn test_virtual_address_is_level_aligned_various() {
+        let va = VirtualAddress::new(0x4000);
+        assert!(va.is_level_aligned(PageLevel::Level1));
+        assert!(!va.is_level_aligned(PageLevel::Level2));
+        let va2 = VirtualAddress::new(0x200000);
+        assert!(va2.is_level_aligned(PageLevel::Level2));
+    }
+
+    #[test]
+    fn test_page_level_root_level() {
+        assert_eq!(PageLevel::root_level(PagingType::Paging5Level), PageLevel::Level5);
+        assert_eq!(PageLevel::root_level(PagingType::Paging4Level), PageLevel::Level4);
+    }
+}

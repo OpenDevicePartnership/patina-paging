@@ -243,3 +243,34 @@ impl PageTableHal for PageTableArchAArch64 {
         matches!(level, PageLevel::Level3 | PageLevel::Level2 | PageLevel::Level1)
     }
 }
+#[cfg(test)]
+mod hal_tests {
+    use super::*;
+    use crate::structs::PageLevel;
+
+    #[test]
+    fn test_paging_type_supported() {
+        assert!(PageTableArchAArch64::paging_type_supported(PagingType::Paging4Level).is_ok());
+        assert!(PageTableArchAArch64::paging_type_supported(PagingType::Paging5Level).is_err());
+    }
+
+    #[test]
+    fn test_get_zero_va() {
+        assert_eq!(PageTableArchAArch64::get_zero_va(PagingType::Paging4Level).unwrap(), ZERO_VA_4_LEVEL.into());
+        assert!(PageTableArchAArch64::get_zero_va(PagingType::Paging5Level).is_err());
+    }
+
+    #[test]
+    fn test_get_max_va() {
+        assert_eq!(PageTableArchAArch64::get_max_va(PagingType::Paging4Level).unwrap(), MAX_VA_4_LEVEL.into());
+        assert!(PageTableArchAArch64::get_max_va(PagingType::Paging5Level).is_err());
+    }
+
+    #[test]
+    fn test_level_supports_pa_entry() {
+        assert!(!PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level4));
+        assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level3));
+        assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level2));
+        assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level1));
+    }
+}

@@ -165,3 +165,23 @@ fn read_cr3() -> u64 {
 
     _value
 }
+#[cfg(test)]
+mod zero_page_tests {
+    use super::*;
+    use crate::structs::VirtualAddress;
+
+    #[test]
+    fn test_zero_page_zeros_entire_page() {
+        // Allocate a page-sized Vec<u8> and fill it with non-zero values
+        let mut page = vec![0xAAu8; PAGE_SIZE as usize];
+        let va = VirtualAddress::new(page.as_mut_ptr() as u64);
+
+        // SAFETY: We have exclusive access to the page buffer
+        unsafe {
+            PageTableArchX64::zero_page(va);
+        }
+
+        // Assert all bytes are zero
+        assert!(page.iter().all(|&b| b == 0), "Not all bytes were zeroed");
+    }
+}

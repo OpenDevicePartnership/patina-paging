@@ -234,3 +234,121 @@ impl AArch64Descriptor {
         self.0
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_pa(addr: u64) -> PhysicalAddress {
+        PhysicalAddress::from(addr)
+    }
+
+    #[test]
+    fn test_descriptor_valid_table() {
+        let mut desc = AArch64Descriptor::new();
+        assert!(!desc.is_valid_table());
+
+        desc.set_valid(true);
+        desc.set_table_desc(true);
+        assert!(desc.is_valid_table());
+    }
+
+    #[test]
+    fn test_get_canonical_page_table_base() {
+        let mut desc = AArch64Descriptor::new();
+        let pa = 0x1234_5600_0000u64;
+        desc.set_page_frame_number(pa >> 12);
+        let base = desc.get_canonical_page_table_base();
+        assert_eq!(u64::from(base), pa & !0xfffu64);
+    }
+
+    #[test]
+    fn test_update_fields_page_aligned() {
+        let mut desc = AArch64Descriptor::new();
+        let pa = make_pa(0x2000_0000);
+        let attrs = MemoryAttributes::Writeback;
+        assert!(desc.update_fields(attrs, pa).is_ok());
+        assert_eq!(desc.page_frame_number(), 0x2000_0000 >> 12);
+        assert!(desc.valid());
+    }
+
+    #[test]
+    fn test_update_fields_unaligned() {
+        let mut desc = AArch64Descriptor::new();
+        let pa = make_pa(0x2000_0001); // not aligned
+        let attrs = MemoryAttributes::Writeback;
+        let res = desc.update_fields(attrs, pa);
+        assert!(matches!(res, Err(PtError::UnalignedPageBase)));
+    }
+
+    #[test]
+    fn test_set_attributes_invalid() {
+        let mut desc = AArch64Descriptor::new();
+        let attrs = MemoryAttributes::from_bits_truncate(0xFFFF_FFFF); // invalid bits
+        let res = desc.set_attributes(attrs);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_set_attributes_execute_protect() {
+        let mut desc = AArch64Descriptor::new();
+        let attrs = MemoryAttributes::Writeback | MemoryAttributes::ExecuteProtect;
+        desc.set_attributes(attrs).unwrap();
+        assert!(desc.uxn());
+        assert!(!desc.pxn());
+    }
+
+    #[test]
+    fn test_set_attributes_readonly() {
+        let mut desc = AArch64Descriptor::new();
+        let attrs = MemoryAttributes::Writeback | MemoryAttributes::ReadOnly;
+        desc.set_attributes(attrs).unwrap();
+        assert_eq!(desc.access_permission(), 2);
+    }
+
+    #[test]
+    fn test_set_attributes_readprotect() {
+        let mut desc = AArch64Descriptor::new();
+        let attrs = MemoryAttributes::Writeback | MemoryAttributes::ReadProtect;
+        desc.set_attributes(attrs).unwrap();
+        assert!(!desc.valid());
+    }
+
+    #[test]
+    fn test_get_attributes_uncacheable() {
+        let mut desc = AArch64Descriptor::new();
+        desc.set_valid(true);
+        desc.set_attribute_index(0);
+        let attrs = desc.get_attributes();
+        assert!(attrs.contains(MemoryAttributes::Uncacheable));
+    }
+
+    #[test]
+    fn test_get_attributes_writeback_readonly_execute() {
+        let mut desc = AArch64Descriptor::new();
+        desc.set_valid(true);
+        desc.set_attribute_index(3);
+        desc.set_access_permission(2);
+        desc.set_uxn(true);
+        let attrs = desc.get_attributes();
+        assert!(attrs.contains(MemoryAttributes::Writeback));
+        assert!(attrs.contains(MemoryAttributes::ReadOnly));
+        assert!(attrs.contains(MemoryAttributes::ExecuteProtect));
+    }
+
+    #[test]
+    fn test_get_attributes_readprotect() {
+        let mut desc = AArch64Descriptor::new();
+        desc.set_valid(false);
+        let attrs = desc.get_attributes();
+        assert!(attrs.contains(MemoryAttributes::ReadProtect));
+    }
+
+    #[test]
+    fn test_dump_entry_runs() {
+        let desc = AArch64Descriptor::new();
+        let va = VirtualAddress::from(0x1000u64);
+        let level = PageLevel::Level3;
+        // Should not panic or error
+        let _ = desc.dump_entry(va, level);
+    }
+}
