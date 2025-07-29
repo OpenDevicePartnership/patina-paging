@@ -278,7 +278,7 @@ fn test_map_memory_address_0_to_ffff_ffff() {
 #[test]
 fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
-    let address_increment = PAGE_SIZE;
+    let address_increment = PAGE_SIZE << 3;
 
     all_configs!(|paging_type| {
         let mut address = 0;
@@ -305,7 +305,7 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
 
 #[test]
 fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
-    let address_increment = PAGE_SIZE;
+    let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE << 1;
 
     all_configs!(|paging_type| {
@@ -430,7 +430,7 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
 #[test]
 fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
-    let address_increment = PAGE_SIZE;
+    let address_increment = PAGE_SIZE << 3;
 
     all_configs!(|paging_type| {
         let mut address = 0;
@@ -457,7 +457,7 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
 #[test]
 fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE << 1;
-    let address_increment = PAGE_SIZE;
+    let address_increment = PAGE_SIZE << 3;
 
     all_configs!(|paging_type| {
         let mut address = 0;
@@ -579,7 +579,7 @@ fn test_query_memory_address_0_to_ffff_ffff() {
 #[test]
 fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
-    let step = PAGE_SIZE;
+    let step = PAGE_SIZE << 3;
 
     all_configs!(|paging_type| {
         let mut address = 0;
@@ -607,7 +607,7 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
 #[test]
 fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE << 1;
-    let step = PAGE_SIZE;
+    let step = PAGE_SIZE << 3;
 
     all_configs!(|paging_type| {
         let mut address = 0;
@@ -807,7 +807,7 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
 
 #[test]
 fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
-    let address_increment = PAGE_SIZE;
+    let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE;
 
     all_configs!(|paging_type| {
@@ -836,7 +836,7 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
 
 #[test]
 fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
-    let address_increment = PAGE_SIZE;
+    let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE << 1;
 
     all_configs!(|paging_type| {
