@@ -35,7 +35,7 @@ impl PageTableState {
 pub struct PageTableInternal<P: PageAllocator, Arch: PageTableHal> {
     base: PhysicalAddress,
     page_allocator: P,
-    paging_type: PagingType,
+    pub(crate) paging_type: PagingType,
     zero_va_pt_pa: Option<PhysicalAddress>,
     _arch: PhantomData<Arch>,
 }

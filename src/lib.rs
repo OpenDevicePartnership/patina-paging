@@ -238,3 +238,13 @@ pub enum PagingType {
     // 4-level paging.
     Paging4Level,
 }
+
+impl PagingType {
+    /// Gets the numbers of bits used for linear address space in this paging type.
+    pub(crate) const fn linear_address_bits(self) -> u64 {
+        match self {
+            PagingType::Paging5Level => 57,
+            PagingType::Paging4Level => 48,
+        }
+    }
+}

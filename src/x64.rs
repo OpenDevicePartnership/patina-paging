@@ -55,10 +55,12 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
         size: u64,
         attributes: crate::MemoryAttributes,
     ) -> crate::PtResult<()> {
+        check_canonical_range(address, size, self.internal.paging_type)?;
         self.internal.map_memory_region(address, size, attributes)
     }
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> crate::PtResult<()> {
+        check_canonical_range(address, size, self.internal.paging_type)?;
         self.internal.unmap_memory_region(address, size)
     }
 
@@ -68,6 +70,7 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
         size: u64,
         attributes: crate::MemoryAttributes,
     ) -> crate::PtResult<()> {
+        check_canonical_range(address, size, self.internal.paging_type)?;
         self.internal.remap_memory_region(address, size, attributes)
     }
 
@@ -76,6 +79,7 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
     }
 
     fn query_memory_region(&self, address: u64, size: u64) -> crate::PtResult<crate::MemoryAttributes> {
+        check_canonical_range(address, size, self.internal.paging_type)?;
         self.internal.query_memory_region(address, size)
     }
 
@@ -165,8 +169,30 @@ fn read_cr3() -> u64 {
 
     _value
 }
+
+/// Checks if the given address is canonical.
+fn check_canonical_range(address: u64, size: u64, paging_type: PagingType) -> PtResult<()> {
+    // For a canonical address, the bits 63 though the max bit supported by the
+    // paging type must be all 0s or all 1s. Get the mask for this range.
+    let max_bit = paging_type.linear_address_bits() - 1;
+    let mask = u64::MAX << max_bit;
+
+    if (address & mask) != 0 && (address & mask) != mask {
+        return Err(crate::PtError::InvalidParameter);
+    }
+
+    // Check that the end address is also canonical without spanning non-canonical addresses.
+    let size = size.checked_sub(1).ok_or(crate::PtError::InvalidMemoryRange)?;
+    let end_address = address.checked_add(size).ok_or(crate::PtError::InvalidMemoryRange)?;
+    if (end_address & mask) != (address & mask) {
+        return Err(crate::PtError::InvalidMemoryRange);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
-mod zero_page_tests {
+mod unittests {
     use super::*;
     use crate::structs::VirtualAddress;
 
@@ -183,5 +209,51 @@ mod zero_page_tests {
 
         // Assert all bytes are zero
         assert!(page.iter().all(|&b| b == 0), "Not all bytes were zeroed");
+    }
+
+    #[test]
+    fn test_check_canonical_range_4_level() {
+        let paging_type = PagingType::Paging4Level;
+
+        // Check the full lower address range.
+        assert!(check_canonical_range(0x0000_0000_0000_0000, 1 << 47, paging_type).is_ok());
+
+        // Check the full upper address range.
+        assert!(check_canonical_range(0xFFFF_8000_0000_0000, 1 << 47, paging_type).is_ok());
+
+        // Check going into the non-canonical range.
+        assert!(check_canonical_range(0x0000_7FFF_FFFF_F000, 2 * PAGE_SIZE, paging_type).is_err());
+
+        // Check fully non-canonical range.
+        assert!(check_canonical_range(0x8d48_0000_0000_0000, PAGE_SIZE, paging_type).is_err());
+
+        // Checking coming out of the non-canonical range.
+        assert!(check_canonical_range(0xFFFF_0000_0000_0000, 0x8F00_0000_0000, paging_type).is_err());
+
+        // Check spanning non-canonical addresses.
+        assert!(check_canonical_range(0x0000_0000_0000_0000, 0xFFFF_FFFF_FFFF_F000, paging_type).is_err());
+    }
+
+    #[test]
+    fn test_check_canonical_range_5_level() {
+        let paging_type = PagingType::Paging5Level;
+
+        // Check the full lower address range.
+        assert!(check_canonical_range(0x0000_0000_0000_0000, 1 << 56, paging_type).is_ok());
+
+        // Check the full upper address range.
+        assert!(check_canonical_range(0xFF00_0000_0000_0000, 1 << 56, paging_type).is_ok());
+
+        // Check going into the non-canonical range.
+        assert!(check_canonical_range(0x00FF_FFFF_FFFF_F000, 2 * PAGE_SIZE, paging_type).is_err());
+
+        // Check fully non-canonical range.
+        assert!(check_canonical_range(0x8d48_0000_0000_0000, PAGE_SIZE, paging_type).is_err());
+
+        // Checking coming out of the non-canonical range.
+        assert!(check_canonical_range(0xFE00_0000_0000_0000, 0x1_FF00_0000_0000, paging_type).is_err());
+
+        // Check spanning non-canonical addresses.
+        assert!(check_canonical_range(0x0000_0000_0000_0000, 0xFFFF_FFFF_FFFF_F000, paging_type).is_err());
     }
 }
