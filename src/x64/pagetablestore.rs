@@ -246,6 +246,7 @@ unsafe fn get_entry<'a, T>(
 }
 
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
     use super::*;
     use crate::arch::PageTableEntry;

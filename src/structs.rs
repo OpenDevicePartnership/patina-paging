@@ -238,7 +238,9 @@ impl From<VirtualAddress> for PhysicalAddress {
         Self(va.0)
     }
 }
+
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
     use super::*;
 

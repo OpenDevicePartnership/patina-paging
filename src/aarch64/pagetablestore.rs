@@ -168,7 +168,9 @@ unsafe fn get_entry<'a, T>(
     };
     unsafe { &mut *((base as *mut T).add(index as usize)) }
 }
+
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
     use super::*;
     use crate::{MemoryAttributes, PagingType, arch::PageTableEntry, paging::PageTableState};

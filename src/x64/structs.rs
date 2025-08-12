@@ -191,6 +191,7 @@ impl PageTableEntryX64 {
 }
 
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
     use super::*;
     use crate::MemoryAttributes;
