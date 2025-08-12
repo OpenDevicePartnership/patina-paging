@@ -61,6 +61,7 @@
 //!
 
 #![cfg_attr(not(test), no_std)]
+#![feature(coverage_attribute)]
 
 pub mod aarch64;
 pub(crate) mod arch;
@@ -68,6 +69,7 @@ pub mod page_allocator;
 pub(crate) mod paging;
 pub(crate) mod structs;
 #[cfg(test)]
+#[coverage(off)]
 mod tests;
 pub mod x64;
 use bitflags::bitflags;

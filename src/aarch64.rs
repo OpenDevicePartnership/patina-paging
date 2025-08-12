@@ -17,6 +17,7 @@ mod pagetablestore;
 mod reg;
 mod structs;
 #[cfg(test)]
+#[coverage(off)]
 mod tests;
 
 const MAX_VA_BITS: u64 = 48;

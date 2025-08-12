@@ -5,6 +5,7 @@ use core::ptr;
 mod pagetablestore;
 mod structs;
 #[cfg(test)]
+#[coverage(off)]
 mod tests;
 
 use pagetablestore::X64PageTableEntry;

@@ -6,7 +6,7 @@ RUSTC_BOOTSTRAP = 1
 BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings=html"
 UEFI_CRATES = "-p patina_paging"
 BUILD_CRATES = "-p patina_paging"
-COV_FLAGS = { value = "--out html --out xml --exclude-files **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
+COV_FLAGS = { value = "--lcov --profile test --ignore-filename-regex **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
 
 [env.development]
 RUSTC_PROFILE = "dev"
@@ -78,7 +78,7 @@ description = "Build and run all tests and calculate coverage."
 install_crate = false
 clear = true
 command = "cargo"
-args = ["tarpaulin", "@@split(COV_FLAGS, )", "--output-dir", "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target"]
+args = ["llvm-cov", "@@split(COV_FLAGS, )", "--output-path", "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target/lcov.info"]
 
 [tasks.clippy]
 description = "Run cargo clippy."

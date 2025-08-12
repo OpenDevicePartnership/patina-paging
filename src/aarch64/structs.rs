@@ -234,7 +234,9 @@ impl AArch64Descriptor {
         self.0
     }
 }
+
 #[cfg(test)]
+#[coverage(off)]
 mod tests {
     use super::*;
 
