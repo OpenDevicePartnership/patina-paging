@@ -1,0 +1,30 @@
+# @file ci-workflow.yml
+#
+# A workflow that runs miri tests on a weekly basis. If miri fails, a new issue is created
+# in the repository. If the issue already exists, it is updated with the latest failure.
+#
+##
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+name: Miri Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 6' # Every Saturday at midnight UTC
+  
+jobs:
+  miri_workflow:
+    name: Run Tests with Miri
+    
+    permissions:
+      issues: write
+      contents: read
+    
+    uses: ./.github/workflows/MiriWorkflow.yml
+    with:
+      test-filter: >
+        x64::structs
+        aarch64::hal_tests
+      create-issue: ${{ github.event_name == 'schedule' }}

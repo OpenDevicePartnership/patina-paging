@@ -1,0 +1,111 @@
+# @file MiriWorkflow.yml
+#
+# A reusable CI workflow that runs tests with Miri.
+#
+##
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: BSD-2-Clause-Patent
+##
+name: Miri Tests
+
+on:
+  workflow_call:
+    inputs:
+      test-filter:
+        description: 'Test filter to run with Miri'
+        required: false
+        default: ""
+        type: string
+      create-issue:
+        description: 'Whether to create/update issues when tests fail'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  miri_tests:
+    name: Run
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      contents: read
+
+    steps:
+      - name: ✅ Checkout Repository ✅
+        uses: actions/checkout@v4
+
+      - name: 🛠️ Download Rust Tools 🛠️
+        uses: ./.github/actions/rust-tool-cache
+      
+      - name: Install miri
+        run: rustup +nightly component add miri
+
+      - name: Run Miri Tests
+        env:
+          MIRI_FLAGS: "-Zmiri-disable-stacked-borrows"
+          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
+          NEXTEST_TEST_THREADS: "8"
+          NEXTEST_MESSAGE_FORMAT: "libtest-json"
+        run: |
+          set +e  # Disable exit on error
+          cargo +nightly miri nextest run --lib --no-fail-fast ${{ inputs.test-filter }} | tee results.log
+          set -e  # Re-enable exit on error
+          
+          grep '^{' results.log | jq -r 'select(.type == "test" and .event == "failed")' > failed_tests.json
+
+          if [ -s failed_tests.json ]; then
+            exit 1  # Fail the job if there are test failures
+      
+      - name: Report Miri Test Failures
+        if: failure() && inputs.create-issue
+        run: |
+          # Check if there's already an open issue with title "Miri Test Failures"
+          existing_issue=$(gh issue list --state open --search "Miri Test Failures in:title" --json number --jq '.[0].number')
+          
+          # Format the failed tests for the issue description
+          failed_count=$(grep '^{' results.log | jq -r 'select(.type == "test" and .event == "failed")' | jq -s 'length')
+          current_date=$(date '+%Y-%m-%d %H:%M:%S UTC')
+          
+          # Create a nicely formatted description
+          echo "# Miri Test Failures Report" > issue_description.md
+          echo "" >> issue_description.md
+          echo "**Date:** $current_date" >> issue_description.md
+          echo "**Failed Tests:** $failed_count" >> issue_description.md
+          echo "**Workflow:** [${{ github.workflow }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> issue_description.md
+          echo "**Branch:** ${{ github.ref_name }}" >> issue_description.md
+          echo "**Commit:** [${{ github.sha }}](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})" >> issue_description.md
+          echo "" >> issue_description.md
+          echo "## Failed Test Details" >> issue_description.md
+          echo "" >> issue_description.md
+          
+          # Create collapsible sections for each failed test
+          while IFS= read -r line; do
+            if [ -n "$line" ] && [ "$line" != "null" ]; then
+              test_name=$(echo "$line" | jq -r '.name' 2>/dev/null || echo "Unknown Test")
+              echo "<details>" >> issue_description.md
+              echo "<summary><strong>$test_name</strong></summary>" >> issue_description.md
+              echo "" >> issue_description.md
+              echo '```json' >> issue_description.md
+              (echo "$line" | jq '.' 2>/dev/null || echo "$line") >> issue_description.md
+              echo '```' >> issue_description.md
+              echo "" >> issue_description.md
+              echo "</details>" >> issue_description.md
+              echo "" >> issue_description.md
+            fi
+          done < <(grep '^{' results.log | jq -c 'select(.type == "test" and .event == "failed")')
+          
+          echo "---" >> issue_description.md
+          echo "*This issue was automatically created/updated by the Miri workflow when test failures were detected.*" >> issue_description.md
+
+          if [ "$existing_issue" != "null" ] && [ -n "$existing_issue" ]; then
+            echo "Found existing open issue #$existing_issue for Miri Test Failures - updating it"
+            gh issue edit $existing_issue --body-file issue_description.md
+            echo "Updated issue #$existing_issue with new failure results"
+          else
+            echo "No existing open issue found - creating new one"
+            gh issue create --title "Miri Test Failures" --body-file issue_description.md --label "bug"
+            echo "Created new issue for Miri test failures"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
