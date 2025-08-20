@@ -24,7 +24,4 @@ jobs:
     
     uses: ./.github/workflows/MiriWorkflow.yml
     with:
-      test-filter: >
-        x64::structs
-        aarch64::hal_tests
       create-issue: ${{ github.event_name == 'schedule' }}
