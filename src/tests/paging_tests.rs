@@ -276,6 +276,7 @@ fn test_map_memory_address_0_to_ffff_ffff() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
     let address_increment = PAGE_SIZE << 3;
@@ -304,6 +305,7 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE << 1;
@@ -428,6 +430,7 @@ fn test_unmap_memory_address_0_to_ffff_ffff() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
     let address_increment = PAGE_SIZE << 3;
@@ -455,6 +458,7 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE << 1;
     let address_increment = PAGE_SIZE << 3;
@@ -577,6 +581,7 @@ fn test_query_memory_address_0_to_ffff_ffff() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
     let step = PAGE_SIZE << 3;
@@ -605,6 +610,7 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE << 1;
     let step = PAGE_SIZE << 3;
@@ -806,6 +812,7 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
     let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE;
@@ -835,6 +842,7 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE << 1;
@@ -965,6 +973,7 @@ fn test_dump_page_tables() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
 fn test_large_page_splitting() {
     #[derive(Clone, Copy)]
     struct TestRange {
