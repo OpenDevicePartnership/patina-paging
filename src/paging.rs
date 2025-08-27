@@ -870,10 +870,7 @@ impl<Arch: PageTableHal> Iterator for EntryIterator<Arch> {
             }
             self.start_index += 1;
 
-            match Arch::PTE::new(self.base, index, self.level, self.paging_type, va, self.state) {
-                Ok(entry) => Some(entry),
-                Err(_) => None, // If we can't create the entry, we just skip it.
-            }
+            Arch::PTE::new(self.base, index, self.level, self.paging_type, va, self.state).ok()
         } else {
             None
         }
