@@ -28,11 +28,7 @@ pub struct AArch64PageTableEntry {
 
 impl AArch64PageTableEntry {
     fn get_entry(&self) -> &AArch64Descriptor {
-        let entry = unsafe {
-            get_entry::<AArch64Descriptor>(self.page_base, self.index, self.level, self.start_va, self.state)
-        };
-
-        entry
+        unsafe { get_entry::<AArch64Descriptor>(self.page_base, self.index, self.level, self.start_va, self.state) }
     }
 
     fn copy_entry(&self) -> AArch64Descriptor {
