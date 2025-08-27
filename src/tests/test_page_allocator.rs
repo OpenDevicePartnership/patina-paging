@@ -98,7 +98,7 @@ impl TestPageAllocator {
         page_index: &mut u64,
         attributes: MemoryAttributes,
     ) {
-        log::info!("Validating pages from {} to {} level: {:?} page_index: {}", start_va, end_va, level, page_index);
+        log::info!("Validating pages from {start_va} to {end_va} level: {level:?} page_index: {page_index}");
         let start_index = start_va.get_index(level);
         let end_index = end_va.get_index(level);
         let page = self.get_page(*page_index).unwrap();
@@ -172,12 +172,7 @@ impl TestPageAllocator {
         let leaf = pte.points_to_pa();
 
         log::info!(
-            "Level: {:?} PageBase: {:#x}, virtual_address: {:#x} next_pt {:x} leaf: {}",
-            level,
-            page_base,
-            virtual_address,
-            next_page_table_address,
-            leaf
+            "Level: {level:?} PageBase: {page_base:#x}, virtual_address: {virtual_address:#x} next_pt {next_page_table_address:x} leaf: {leaf}",
         );
 
         if leaf {

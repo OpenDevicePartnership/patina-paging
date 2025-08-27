@@ -112,7 +112,7 @@ impl AArch64Descriptor {
                 self.set_shareable(3);
             }
             _ => {
-                log::error!("Invalid memory attributes: {:?}", attributes);
+                log::error!("Invalid memory attributes: {attributes:?}");
                 return Err(PtError::InvalidParameter);
             }
         }
