@@ -943,7 +943,7 @@ fn test_from_existing_page_table() {
 
         // Validate the new page table
         let res = new_pt.query_memory_region(address, size);
-        println!("res: {:?}", res);
+        println!("res: {res:?}");
         assert!(res.is_ok());
     });
 }
@@ -1123,14 +1123,14 @@ fn test_install_page_table() {
 
             let res = pt.map_memory_region(test_address, test_size, test_attributes);
             if res.is_err() {
-                log::error!("Page fault occurred while mapping address: {:#x}", test_address);
+                log::error!("Page fault occurred while mapping address: {test_address:#x}");
                 continue;
             }
 
             // Confirm querying the new pages show they are mapped
             let res = pt.query_memory_region(test_address, test_size);
             if res.is_err() {
-                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                log::error!("Page fault occurred while querying address: {test_address:#x}");
                 continue;
             }
             assert_eq!(res.unwrap(), test_attributes);
@@ -1148,14 +1148,14 @@ fn test_install_page_table() {
 
             let res = pt.remap_memory_region(test_address, test_size, test_attributes);
             if res.is_err() {
-                log::error!("Page fault occurred while remapping address: {:#x}", test_address);
+                log::error!("Page fault occurred while remapping address: {test_address:#x}");
                 continue;
             }
 
             // Confirm querying the remapped pages show they are remapped
             let res = pt.query_memory_region(test_address, test_size);
             if res.is_err() {
-                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                log::error!("Page fault occurred while querying address: {test_address:#x}");
                 continue;
             }
             assert_eq!(res.unwrap(), test_attributes);
@@ -1168,14 +1168,14 @@ fn test_install_page_table() {
 
             let res = pt.unmap_memory_region(test_address, test_size);
             if res.is_err() {
-                log::error!("Page fault occurred while unmapping address: {:#x}", test_address);
+                log::error!("Page fault occurred while unmapping address: {test_address:#x}");
                 continue;
             }
 
             // Confirm querying the unmapped pages show they are unmapped
             let res = pt.query_memory_region(test_address, test_size);
             if res.is_err() {
-                log::error!("Page fault occurred while querying address: {:#x}", test_address);
+                log::error!("Page fault occurred while querying address: {test_address:#x}");
                 continue;
             }
         }

@@ -205,7 +205,7 @@ impl PageTableHal for PageTableArchAArch64 {
         } else if max_address < SIZE_256TB {
             TCR_PS_256TB
         } else {
-            log::error!("Unsupported max physical address size: {:#x}", max_address);
+            log::error!("Unsupported max physical address size: {max_address:#x}");
             return Err(PtError::InvalidParameter);
         };
 
@@ -214,7 +214,7 @@ impl PageTableHal for PageTableArchAArch64 {
             ExceptionLevel::EL1 => TCR_EL1_DEFAULTS | (tcr_ps << TCR_EL1_IPS_SHIFT),
         };
 
-        log::info!("Setting TCR: {:#x}", tcr);
+        log::info!("Setting TCR: {tcr:#x}");
 
         // Set TCR
         reg::set_tcr(tcr);

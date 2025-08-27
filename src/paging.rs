@@ -253,8 +253,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                         // We are trying to map a page but it is already mapped. The caller has an inconsistent state
                         // of the page table
                         log::error!(
-                            "Paging crate failed to map memory region at VA {:#x?} as the entry is already valid",
-                            va
+                            "Paging crate failed to map memory region at VA {va:#x?} as the entry is already valid",
                         );
                         return Err(PtError::InconsistentMappingAcrossRange);
                     }
@@ -499,10 +498,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let level = entry.get_level();
         let next_level = level.next_level().unwrap();
         if !entry.points_to_pa() {
-            log::error!(
-                "Failed to split large page at VA {:#x?} as the entry does not point to a physical address",
-                va
-            );
+            log::error!("Failed to split large page at VA {va:#x?} as the entry does not point to a physical address",);
             return Err(PtError::InvalidParameter);
         }
 
@@ -764,7 +760,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
     pub fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()> {
         if self.validate_address_range(address.into(), size).is_err() {
-            log::error!("Invalid address range for page table dump! Address: {:#x?}, Size: {:#x?}", address, size);
+            log::error!("Invalid address range for page table dump! Address: {address:#x?}, Size: {size:#x?}");
             return Err(PtError::InvalidMemoryRange);
         }
 
@@ -772,7 +768,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let start_va = address;
         let end_va = (address + (size - 1))?;
 
-        log::info!("Page Table Range: {} - {}", start_va, end_va);
+        log::info!("Page Table Range: {start_va} - {end_va}");
         Arch::PTE::dump_entry_header();
         self.dump_page_tables_internal(
             start_va,
@@ -1115,14 +1111,14 @@ mod tests {
             for i in 0..8 {
                 let va = 0x8000 + i * PAGE_SIZE;
                 let found = entries.values().any(|pte| pte.present && pte.pa == PhysicalAddress::new(va));
-                assert!(found, "Expected mapping for VA {:#x} not found", va);
+                assert!(found, "Expected mapping for VA {va:#x} not found");
             }
             // Check that an unmapped region is not present
             let unmapped_va = 0x7000;
             let found = entries.values().any(|pte| {
                 pte.present && pte.pa == PhysicalAddress::new(unmapped_va) && pte.level == PageLevel::Level1
             });
-            assert!(!found, "Unexpected mapping found for unmapped VA {:#x}", unmapped_va);
+            assert!(!found, "Unexpected mapping found for unmapped VA {unmapped_va:#x}");
         });
     }
 
