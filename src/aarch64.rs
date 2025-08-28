@@ -1,6 +1,3 @@
-#[allow(unused_imports)]
-use core::arch::asm;
-
 use pagetablestore::AArch64PageTableEntry;
 use reg::ExceptionLevel;
 use structs::{MAX_VA_4_LEVEL, ZERO_VA_4_LEVEL};

@@ -1,4 +1,5 @@
 use core::ptr;
+use core::sync::atomic::{Ordering, compiler_fence};
 
 use crate::structs::{PAGE_SIZE, PhysicalAddress};
 
@@ -10,6 +11,12 @@ const SCTLR_M_ENABLE: u64 = 0x1;
 pub(crate) enum ExceptionLevel {
     EL1,
     EL2,
+}
+
+/// This enum is used to specify the type of barrier to use when writing to a system register and in which order.
+enum BarrierType {
+    Instruction,
+    DataInstruction,
 }
 
 cfg_if::cfg_if! {
@@ -37,11 +44,27 @@ macro_rules! read_sysreg {
 
 macro_rules! write_sysreg {
   ($reg:expr, $value:expr) => {{
+    // no barrier required case
     let _value: u64 = $value;
     let _ = $reg; // Helps prevent identical code being generated in tests.
     #[cfg(all(not(test), target_arch = "aarch64"))]
     unsafe {
       asm!(concat!("msr ", $reg, ", {}"), in(reg) _value, options(nostack, preserves_flags));
+    }
+  }};
+  ($reg:expr, $value:expr, $barrier:expr) => {{
+    // barrier required case
+    let _value: u64 = $value;
+    let _ = $reg; // Helps prevent identical code being generated in tests.
+    let _barrier: BarrierType = $barrier;
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    match _barrier {
+      BarrierType::Instruction => unsafe {
+        asm!(concat!("msr ", $reg, ", {}"), "isb sy", in(reg) _value, options(nostack, preserves_flags));
+      },
+      BarrierType::DataInstruction => unsafe {
+        asm!(concat!("msr ", $reg, ", {}"), "dsb sy", "isb sy", in(reg) _value, options(nostack, preserves_flags));
+      }
     }
   }};
 }
@@ -50,22 +73,6 @@ pub(crate) enum CpuFlushType {
     _EfiCpuFlushTypeWriteBackInvalidate,
     _EfiCpuFlushTypeWriteBack,
     EFiCpuFlushTypeInvalidate,
-}
-
-#[inline(always)]
-fn instruction_barrier() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        asm!("isb", options(nostack, preserves_flags));
-    }
-}
-
-#[inline(always)]
-fn data_barrier() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    unsafe {
-        asm!("dsb sy", options(nostack, preserves_flags));
-    }
 }
 
 pub(crate) fn get_phys_addr_bits() -> u64 {
@@ -107,18 +114,16 @@ pub(crate) fn get_current_el() -> ExceptionLevel {
 
 pub(crate) fn set_tcr(tcr: u64) {
     match get_current_el() {
-        ExceptionLevel::EL2 => write_sysreg!("tcr_el2", tcr),
-        ExceptionLevel::EL1 => write_sysreg!("tcr_el1", tcr),
+        ExceptionLevel::EL2 => write_sysreg!("tcr_el2", tcr, BarrierType::Instruction),
+        ExceptionLevel::EL1 => write_sysreg!("tcr_el1", tcr, BarrierType::Instruction),
     }
-    instruction_barrier();
 }
 
 pub(crate) fn set_ttbr0(ttbr0: u64) {
     match get_current_el() {
-        ExceptionLevel::EL2 => write_sysreg!("ttbr0_el2", ttbr0),
-        ExceptionLevel::EL1 => write_sysreg!("ttbr0_el1", ttbr0),
+        ExceptionLevel::EL2 => write_sysreg!("ttbr0_el2", ttbr0, BarrierType::Instruction),
+        ExceptionLevel::EL1 => write_sysreg!("ttbr0_el1", ttbr0, BarrierType::Instruction),
     }
-    instruction_barrier();
 
     // Invalidate the TLB after setting TTBR0
     invalidate_tlb();
@@ -126,10 +131,9 @@ pub(crate) fn set_ttbr0(ttbr0: u64) {
 
 pub(crate) fn set_mair(mair: u64) {
     match get_current_el() {
-        ExceptionLevel::EL2 => write_sysreg!("mair_el2", mair),
-        ExceptionLevel::EL1 => write_sysreg!("mair_el1", mair),
+        ExceptionLevel::EL2 => write_sysreg!("mair_el2", mair, BarrierType::Instruction),
+        ExceptionLevel::EL1 => write_sysreg!("mair_el1", mair, BarrierType::Instruction),
     }
-    instruction_barrier();
 }
 
 pub(crate) fn is_mmu_enabled() -> bool {
@@ -146,10 +150,10 @@ pub(crate) fn invalidate_tlb() {
     unsafe {
         match get_current_el() {
             ExceptionLevel::EL2 => {
-                asm!("tlbi alle2", "dsb nsh", "isb", options(nostack));
+                asm!("tlbi alle2", "dsb nsh", "isb sy", options(nostack));
             }
             ExceptionLevel::EL1 => {
-                asm!("tlbi alle1", "dsb nsh", "isb", options(nostack));
+                asm!("tlbi alle1", "dsb nsh", "isb sy", options(nostack));
             }
         }
     }
@@ -165,8 +169,9 @@ pub(crate) fn enable_mmu() {
                     "orr {val}, {val}, #0x1",
                     "tlbi alle2",
                     "dsb nsh",
-                    "isb",
+                    "isb sy",
                     "msr sctlr_el2, {val}",
+                    "isb sy",
                     val = out(reg) _,
                     options(nostack)
                 );
@@ -177,15 +182,14 @@ pub(crate) fn enable_mmu() {
                     "orr {val}, {val}, #0x1",
                     "tlbi vmalle1",
                     "dsb nsh",
-                    "isb",
+                    "isb sy",
                     "msr sctlr_el1, {val}",
+                    "isb sy",
                     val = out(reg) _,
                     options(nostack)
                 );
             }
         }
-
-        asm!("isb", options(nostack));
     }
 }
 
@@ -194,21 +198,18 @@ pub(crate) fn set_stack_alignment_check(enable: bool) {
         ExceptionLevel::EL2 => {
             let sctlr = read_sysreg!("sctlr_el2", 0);
             match enable {
-                true => write_sysreg!("sctlr_el2", sctlr | 0x8),
-                false => write_sysreg!("sctlr_el2", sctlr & !0x8),
+                true => write_sysreg!("sctlr_el2", sctlr | 0x8, BarrierType::DataInstruction),
+                false => write_sysreg!("sctlr_el2", sctlr & !0x8, BarrierType::DataInstruction),
             }
         }
         ExceptionLevel::EL1 => {
             let sctlr = read_sysreg!("sctlr_el1", 0);
             match enable {
-                true => write_sysreg!("sctlr_el1", sctlr | 0x8),
-                false => write_sysreg!("sctlr_el1", sctlr & !0x8),
+                true => write_sysreg!("sctlr_el1", sctlr | 0x8, BarrierType::DataInstruction),
+                false => write_sysreg!("sctlr_el1", sctlr & !0x8, BarrierType::DataInstruction),
             }
         }
     }
-
-    data_barrier();
-    instruction_barrier();
 }
 
 pub(crate) fn set_alignment_check(enable: bool) {
@@ -216,53 +217,44 @@ pub(crate) fn set_alignment_check(enable: bool) {
         ExceptionLevel::EL2 => {
             let sctlr = read_sysreg!("sctlr_el2", 0);
             match enable {
-                true => write_sysreg!("sctlr_el2", sctlr | 0x2),
-                false => write_sysreg!("sctlr_el2", sctlr & !0x2),
+                true => write_sysreg!("sctlr_el2", sctlr | 0x2, BarrierType::DataInstruction),
+                false => write_sysreg!("sctlr_el2", sctlr & !0x2, BarrierType::DataInstruction),
             }
         }
         ExceptionLevel::EL1 => {
             let sctlr = read_sysreg!("sctlr_el1", 0);
             match enable {
-                true => write_sysreg!("sctlr_el1", sctlr | 0x2),
-                false => write_sysreg!("sctlr_el1", sctlr & !0x2),
+                true => write_sysreg!("sctlr_el1", sctlr | 0x2, BarrierType::DataInstruction),
+                false => write_sysreg!("sctlr_el1", sctlr & !0x2, BarrierType::DataInstruction),
             }
         }
     }
-
-    data_barrier();
-    instruction_barrier();
 }
 
 pub(crate) fn enable_instruction_cache() {
     match get_current_el() {
         ExceptionLevel::EL2 => {
             let sctlr = read_sysreg!("sctlr_el2", 0);
-            write_sysreg!("sctlr_el2", sctlr | 0x1000);
+            write_sysreg!("sctlr_el2", sctlr | 0x1000, BarrierType::DataInstruction);
         }
         ExceptionLevel::EL1 => {
             let sctlr = read_sysreg!("sctlr_el1", 0);
-            write_sysreg!("sctlr_el1", sctlr | 0x1000);
+            write_sysreg!("sctlr_el1", sctlr | 0x1000, BarrierType::DataInstruction);
         }
     }
-
-    data_barrier();
-    instruction_barrier();
 }
 
 pub(crate) fn enable_data_cache() {
     match get_current_el() {
         ExceptionLevel::EL2 => {
             let sctlr = read_sysreg!("sctlr_el2", 0);
-            write_sysreg!("sctlr_el2", sctlr | 0x4);
+            write_sysreg!("sctlr_el2", sctlr | 0x4, BarrierType::DataInstruction);
         }
         ExceptionLevel::EL1 => {
             let sctlr = read_sysreg!("sctlr_el1", 0);
-            write_sysreg!("sctlr_el1", sctlr | 0x4);
+            write_sysreg!("sctlr_el1", sctlr | 0x4, BarrierType::DataInstruction);
         }
     }
-
-    data_barrier();
-    instruction_barrier();
 }
 
 pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
@@ -270,13 +262,15 @@ pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva
     unsafe {
         let pfn = _mva >> 12;
         let mut sctlr: u64;
-        asm!("dsb     nshst", options(nostack));
 
         match get_current_el() {
             ExceptionLevel::EL2 => {
                 asm!(
+                    "dsb nshst",
                     "tlbi vae2, {}",
                     "mrs {}, sctlr_el2",
+                    "dsb nsh",
+                    "isb sy",
                     in(reg) pfn,
                     out(reg) sctlr,
                     options(nostack)
@@ -284,8 +278,11 @@ pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva
             }
             ExceptionLevel::EL1 => {
                 asm!(
+                    "dsb nshst",
                     "tlbi vaae1, {}",
                     "mrs {}, sctlr_el1",
+                    "dsb nsh",
+                    "isb sy",
                     in(reg) pfn,
                     out(reg) sctlr,
                     options(nostack)
@@ -297,12 +294,12 @@ pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva
         if sctlr & 1 == 0 {
             asm!(
                 "dc ivac, {}",
+                "dsb nsh",
+                "isb",
                 in(reg) _translation_table_entry,
                 options(nostack)
             );
         }
-        asm!("dsb nsh", options(nostack));
-        asm!("isb", options(nostack));
     }
 }
 
@@ -325,7 +322,13 @@ pub(crate) fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
         }
     }
 
-    data_barrier();
+    // we have a data barrier after all cache lines have had the operation performed on them as an optimization
+    // add the compiler fence to ensure that the compiler does not reorder memory accesses around this point
+    compiler_fence(Ordering::SeqCst);
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    unsafe {
+        asm!("dsb sy", options(nostack, preserves_flags));
+    }
 }
 
 fn data_cache_line_len() -> u64 {

@@ -26,6 +26,7 @@ words:
   - civac
   - efiapi
   - mfence
+  - nshst
   - sctlr
   - sysreg
   - uncacheable
