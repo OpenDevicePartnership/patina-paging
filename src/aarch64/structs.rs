@@ -4,6 +4,9 @@ use crate::{
 };
 use bitfield_struct::bitfield;
 
+#[cfg(all(not(test), target_arch = "aarch64"))]
+use crate::arch::PageTableEntry;
+
 // This is the maximum virtual address that can be used in the system because of our artificial restriction to use
 // the zero VA and self map index in the top level page table. This is a temporary restriction
 pub(crate) const MAX_VA_4_LEVEL: u64 = 0x0000_FEFF_FFFF_FFFF;
@@ -25,17 +28,17 @@ pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFF00_0000_0000;
 // map. The crate explicitly panics if such high level addresses are used, but this will be fixed in a future version
 // of this crate so as not to artificially limit the address range lower than what is physically addressable by the
 // CPU.
-pub(crate) const FOUR_LEVEL_4_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_F000;
-pub(crate) const FOUR_LEVEL_3_SELF_MAP_BASE: u64 = 0xFFFF_FFE0_0000;
-pub(crate) const FOUR_LEVEL_2_SELF_MAP_BASE: u64 = 0xFFFF_C000_0000;
-pub(crate) const FOUR_LEVEL_1_SELF_MAP_BASE: u64 = 0xFF80_0000_0000;
+pub(crate) const FOUR_LEVEL_LEVEL4_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_F000;
+pub(crate) const FOUR_LEVEL_LEVEL3_SELF_MAP_BASE: u64 = 0xFFFF_FFE0_0000;
+pub(crate) const FOUR_LEVEL_LEVEL2_SELF_MAP_BASE: u64 = 0xFFFF_C000_0000;
+pub(crate) const FOUR_LEVEL_LEVEL1_SELF_MAP_BASE: u64 = 0xFF80_0000_0000;
 
 // Below is a common definition for the AArch64 VMSAv8-64 stage-1 decriptors. This uses
 // the common understanding of bits accross all levels/types to simplify translation
 // as well as to allow for recursive translation.
 #[rustfmt::skip]
 #[bitfield(u64)]
-pub struct AArch64Descriptor {
+pub struct PageTableEntryAArch64 {
     pub valid: bool,              // 1 bit -  Valid descriptor
     pub table_desc: bool,         // 1 bit -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
     #[bits(3)]
@@ -63,7 +66,7 @@ pub struct AArch64Descriptor {
     pub ns_table: bool,            // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
 }
 
-impl AArch64Descriptor {
+impl PageTableEntryAArch64 {
     pub fn is_valid_table(&self) -> bool {
         self.valid() && self.table_desc()
     }
@@ -73,23 +76,22 @@ impl AArch64Descriptor {
         (self.page_frame_number() << PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT).into()
     }
 
-    /// update all the fields and table base address
-    pub fn update_fields(&mut self, attributes: MemoryAttributes, next_pa: PhysicalAddress) -> PtResult<()> {
-        if !next_pa.is_page_aligned() {
-            return Err(PtError::UnalignedPageBase);
+    cfg_if::cfg_if! {
+        if #[cfg(all(not(test), target_arch = "aarch64"))] {
+            fn swap_entry(&mut self, new_entry: u64, va: u64) {
+                // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
+                // In this case we are replacing a live translation entry, which is a safe operation as long as the
+                // caller ensures that the entry being replaced is valid.
+                unsafe {
+                    crate::aarch64::reg::replace_live_xlat_entry(self.entry_ptr_address(), new_entry, va);
+                }
+            }
+        } else {
+            // for testing, just set the entry directly
+            fn swap_entry(&mut self, new_entry: u64, _va: u64) {
+                self.0 = new_entry;
+            }
         }
-
-        let next_level_table_base: u64 = next_pa.into();
-        let pfn = next_level_table_base >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;
-        self.set_page_frame_number(pfn);
-
-        self.set_valid(true);
-
-        // update the memory attributes irrespective of new or old page table
-        self.set_attributes(attributes)?;
-
-        // TODO: need to flush the cache if operating on the active page table
-        Ok(())
     }
 
     fn set_attributes(&mut self, attributes: MemoryAttributes) -> PtResult<()> {
@@ -140,9 +142,57 @@ impl AArch64Descriptor {
         }
         Ok(())
     }
+}
+
+impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
+    /// update all the fields and table base address
+    fn update_fields(
+        &mut self,
+        attributes: MemoryAttributes,
+        pa: PhysicalAddress,
+        block: bool,
+        level: PageLevel,
+        va: VirtualAddress,
+    ) -> PtResult<()> {
+        if !pa.is_page_aligned() {
+            return Err(PtError::UnalignedPageBase);
+        }
+
+        // PageTableEntryAArch64 is Copy, so we can make a copy to modify and then swap it in
+        let mut copy = *self;
+
+        let next_level_table_base: u64 = pa.into();
+        let pfn = next_level_table_base >> PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT;
+        copy.set_page_frame_number(pfn);
+
+        copy.set_valid(true);
+
+        // update the memory attributes irrespective of new or old page table
+        copy.set_attributes(attributes)?;
+
+        // set_attributes sets that this is a block entry, so we need to
+        // set this if we are a table entry
+        copy.set_table_desc(level == PageLevel::Level1 || !block);
+        self.swap_entry(copy.0, va.into());
+
+        // TODO: need to flush the cache if operating on the active page table
+        Ok(())
+    }
+
+    fn present(&self) -> bool {
+        self.valid()
+    }
+
+    fn get_next_address(&self) -> PhysicalAddress {
+        self.get_canonical_page_table_base()
+    }
+
+    fn entry_ptr_address(&self) -> u64 {
+        self as *const _ as u64
+    }
 
     /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> MemoryAttributes {
+    fn get_attributes(&self) -> MemoryAttributes {
         let mut attributes = MemoryAttributes::empty();
 
         if !self.valid() {
@@ -169,7 +219,28 @@ impl AArch64Descriptor {
         attributes
     }
 
-    pub fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()> {
+    fn set_present(&mut self, value: bool, va: VirtualAddress) {
+        // PageTableEntryAArch64 is Copy, so we can make a copy to modify and then swap it in
+        let mut entry = *self;
+        entry.set_valid(value);
+        self.swap_entry(entry.0, va.into());
+    }
+
+    fn points_to_pa(&self, level: PageLevel) -> bool {
+        match level {
+            PageLevel::Level1 => true,
+            PageLevel::Level2 | PageLevel::Level3 => !self.table_desc(),
+            _ => false,
+        }
+    }
+
+    fn dump_entry_header() {
+        log::info!(
+            "----------------------------------------------------------------------------------------------------------------------------------"
+        );
+    }
+
+    fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()> {
         let valid = self.valid() as u64;
         let table_desc = self.table_desc() as u64;
         let attribute_index = self.attribute_index();
@@ -229,16 +300,13 @@ impl AArch64Descriptor {
 
         Ok(())
     }
-
-    pub fn get_u64(&self) -> u64 {
-        self.0
-    }
 }
 
 #[cfg(test)]
 #[coverage(off)]
 mod tests {
     use super::*;
+    use crate::arch::PageTableEntry;
 
     fn make_pa(addr: u64) -> PhysicalAddress {
         PhysicalAddress::from(addr)
@@ -246,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_descriptor_valid_table() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         assert!(!desc.is_valid_table());
 
         desc.set_valid(true);
@@ -256,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_get_canonical_page_table_base() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         let pa = 0x1234_5600_0000u64;
         desc.set_page_frame_number(pa >> 12);
         let base = desc.get_canonical_page_table_base();
@@ -265,26 +333,26 @@ mod tests {
 
     #[test]
     fn test_update_fields_page_aligned() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         let pa = make_pa(0x2000_0000);
         let attrs = MemoryAttributes::Writeback;
-        assert!(desc.update_fields(attrs, pa).is_ok());
+        assert!(desc.update_fields(attrs, pa, true, PageLevel::Level1, pa.into()).is_ok());
         assert_eq!(desc.page_frame_number(), 0x2000_0000 >> 12);
         assert!(desc.valid());
     }
 
     #[test]
     fn test_update_fields_unaligned() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         let pa = make_pa(0x2000_0001); // not aligned
         let attrs = MemoryAttributes::Writeback;
-        let res = desc.update_fields(attrs, pa);
+        let res = desc.update_fields(attrs, pa, true, PageLevel::Level1, pa.into());
         assert!(matches!(res, Err(PtError::UnalignedPageBase)));
     }
 
     #[test]
     fn test_set_attributes_invalid() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         let attrs = MemoryAttributes::from_bits_truncate(0xFFFF_FFFF); // invalid bits
         let res = desc.set_attributes(attrs);
         assert!(res.is_err());
@@ -292,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_set_attributes_execute_protect() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         let attrs = MemoryAttributes::Writeback | MemoryAttributes::ExecuteProtect;
         desc.set_attributes(attrs).unwrap();
         assert!(desc.uxn());
@@ -301,7 +369,7 @@ mod tests {
 
     #[test]
     fn test_set_attributes_readonly() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         let attrs = MemoryAttributes::Writeback | MemoryAttributes::ReadOnly;
         desc.set_attributes(attrs).unwrap();
         assert_eq!(desc.access_permission(), 2);
@@ -309,7 +377,7 @@ mod tests {
 
     #[test]
     fn test_set_attributes_readprotect() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         let attrs = MemoryAttributes::Writeback | MemoryAttributes::ReadProtect;
         desc.set_attributes(attrs).unwrap();
         assert!(!desc.valid());
@@ -317,7 +385,7 @@ mod tests {
 
     #[test]
     fn test_get_attributes_uncacheable() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         desc.set_valid(true);
         desc.set_attribute_index(0);
         let attrs = desc.get_attributes();
@@ -326,7 +394,7 @@ mod tests {
 
     #[test]
     fn test_get_attributes_writeback_readonly_execute() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         desc.set_valid(true);
         desc.set_attribute_index(3);
         desc.set_access_permission(2);
@@ -339,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_get_attributes_readprotect() {
-        let mut desc = AArch64Descriptor::new();
+        let mut desc = PageTableEntryAArch64::new();
         desc.set_valid(false);
         let attrs = desc.get_attributes();
         assert!(attrs.contains(MemoryAttributes::ReadProtect));
@@ -347,7 +415,7 @@ mod tests {
 
     #[test]
     fn test_dump_entry_runs() {
-        let desc = AArch64Descriptor::new();
+        let desc = PageTableEntryAArch64::new();
         let va = VirtualAddress::from(0x1000u64);
         let level = PageLevel::Level3;
         // Should not panic or error

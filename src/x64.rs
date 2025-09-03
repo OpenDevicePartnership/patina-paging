@@ -2,13 +2,11 @@
 use core::arch::asm;
 use core::ptr;
 
-mod pagetablestore;
 mod structs;
 #[cfg(test)]
 #[coverage(off)]
 mod tests;
 
-use pagetablestore::X64PageTableEntry;
 use structs::{CR3_PAGE_BASE_ADDRESS_MASK, MAX_VA_4_LEVEL, MAX_VA_5_LEVEL, ZERO_VA_4_LEVEL, ZERO_VA_5_LEVEL};
 
 use crate::{
@@ -16,8 +14,19 @@ use crate::{
     arch::PageTableHal,
     page_allocator::PageAllocator,
     paging::PageTableInternal,
-    structs::{PAGE_SIZE, PageLevel, VirtualAddress},
+    structs::{PAGE_SIZE, PageLevel, SIZE_1GB, SIZE_2MB, SIZE_4KB, SIZE_512GB, VirtualAddress},
+    x64::structs::*,
 };
+
+// Constants for page levels to conform to x64 standards.
+pub const PML5: PageLevel = PageLevel::Level5;
+pub const PML4: PageLevel = PageLevel::Level4;
+pub const PDP: PageLevel = PageLevel::Level3;
+pub const PD: PageLevel = PageLevel::Level2;
+pub const PT: PageLevel = PageLevel::Level1;
+
+// Maximum number of entries in a page table (512)
+pub const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize;
 
 pub struct X64PageTable<P: PageAllocator> {
     internal: PageTableInternal<P, PageTableArchX64>,
@@ -89,11 +98,22 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
     }
 }
 
+pub(crate) fn invalidate_tlb(va: VirtualAddress) {
+    let _va: u64 = va.into();
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are invalidating
+    // the TLB, which is a safe operation.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        core::arch::asm!("mfence", "invlpg [{0}]", in(reg) _va)
+    };
+}
+
 pub(crate) struct PageTableArchX64;
 
 impl PageTableHal for PageTableArchX64 {
-    type PTE = X64PageTableEntry;
+    type PTE = PageTableEntryX64;
     const DEFAULT_ATTRIBUTES: MemoryAttributes = MemoryAttributes::empty();
+    const MAX_ENTRIES: usize = MAX_ENTRIES;
 
     /// Zero a page of memory
     ///
@@ -121,7 +141,7 @@ impl PageTableHal for PageTableArchX64 {
     }
 
     fn invalidate_tlb(va: VirtualAddress) {
-        pagetablestore::invalidate_tlb(va.into());
+        invalidate_tlb(va);
     }
 
     fn get_max_va(paging_type: PagingType) -> PtResult<VirtualAddress> {
@@ -135,6 +155,8 @@ impl PageTableHal for PageTableArchX64 {
         read_cr3() == (base & CR3_PAGE_BASE_ADDRESS_MASK)
     }
 
+    /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
+    /// The caller must ensure that the base address is valid and points to a properly constructed page table.
     unsafe fn install_page_table(base: u64) -> PtResult<()> {
         unsafe {
             write_cr3(base);
@@ -145,9 +167,57 @@ impl PageTableHal for PageTableArchX64 {
     fn level_supports_pa_entry(level: crate::structs::PageLevel) -> bool {
         matches!(level, PageLevel::Level3 | PageLevel::Level2 | PageLevel::Level1)
     }
+
+    /// This function returns the base address of the self-mapped page table at the given level for this VA
+    /// It is used in the get_entry function to determine the base address in the self map in which to apply
+    /// the index within the page table to get the entry we are intending to operate on.
+    /// Each index within the VA is multiplied by the memory size that each entry in the page table at that
+    /// level covers in order to calculate the correct address. E.g., for a 4-level page table, each PML4 entry
+    /// covers 512GB of memory, each PDP entry covers 1GB of memory, each PD entry covers 2MB of memory, and
+    /// each PT entry covers 4KB of memory, but when we recurse in the self map to a given level, we shift what
+    /// each entry covers to be the size of the next level down for each recursion into the self map we did.
+    fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
+        match paging_type {
+            PagingType::Paging4Level => match level {
+                // PML5 is not used in 4-level paging, so we return an unimplemented error.
+                PML5 => unimplemented!(),
+                PML4 => FOUR_LEVEL_PML4_SELF_MAP_BASE,
+                PDP => FOUR_LEVEL_PDP_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PML4)),
+                PD => FOUR_LEVEL_PD_SELF_MAP_BASE + (SIZE_2MB * va.get_index(PML4)) + (SIZE_4KB * va.get_index(PDP)),
+                PT => {
+                    FOUR_LEVEL_PT_SELF_MAP_BASE
+                        + (SIZE_1GB * va.get_index(PML4))
+                        + (SIZE_2MB * va.get_index(PDP))
+                        + (SIZE_4KB * va.get_index(PD))
+                }
+            },
+            PagingType::Paging5Level => match level {
+                PML5 => FIVE_LEVEL_PML5_SELF_MAP_BASE,
+                PML4 => FIVE_LEVEL_PML4_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PML5)),
+                PDP => FIVE_LEVEL_PDP_SELF_MAP_BASE + (SIZE_2MB * va.get_index(PML5)) + (SIZE_4KB * va.get_index(PML4)),
+                PD => {
+                    FIVE_LEVEL_PD_SELF_MAP_BASE
+                        + (SIZE_1GB * va.get_index(PML5))
+                        + (SIZE_2MB * va.get_index(PML4))
+                        + (SIZE_4KB * va.get_index(PDP))
+                }
+                PT => {
+                    FIVE_LEVEL_PT_SELF_MAP_BASE
+                        + (SIZE_512GB * va.get_index(PML5))
+                        + (SIZE_1GB * va.get_index(PML4))
+                        + (SIZE_2MB * va.get_index(PDP))
+                        + (SIZE_4KB * va.get_index(PD))
+                }
+            },
+        }
+    }
 }
 
 /// Write CR3 register. Also invalidates TLB.
+///
+/// # Safety
+/// This function is unsafe because it updates the HW page table registers to install a new page table. The
+/// caller must ensure that the base address is valid and points to a properly constructed page table.
 unsafe fn write_cr3(_value: u64) {
     #[cfg(all(not(test), target_arch = "x86_64"))]
     {
@@ -163,6 +233,8 @@ fn read_cr3() -> u64 {
 
     #[cfg(all(not(test), target_arch = "x86_64"))]
     {
+        // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
+        // In this case we are reading the CR3 register, which is a safe operation.
         unsafe {
             asm!("mov {}, cr3", out(reg) _value, options(nostack, preserves_flags));
         }
