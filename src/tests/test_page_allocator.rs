@@ -1,9 +1,12 @@
 use crate::arch::{PageTableEntry, PageTableHal};
 use crate::page_allocator::PageAllocator;
-use crate::paging::PageTableState;
-use crate::structs::{PAGE_SIZE, PageLevel, VirtualAddress};
+use crate::structs::{PAGE_SIZE, PageLevel, PhysicalAddress, VirtualAddress};
 use crate::{MemoryAttributes, PagingType};
 use crate::{PtError, PtResult};
+
+// Add this import if get_entry is defined in crate::paging or another module
+use crate::paging::PageTableStateWithAddress;
+use crate::paging::get_entry;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -157,19 +160,17 @@ impl TestPageAllocator {
         level: PageLevel,
         expected_attributes: MemoryAttributes,
     ) -> bool {
-        let pte = Arch::PTE::new(
-            (page_table_ptr as u64).into(),
-            index,
+        let pte = get_entry::<Arch>(
             level,
             self.paging_type,
-            virtual_address.into(),
-            PageTableState::Inactive,
+            PageTableStateWithAddress::NotSelfMapped(PhysicalAddress::new(page_table_ptr as u64)),
+            index,
         )
         .unwrap();
 
-        let page_base: u64 = pte.get_address().into();
+        let page_base: u64 = pte.get_next_address().into();
         let attributes = pte.get_attributes();
-        let leaf = pte.points_to_pa();
+        let leaf = pte.points_to_pa(level);
 
         log::info!(
             "Level: {level:?} PageBase: {page_base:#x}, virtual_address: {virtual_address:#x} next_pt {next_page_table_address:x} leaf: {leaf}",

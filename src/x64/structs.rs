@@ -1,7 +1,7 @@
 use crate::{
     MemoryAttributes, PtResult,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
-    x64::pagetablestore::{PD, PDP, PML4, PML5, PT},
+    x64::{PD, PDP, PML4, PML5, PT, invalidate_tlb},
 };
 use bitfield_struct::bitfield;
 use core::ptr::write_volatile;
@@ -59,40 +59,6 @@ pub struct PageTableEntryX64 {
 }
 
 impl PageTableEntryX64 {
-    /// update all the fields and next table base address
-    pub fn update_fields(&mut self, attributes: MemoryAttributes, pa: PhysicalAddress) -> PtResult<()> {
-        let mut next_level_table_base: u64 = pa.into();
-
-        next_level_table_base &= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK;
-        next_level_table_base >>= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT;
-
-        self.set_page_table_base_address(next_level_table_base);
-        self.set_present(true);
-
-        // update the memory attributes irrespective of new or old page table
-        self.set_attributes(attributes);
-        Ok(())
-    }
-
-    /// return all the memory attributes for the current entry
-    pub fn get_attributes(&self) -> MemoryAttributes {
-        let mut attributes = MemoryAttributes::empty();
-
-        if !self.present() {
-            attributes |= MemoryAttributes::ReadProtect;
-        }
-
-        if !self.read_write() {
-            attributes |= MemoryAttributes::ReadOnly;
-        }
-
-        if self.nx() {
-            attributes |= MemoryAttributes::ExecuteProtect;
-        }
-
-        attributes
-    }
-
     /// set all the memory attributes for the current entry
     fn set_attributes(&mut self, attributes: MemoryAttributes) {
         if attributes.contains(MemoryAttributes::ReadProtect) {
@@ -131,7 +97,95 @@ impl PageTableEntryX64 {
         page_table_base_address.into()
     }
 
-    pub fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()> {
+    /// Performs an overwrite of the table entry. This ensures that all fields
+    /// are written to memory at once to avoid partial PTE edits causing unexpected
+    /// behavior with speculative execution or when operating on the current mapping.
+    pub fn swap(&mut self, other: &Self) {
+        // Safety: This is safe because we are writing to a valid memory location that is owned by this struct and we
+        // are not mutating the memory location in a way that would cause undefined behavior. We are simply overwriting
+        // the entire entry atomically.
+        unsafe { write_volatile(&mut self.0, other.0) };
+    }
+}
+
+impl crate::arch::PageTableEntry for PageTableEntryX64 {
+    /// update all the fields and next table base address
+    fn update_fields(
+        &mut self,
+        attributes: MemoryAttributes,
+        pa: PhysicalAddress,
+        leaf_entry: bool,
+        level: PageLevel,
+        va: VirtualAddress,
+    ) -> PtResult<()> {
+        // ensure break-before-make by working on a copy and then swapping. PageTableEntryX64 derives Copy, so this
+        // will create a copy of the entry to modify
+        let mut copy = *self;
+
+        let mut next_level_table_base: u64 = pa.into();
+
+        next_level_table_base &= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK;
+        next_level_table_base >>= PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT;
+
+        copy.set_page_table_base_address(next_level_table_base);
+        copy.set_present(true);
+
+        // update the memory attributes irrespective of new or old page table
+        copy.set_attributes(attributes);
+
+        // update page size if we have a large page. set_attributes will have cleared this bit.
+        if matches!(level, PD | PDP) {
+            let page_size = leaf_entry && !attributes.contains(MemoryAttributes::ReadProtect);
+            copy.set_page_size(page_size);
+        }
+
+        let prev_valid = self.present();
+        self.swap(&copy);
+        if prev_valid {
+            invalidate_tlb(va);
+        }
+        Ok(())
+    }
+
+    fn present(&self) -> bool {
+        self.present()
+    }
+
+    fn set_present(&mut self, value: bool, va: VirtualAddress) {
+        // PageTableEntryX64 is Copy, so we can make a copy to modify and then swap it in
+        let mut copy = *self;
+        copy.set_present(value);
+        let prev_valid = self.present();
+        self.swap(&copy);
+        if prev_valid {
+            invalidate_tlb(va);
+        }
+    }
+
+    fn get_next_address(&self) -> PhysicalAddress {
+        self.get_canonical_page_table_base()
+    }
+
+    /// return all the memory attributes for the current entry
+    fn get_attributes(&self) -> MemoryAttributes {
+        let mut attributes = MemoryAttributes::empty();
+
+        if !self.present() {
+            attributes |= MemoryAttributes::ReadProtect;
+        }
+
+        if !self.read_write() {
+            attributes |= MemoryAttributes::ReadOnly;
+        }
+
+        if self.nx() {
+            attributes |= MemoryAttributes::ExecuteProtect;
+        }
+
+        attributes
+    }
+
+    fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()> {
         let nx = self.nx() as u64;
         let available_high = self.available_high() as u64;
         let page_table_base_address = self.page_table_base_address();
@@ -182,11 +236,37 @@ impl PageTableEntryX64 {
         Ok(())
     }
 
-    /// Performs an overwrite of the table entry. This ensures that all fields
-    /// are written to memory at once to avoid partial PTE edits causing unexpected
-    /// behavior with speculative execution or when operating on the current mapping.
-    pub fn swap(&mut self, other: &Self) {
-        unsafe { write_volatile(&mut self.0, other.0) };
+    fn dump_entry_header() {
+        log::info!(
+            "------------------------------------------------------------------------------------------------------------------------------------"
+        );
+        log::info!(
+            "                                                      63 62       52 51                                   12 11 9 8 7 6 5 4 3 2 1 0 "
+        );
+        log::info!(
+            "                                                      |N|           |                                        |   |M|P|I| |P|P|U|R| |"
+        );
+        log::info!(
+            "                                                      |X| Available |     Page-Map Level-4 Base Address      |AVL|B|G|G|A|C|W|/|/|P|"
+        );
+        log::info!(
+            "                                                      | |           |                                        |   |Z|S|N| |D|T|S|W| |"
+        );
+        log::info!(
+            "------------------------------------------------------------------------------------------------------------------------------------"
+        );
+    }
+
+    fn points_to_pa(&self, level: PageLevel) -> bool {
+        match level {
+            PT => true,
+            PD | PDP => self.page_size(),
+            _ => false,
+        }
+    }
+
+    fn entry_ptr_address(&self) -> u64 {
+        self as *const _ as u64
     }
 }
 
@@ -195,6 +275,7 @@ impl PageTableEntryX64 {
 mod tests {
     use super::*;
     use crate::MemoryAttributes;
+    use crate::arch::PageTableEntry;
     use crate::structs::{PageLevel, PhysicalAddress, VirtualAddress};
 
     #[test]
@@ -203,7 +284,7 @@ mod tests {
         let pa = PhysicalAddress::from(0x1234_5678_9000u64);
         let attrs = MemoryAttributes::ExecuteProtect | MemoryAttributes::ReadOnly;
 
-        entry.update_fields(attrs, pa).unwrap();
+        entry.update_fields(attrs, pa, true, PageLevel::Level1, pa.into()).unwrap();
 
         assert!(entry.present());
         assert_eq!(

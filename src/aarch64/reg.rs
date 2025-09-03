@@ -35,6 +35,8 @@ macro_rules! read_sysreg {
     let mut _value: u64 = $default;
     let _ = $reg; // Helps prevent identical code being generated in tests.
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are reading a
+    // system register, which is a safe operation.
     unsafe {
       asm!(concat!("mrs {}, ", $reg), out(reg) _value, options(nostack, preserves_flags));
     }
@@ -48,6 +50,9 @@ macro_rules! write_sysreg {
     let _value: u64 = $value;
     let _ = $reg; // Helps prevent identical code being generated in tests.
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are writing to a
+    // system register, which is a safe operation as long as the caller ensures that the value being written is valid
+    // for that register.
     unsafe {
       asm!(concat!("msr ", $reg, ", {}"), in(reg) _value, options(nostack, preserves_flags));
     }
@@ -59,9 +64,15 @@ macro_rules! write_sysreg {
     let _barrier: BarrierType = $barrier;
     #[cfg(all(not(test), target_arch = "aarch64"))]
     match _barrier {
+      // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are writing to a
+      // system register, which is a safe operation as long as the caller ensures that the value being written is valid
+      // for that register.
       BarrierType::Instruction => unsafe {
         asm!(concat!("msr ", $reg, ", {}"), "isb sy", in(reg) _value, options(nostack, preserves_flags));
       },
+      // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are writing to a
+      // system register, which is a safe operation as long as the caller ensures that the value being written is valid
+      // for that register.
       BarrierType::DataInstruction => unsafe {
         asm!(concat!("msr ", $reg, ", {}"), "dsb sy", "isb sy", in(reg) _value, options(nostack, preserves_flags));
       }
@@ -147,6 +158,8 @@ pub(crate) fn is_mmu_enabled() -> bool {
 
 pub(crate) fn invalidate_tlb() {
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
+    // In this case we are invalidating the TLB, which is a safe operation.
     unsafe {
         match get_current_el() {
             ExceptionLevel::EL2 => {
@@ -161,6 +174,9 @@ pub(crate) fn invalidate_tlb() {
 
 pub(crate) fn enable_mmu() {
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
+    // In this case we are enabling the MMU, which is a safe operation as long as the caller ensures
+    // that the page tables are properly set up.
     unsafe {
         match get_current_el() {
             ExceptionLevel::EL2 => {
@@ -259,6 +275,9 @@ pub(crate) fn enable_data_cache() {
 
 pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are updating a
+    // translation table entry, which is a safe operation as long as the caller ensures that the entry being updated
+    // is valid.
     unsafe {
         let pfn = _mva >> 12;
         let mut sctlr: u64;
@@ -326,6 +345,8 @@ pub(crate) fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
     // add the compiler fence to ensure that the compiler does not reorder memory accesses around this point
     compiler_fence(Ordering::SeqCst);
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
+    // In this case we are issuing a data barrier, which is a safe operation.
     unsafe {
         asm!("dsb sy", options(nostack, preserves_flags));
     }
@@ -339,6 +360,8 @@ fn data_cache_line_len() -> u64 {
 
 fn clean_data_entry_by_mva(_mva: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are cleaning a
+    // data cache entry, which is a safe operation as long as the caller ensures that the entry being cleaned is valid.
     unsafe {
         asm!("dc cvac, {}", in(reg) _mva, options(nostack, preserves_flags));
     }
@@ -346,6 +369,9 @@ fn clean_data_entry_by_mva(_mva: u64) {
 
 fn invalidate_data_cache_entry_by_mva(_mva: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are invalidating a
+    // data cache entry, which is a safe operation as long as the caller ensures that the entry being invalidated is
+    // valid.
     unsafe {
         asm!("dc ivac, {}", in(reg) _mva, options(nostack, preserves_flags));
     }
@@ -353,6 +379,9 @@ fn invalidate_data_cache_entry_by_mva(_mva: u64) {
 
 fn clean_and_invalidate_data_entry_by_mva(_mva: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are cleaning and
+    // invalidating a data cache entry, which is a safe operation as long as the caller ensures that the entry being
+    // cleaned and invalidated is valid.
     unsafe {
         asm!("dc civac, {}", in(reg) _mva, options(nostack, preserves_flags));
     }

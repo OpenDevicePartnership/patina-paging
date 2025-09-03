@@ -147,6 +147,10 @@ fn num_page_tables_required<Arch: PageTableHal>(address: u64, size: u64, paging_
     Ok(pages)
 }
 
+fn get_self_mapped_base<Arch: PageTableHal>(paging_type: PagingType) -> u64 {
+    Arch::get_self_mapped_base(PageLevel::root_level(paging_type), VirtualAddress::new(0), paging_type)
+}
+
 #[test]
 fn test_find_num_page_tables() {
     all_archs!({
@@ -549,6 +553,24 @@ fn test_query_memory_address_simple() {
         let res = pt.query_memory_region(address, size);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), attributes);
+    });
+}
+
+#[test]
+fn test_query_self_map() {
+    all_configs!(|paging_type| {
+        let address = get_self_mapped_base::<Arch>(paging_type);
+        let size = PAGE_SIZE;
+
+        let page_allocator = TestPageAllocator::new(10, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let pt = pt.unwrap();
+
+        let res = pt.query_memory_region(address, size);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), Arch::DEFAULT_ATTRIBUTES);
     });
 }
 

@@ -2,7 +2,7 @@ use crate::{
     MemoryAttributes, PageTable, PagingType, PtError,
     aarch64::{
         AArch64PageTable,
-        structs::{AArch64Descriptor, FOUR_LEVEL_4_SELF_MAP_BASE, ZERO_VA_4_LEVEL},
+        structs::{FOUR_LEVEL_LEVEL4_SELF_MAP_BASE, PageTableEntryAArch64, ZERO_VA_4_LEVEL},
     },
     structs::{PAGE_SIZE, SELF_MAP_INDEX, ZERO_VA_INDEX},
     tests::test_page_allocator::TestPageAllocator,
@@ -61,7 +61,7 @@ fn test_self_map() {
         let pt = pt.unwrap();
 
         // ensure the self map is present
-        let res = pt.query_memory_region(FOUR_LEVEL_4_SELF_MAP_BASE, PAGE_SIZE);
+        let res = pt.query_memory_region(FOUR_LEVEL_LEVEL4_SELF_MAP_BASE, PAGE_SIZE);
         assert!(res.is_ok());
 
         // we can't query the zero VA because in new() it is not mapped on purpose, so we just check we mapped
@@ -72,7 +72,7 @@ fn test_self_map() {
         let root = pt.into_page_table_root();
 
         // now we should see the zero VA and the self map entries in the base page table
-        let zero_va_top_level = root + ZERO_VA_INDEX * size_of::<AArch64Descriptor>() as u64;
+        let zero_va_top_level = root + ZERO_VA_INDEX * size_of::<PageTableEntryAArch64>() as u64;
         assert!(unsafe { *(zero_va_top_level as *const u64) != 0 });
 
         let zero_va_pdp_level = unsafe { *(zero_va_top_level as *const u64) & !0xFFF };
@@ -87,7 +87,7 @@ fn test_self_map() {
         let zero_va_pa = unsafe { *(zero_va_pt_level as *const u64) & !0xFFF };
         assert!(zero_va_pa == 0);
 
-        let self_map_top_level = root + SELF_MAP_INDEX * size_of::<AArch64Descriptor>() as u64;
+        let self_map_top_level = root + SELF_MAP_INDEX * size_of::<PageTableEntryAArch64>() as u64;
         assert_eq!((unsafe { *(self_map_top_level as *const u64) } & !0xFFF), root);
     }
 }
