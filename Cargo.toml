@@ -1,6 +1,6 @@
 [package]
 name = "patina_paging"
-version = "8.0.4"
+version = "8.1.0"
 edition = "2024"
 license = "BSD-2-Clause-Patent"
 description = "Paging library for AArch64 & X64 architectures"
