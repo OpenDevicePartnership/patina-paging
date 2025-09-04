@@ -4,7 +4,7 @@
 #
 ##
 # Copyright (c) Microsoft Corporation.
-# SPDX-License-Identifier: BSD-2-Clause-Patent
+# SPDX-License-Identifier: Apache-2.0
 ##
 name: Miri Tests
 
@@ -37,7 +37,7 @@ jobs:
 
       - name: 🛠️ Download Rust Tools 🛠️
         uses: ./.github/actions/rust-tool-cache
-      
+
       - name: Install miri
         run: rustup +nightly component add miri
 
@@ -52,24 +52,24 @@ jobs:
           set +e  # Disable exit on error
           cargo +nightly miri nextest run --lib --no-fail-fast $filters | tee results.log
           set -e  # Re-enable exit on error
-          
+
           grep '^{' results.log | jq -r 'select(.type == "test" and .event == "failed")' > failed_tests.json
 
           if [ -s failed_tests.json ]; then
             exit 1  # Fail the job if there are test failures
           fi
           exit 0
-      
+
       - name: Report Miri Test Failures
         if: failure() && inputs.create-issue
         run: |
           # Check if there's already an open issue with "miri" and "automation" labels
           existing_issue=$(gh issue list --state open --label "miri,automation" --json number --jq '.[0].number')
-          
+
           # Format the failed tests for the issue description
           failed_count=$(grep '^{' results.log | jq -r 'select(.type == "test" and .event == "failed")' | jq -s 'length')
           current_date=$(date '+%Y-%m-%d %H:%M:%S UTC')
-          
+
           # Create a nicely formatted description
           echo "# Miri Test Failures Report" > issue_description.md
           echo "" >> issue_description.md
@@ -81,7 +81,7 @@ jobs:
           echo "" >> issue_description.md
           echo "## Failed Test Details" >> issue_description.md
           echo "" >> issue_description.md
-          
+
           # Create collapsible sections for each failed test
           while IFS= read -r line; do
             if [ -n "$line" ] && [ "$line" != "null" ]; then
@@ -97,7 +97,7 @@ jobs:
               echo "" >> issue_description.md
             fi
           done < <(grep '^{' results.log | jq -c 'select(.type == "test" and .event == "failed")')
-          
+
           echo "---" >> issue_description.md
           echo "*This issue was automatically created/updated by the Miri workflow when test failures were detected.*" >> issue_description.md
 

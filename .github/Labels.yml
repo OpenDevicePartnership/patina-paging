@@ -1,5 +1,5 @@
 # @file Labels.yml
-# 
+#
 # Specifies the labels used in the project.
 #
 # This file is meant to define the labels used such that label management is consistent, centralized,
@@ -16,7 +16,7 @@
 #
 ##
 # Copyright (c) Microsoft Corporation.
-# SPDX-License-Identifier: BSD-2-Clause-Patent
+# SPDX-License-Identifier: Apache-2.0
 ##
 #
 # For more information, see:
