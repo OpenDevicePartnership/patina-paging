@@ -1,3 +1,11 @@
+//! Data structures and constants for AArch64 page table entries and address translation.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use crate::{
     MemoryAttributes, PtError, PtResult,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},

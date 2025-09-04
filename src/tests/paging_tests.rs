@@ -1,3 +1,11 @@
+//! General infrastructure and tests for paging logic, address translation, and page table manipulation.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use log::{Level, LevelFilter, Metadata, Record};
 
 use crate::{

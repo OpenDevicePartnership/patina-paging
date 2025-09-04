@@ -1,3 +1,11 @@
+//! AArch64 system register and cache management utilities for page table and MMU control.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use core::ptr;
 use core::sync::atomic::{Ordering, compiler_fence};
 

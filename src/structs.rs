@@ -1,3 +1,11 @@
+//! Common data structures and constants for page table management and address translation.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use core::{
     fmt::{self, Display, Formatter},
     ops::{Add, Sub},

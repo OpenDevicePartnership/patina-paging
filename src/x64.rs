@@ -1,3 +1,11 @@
+//! x64-specific implementation of page table management, including paging structures and address translation.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 #[allow(unused_imports)]
 use core::arch::asm;
 use core::ptr;
