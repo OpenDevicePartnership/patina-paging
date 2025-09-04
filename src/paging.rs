@@ -1,3 +1,12 @@
+//! Paging logic and core algorithms for managing virtual memory mappings, page table traversal, and address
+//! translation.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use core::marker::PhantomData;
 use core::slice;
 

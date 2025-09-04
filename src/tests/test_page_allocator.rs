@@ -1,3 +1,11 @@
+//! Test utilities and code for the page allocator.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use crate::arch::{PageTableEntry, PageTableHal};
 use crate::page_allocator::PageAllocator;
 use crate::structs::{PAGE_SIZE, PageLevel, PhysicalAddress, VirtualAddress};

@@ -1,3 +1,12 @@
+//! AArch64-specific implementation of page table management, including address translation and memory attribute
+//! handling.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use reg::ExceptionLevel;
 use structs::*;
 

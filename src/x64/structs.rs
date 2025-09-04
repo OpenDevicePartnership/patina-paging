@@ -1,3 +1,11 @@
+//! Data structures and constants for x64 page table entries and address translation.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use crate::{
     MemoryAttributes, PtResult,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},

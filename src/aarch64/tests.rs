@@ -1,3 +1,11 @@
+//! Unit tests for AArch64 page table and memory management functionality.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use crate::{
     MemoryAttributes, PageTable, PagingType, PtError,
     aarch64::{

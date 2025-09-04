@@ -1,3 +1,11 @@
+//! Architecture-agnostic traits and types for page table operations, enabling support for multiple CPU architectures.
+//!
+//! ## License
+//!
+//! Copyright (c) Microsoft Corporation.
+//!
+//! SPDX-License-Identifier: Apache-2.0
+//!
 use crate::{
     MemoryAttributes, PagingType, PtResult,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
