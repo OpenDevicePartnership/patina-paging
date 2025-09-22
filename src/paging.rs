@@ -255,7 +255,14 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         };
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
 
-        for entry in table.slice.iter_mut() {
+        // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
+        // of the self map. This can only occur in the query, due to map/remap/unmap explicitly ensuring we are not
+        // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
+        // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
+        // work around this by simply iterating on the indices instead of the iterator
+        let len = table.slice.len();
+        for i in 0..len {
+            let entry = &mut table.slice[i];
             if !entry.present()
                 && Arch::level_supports_pa_entry(level)
                 && va.is_level_aligned(level)
@@ -327,7 +334,14 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         };
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
 
-        for entry in table.slice.iter_mut() {
+        // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
+        // of the self map. This can only occur in the query, due to map/remap/unmap explicitly ensuring we are not
+        // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
+        // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
+        // work around this by simply iterating on the indices instead of the iterator
+        let len = table.slice.len();
+        for i in 0..len {
+            let entry = &mut table.slice[i];
             // Check if this is a large page in need of splitting.
             if entry.points_to_pa(level)
                 && (!va.is_level_aligned(level) || va.length_through(end_va)? < level.entry_va_size())
@@ -387,7 +401,14 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         };
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
 
-        for entry in table.slice.iter_mut() {
+        // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
+        // of the self map. This can only occur in the query, due to map/remap/unmap explicitly ensuring we are not
+        // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
+        // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
+        // work around this by simply iterating on the indices instead of the iterator
+        let len = table.slice.len();
+        for i in 0..len {
+            let entry = &mut table.slice[i];
             if !entry.present() {
                 return Err(PtError::NoMapping);
             }
@@ -448,8 +469,15 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             _ => PageTableStateWithAddress::NotSelfMapped(base),
         };
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
-        let mut entries = table.slice.iter_mut().peekable();
-        while let Some(entry) = entries.next() {
+        // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
+        // of the self map. This can only occur in the query, due to map/remap/unmap explicitly ensuring we are not
+        // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
+        // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
+        // work around this by simply iterating on the indices instead of the iterator
+        let len = table.slice.len();
+        for i in 0..len {
+            let entry = &mut table.slice[i];
+
             if !entry.present() {
                 // if we found an entry that is not present after finding entries that were already mapped,
                 // we fail this with InconsistentMappingAcrossRange. If we have set found any region yet, mark
@@ -508,7 +536,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
             // only calculate the next VA if there is another entry in the table we are processing
             // when processing the self map, always calculating the next VA can result in overflow needlessly
-            if entries.peek().is_some() {
+            if i + 1 < len {
                 va = va.get_next_va(level)?;
             }
         }
