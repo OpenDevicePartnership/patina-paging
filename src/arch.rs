@@ -41,8 +41,8 @@ pub(crate) trait PageTableEntry {
         level: PageLevel,
         va: VirtualAddress,
     ) -> PtResult<()>;
-    fn present(&self) -> bool;
-    fn set_present(&mut self, value: bool, va: VirtualAddress);
+    fn get_present_bit(&self) -> bool;
+    fn set_present_bit(&mut self, value: bool, va: VirtualAddress);
     fn get_next_address(&self) -> PhysicalAddress;
     fn get_attributes(&self) -> MemoryAttributes;
     fn dump_entry_header();

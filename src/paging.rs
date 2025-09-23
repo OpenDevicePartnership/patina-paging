@@ -106,7 +106,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let entry =
             get_entry::<Arch>(level, paging_type, PageTableStateWithAddress::NotSelfMapped(table_base), index as u64)?;
         entry.update_fields(Arch::DEFAULT_ATTRIBUTES, PhysicalAddress::new(0), true, level, zero_va)?;
-        entry.set_present(false, zero_va);
+        entry.set_present_bit(false, zero_va);
 
         Ok(pt)
     }
@@ -263,7 +263,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let len = table.slice.len();
         for i in 0..len {
             let entry = &mut table.slice[i];
-            if !entry.present()
+            if !entry.get_present_bit()
                 && Arch::level_supports_pa_entry(level)
                 && va.is_level_aligned(level)
                 && va.length_through(end_va)? >= level.entry_va_size()
@@ -284,7 +284,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     }
                 };
 
-                if !entry.present() {
+                if !entry.get_present_bit() {
                     let pa = self.allocate_page(state)?;
                     // non-leaf pages should always have the most permissive memory attributes.
                     entry.update_fields(Arch::DEFAULT_ATTRIBUTES, pa, false, level, va)?;
@@ -350,9 +350,9 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             }
 
             // This is at least either the entirety of a large page or a single page.
-            if entry.present() {
+            if entry.get_present_bit() {
                 if entry.points_to_pa(level) {
-                    entry.set_present(false, va);
+                    entry.set_present_bit(false, va);
                 } else {
                     // This should always have another level if this is not a PA entry.
                     let next_level = level.next_level().unwrap();
@@ -409,7 +409,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let len = table.slice.len();
         for i in 0..len {
             let entry = &mut table.slice[i];
-            if !entry.present() {
+            if !entry.get_present_bit() {
                 return Err(PtError::NoMapping);
             }
 
@@ -478,7 +478,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         for i in 0..len {
             let entry = &mut table.slice[i];
 
-            if !entry.present() {
+            if !entry.get_present_bit() {
                 // if we found an entry that is not present after finding entries that were already mapped,
                 // we fail this with InconsistentMappingAcrossRange. If we have set found any region yet, mark
                 // this as an unmapped region and continue
@@ -633,7 +633,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         };
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
         for entry in table.slice.iter() {
-            if !entry.present() && !level.is_lowest_level() {
+            if !entry.get_present_bit() && !level.is_lowest_level() {
                 return Err(PtError::NoMapping);
             }
 
@@ -649,7 +649,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
 
             entry.dump_entry(start_va, level)?;
-            if entry.present() && !entry.points_to_pa(level) {
+            if entry.get_present_bit() && !entry.points_to_pa(level) {
                 let next_base = entry.get_next_address();
                 self.dump_page_tables_internal(
                     next_level_start_va,
@@ -705,7 +705,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             Err(_) => return PageTableState::ActiveIdentityMapped, // if we can't read the entry, assume identity mapped
         };
 
-        if !self_map_entry.present() || self_map_entry.get_next_address() != self.base {
+        if !self_map_entry.get_present_bit() || self_map_entry.get_next_address() != self.base {
             PageTableState::ActiveIdentityMapped
         } else {
             PageTableState::ActiveSelfMapped
@@ -988,10 +988,10 @@ mod tests {
     }
 
     impl PageTableEntry for DummyPTE {
-        fn present(&self) -> bool {
+        fn get_present_bit(&self) -> bool {
             self.0 & 0x8000_0000_0000_0000 != 0
         }
-        fn set_present(&mut self, val: bool, _va: VirtualAddress) {
+        fn set_present_bit(&mut self, val: bool, _va: VirtualAddress) {
             if val {
                 self.0 |= 0x8000_0000_0000_0000;
             } else {
@@ -1103,12 +1103,12 @@ mod tests {
             SELF_MAP_INDEX,
         )
         .unwrap();
-        entry.set_present(false, VirtualAddress::new(0));
+        entry.set_present_bit(false, VirtualAddress::new(0));
 
         assert_eq!(pt.get_state(), PageTableState::ActiveIdentityMapped);
 
         // Now set the self-map entry to present and point to the correct base
-        entry.set_present(true, VirtualAddress::new(0));
+        entry.set_present_bit(true, VirtualAddress::new(0));
         entry.update_fields(DummyArch::DEFAULT_ATTRIBUTES, pt.base, true, root_level, VirtualAddress::new(0)).unwrap();
 
         assert_eq!(pt.get_state(), PageTableState::ActiveSelfMapped);
@@ -1141,7 +1141,7 @@ mod tests {
     fn test_split_large_page_error() {
         let (mut pt, allocator) = make_table();
         let mut entry = DummyPTE::new();
-        entry.set_present(false, VirtualAddress::new(0x0));
+        entry.set_present_bit(false, VirtualAddress::new(0x0));
         let res =
             pt.split_large_page(VirtualAddress::new(0x0), &mut entry, PageTableState::Inactive, PageLevel::Level1);
         assert_eq!(res, Err(PtError::InvalidParameter));
