@@ -155,11 +155,11 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         Ok(())
     }
 
-    fn present(&self) -> bool {
+    fn get_present_bit(&self) -> bool {
         self.present()
     }
 
-    fn set_present(&mut self, value: bool, va: VirtualAddress) {
+    fn set_present_bit(&mut self, value: bool, va: VirtualAddress) {
         // PageTableEntryX64 is Copy, so we can make a copy to modify and then swap it in
         let mut copy = *self;
         copy.set_present(value);

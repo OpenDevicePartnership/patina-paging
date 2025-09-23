@@ -187,7 +187,7 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
         Ok(())
     }
 
-    fn present(&self) -> bool {
+    fn get_present_bit(&self) -> bool {
         self.valid()
     }
 
@@ -227,7 +227,7 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
         attributes
     }
 
-    fn set_present(&mut self, value: bool, va: VirtualAddress) {
+    fn set_present_bit(&mut self, value: bool, va: VirtualAddress) {
         // PageTableEntryAArch64 is Copy, so we can make a copy to modify and then swap it in
         let mut entry = *self;
         entry.set_valid(value);
