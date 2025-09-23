@@ -10,6 +10,8 @@
 use core::marker::PhantomData;
 use core::slice;
 
+use patina_stacktrace::StackTrace;
+
 use crate::{
     MemoryAttributes, PagingType, PtError, PtResult, RangeMappingState,
     arch::PageTableEntry,
@@ -685,9 +687,20 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
     }
 
     pub fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
+        let address_u = address;
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
+
+        const BAD_ADDRESS: u64 = 0x600000;
+        if address_u >= 0x38A000 && address_u <= BAD_ADDRESS {
+            log::error!("Bad address map {address:#x?}");
+            log::error!("size: {}", size);
+
+            unsafe {
+                StackTrace::dump();
+            }
+        }
 
         let max_va = Arch::get_max_va(self.paging_type)?;
 
@@ -712,9 +725,20 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
     }
 
     pub fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
+        let address_u = address;
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
+
+        const BAD_ADDRESS: u64 = 0x600000;
+        if address_u >= 0x38A000 && address_u <= BAD_ADDRESS {
+            log::error!("Bad address unmap {address:#x?}");
+            log::error!("size: {}", size);
+
+            unsafe {
+                StackTrace::dump();
+            }
+        }
 
         let max_va = Arch::get_max_va(self.paging_type)?;
 

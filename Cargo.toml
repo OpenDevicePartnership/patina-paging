@@ -15,6 +15,7 @@ bitfield-struct = "0.10"
 bitflags = "2.6.0"
 log = { version = "^0.4", default-features = false }
 cfg-if = "1.0.0"
+patina_stacktrace = { path="C:/Users/sherryfan/patina/core/patina_stacktrace" }
 
 [features]
 doc = []
