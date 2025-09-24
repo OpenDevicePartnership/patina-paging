@@ -593,14 +593,16 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         entry.update_fields(Arch::DEFAULT_ATTRIBUTES, pa, false, level, va)?;
 
         if matches!(state, PageTableState::ActiveSelfMapped) {
-            // invalidate the self map VA for the region covered by the large page
+            // invalidate the self map VA for the region covered by the large page. The next level of the self map
+            // may get pulled in by speculative execution, so we need to ensure the wrong mapping is not in the TLB
+            // before we have the correct mapping in place.
             // this function gets called multiple times to split from larger pages to smaller pages, so we only invalidate
             // once for the new page table we created
             if let Ok(tb_entry) = get_entry::<Arch>(
-                level,
+                next_level,
                 self.paging_type,
                 PageTableStateWithAddress::SelfMapped(va),
-                va.get_index(level),
+                va.get_index(next_level),
             ) {
                 // Invalidate the TLB entry for the self-mapped region
                 Arch::invalidate_tlb(tb_entry.entry_ptr_address().into());
