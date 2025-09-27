@@ -487,6 +487,12 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     RangeMappingState::Mapped(_) => return Err(PtError::InconsistentMappingAcrossRange),
                     RangeMappingState::Unmapped => {}
                 }
+
+                // only calculate the next VA if there is another entry in the table we are processing
+                // when processing the self map, always calculating the next VA can result in overflow needlessly
+                if i + 1 < len {
+                    va = va.get_next_va(level)?;
+                }
                 continue;
             }
 
