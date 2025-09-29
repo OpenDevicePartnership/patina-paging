@@ -82,16 +82,6 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
         self.internal.unmap_memory_region(address, size)
     }
 
-    fn remap_memory_region(
-        &mut self,
-        address: u64,
-        size: u64,
-        attributes: crate::MemoryAttributes,
-    ) -> crate::PtResult<()> {
-        check_canonical_range(address, size, self.internal.paging_type)?;
-        self.internal.remap_memory_region(address, size, attributes)
-    }
-
     fn install_page_table(&mut self) -> crate::PtResult<()> {
         self.internal.install_page_table()
     }

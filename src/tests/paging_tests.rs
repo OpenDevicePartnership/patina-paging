@@ -538,6 +538,76 @@ fn test_unmap_memory_address_zero_size() {
     });
 }
 
+#[test]
+fn test_unmap_memory_address_with_different_attributes() {
+    let address = 0x8000;
+    let size = PAGE_SIZE * 4; // 4 pages
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        // Map first two pages with ReadOnly, next two with ExecuteProtect
+        let attr1 = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        let attr2 = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
+
+        let res = pt.map_memory_region(address, PAGE_SIZE * 2, attr1);
+        assert!(res.is_ok());
+        let res = pt.map_memory_region(address + PAGE_SIZE * 2, PAGE_SIZE * 2, attr2);
+        assert!(res.is_ok());
+
+        // Unmap the whole region, should succeed even though attributes differ
+        let res = pt.unmap_memory_region(address, size);
+        assert!(res.is_ok());
+
+        // All pages should now be unmapped
+        for i in 0..4 {
+            let res = pt.query_memory_region(address + i * PAGE_SIZE, PAGE_SIZE);
+            assert!(res.is_err());
+        }
+    });
+}
+
+#[test]
+fn test_unmap_memory_address_partially_unmapped() {
+    let address = 0x4000;
+    let size = PAGE_SIZE * 4; // 4 pages
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        // Map the full range
+        let res = pt.map_memory_region(address, size, attributes);
+        assert!(res.is_ok());
+
+        // Unmap the second page
+        let res = pt.unmap_memory_region(address + PAGE_SIZE, PAGE_SIZE);
+        assert!(res.is_ok());
+
+        // Now try to unmap the whole range, which includes already unmapped region
+        let res = pt.unmap_memory_region(address, size);
+        assert!(res.is_ok());
+
+        // All pages should now be unmapped
+        for i in 0..4 {
+            let res = pt.query_memory_region(address + i * PAGE_SIZE, PAGE_SIZE);
+            assert!(res.is_err());
+        }
+    });
+}
+
 // Memory query tests
 #[test]
 fn test_query_memory_address_simple() {
@@ -807,7 +877,7 @@ fn test_remap_memory_address_simple() {
         assert_eq!(page_allocator.pages_allocated(), num_pages);
 
         let attributes = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
-        let res = pt.remap_memory_region(address, size, attributes);
+        let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_ok());
     });
 }
@@ -834,7 +904,7 @@ fn test_remap_memory_address_0_to_ffff_ffff() {
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
             let attributes = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
-            let res = pt.remap_memory_region(address, size, attributes);
+            let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             size <<= 1;
         }
@@ -864,7 +934,7 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(res.is_ok());
 
             let attributes = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
-            let res = pt.remap_memory_region(address, size, attributes);
+            let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             address += address_increment;
         }
@@ -895,7 +965,7 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
             let attributes = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
-            let res = pt.remap_memory_region(address, size, attributes);
+            let res = pt.map_memory_region(address, size, attributes);
             assert!(res.is_ok());
             address += address_increment;
         }
@@ -918,7 +988,7 @@ fn test_remap_memory_address_unaligned() {
         let mut pt = pt.unwrap();
 
         let attributes = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
-        let res = pt.remap_memory_region(address, size, attributes);
+        let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::UnalignedAddress));
     });
@@ -940,9 +1010,111 @@ fn test_remap_memory_address_zero_size() {
         let mut pt = pt.unwrap();
 
         let attributes = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
-        let res = pt.remap_memory_region(address, size, attributes);
+        let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
+    });
+}
+
+#[test]
+fn test_remap_memory_address_mixed_attributes() {
+    // This test maps a range with mixed attributes, then remaps the entire range with a single attribute.
+    let base_address = 0x3000;
+    let total_size = PAGE_SIZE * 4; // 4 pages
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(base_address, total_size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        // Map each page with different attributes
+        let attrs = [
+            MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES,
+            MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES,
+            MemoryAttributes::empty() | Arch::DEFAULT_ATTRIBUTES,
+            MemoryAttributes::ReadOnly | MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES,
+        ];
+
+        for i in 0..4 {
+            let addr = base_address + i * PAGE_SIZE;
+            let res = pt.map_memory_region(addr, PAGE_SIZE, attrs[i as usize]);
+            assert!(res.is_ok());
+        }
+
+        // Confirm each page has the expected attribute
+        for i in 0..4 {
+            let addr = base_address + i * PAGE_SIZE;
+            let res = pt.query_memory_region(addr, PAGE_SIZE);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), attrs[i as usize]);
+        }
+
+        // Remap the entire range with a single attribute
+        let new_attr = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
+        let res = pt.map_memory_region(base_address, total_size, new_attr);
+        assert!(res.is_ok());
+
+        // Confirm all pages now have the new attribute
+        for i in 0..4 {
+            let addr = base_address + i * PAGE_SIZE;
+            let res = pt.query_memory_region(addr, PAGE_SIZE);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), new_attr);
+        }
+    });
+}
+
+#[test]
+fn test_remap_memory_address_partially_mapped_range() {
+    // This test maps a range where the first half is already mapped with one attribute,
+    // the second half is unmapped, and then remaps the entire range with a new attribute.
+    let base_address = 0x2000;
+    let total_size = PAGE_SIZE * 4; // 4 pages
+    let half_size = PAGE_SIZE * 2;
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(base_address, total_size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attr_initial = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        let attr_new = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
+
+        // Map only the first half of the range
+        let res = pt.map_memory_region(base_address, half_size, attr_initial);
+        assert!(res.is_ok());
+
+        // Confirm first half is mapped, second half is unmapped
+        for i in 0..4 {
+            let addr = base_address + i * PAGE_SIZE;
+            let res = pt.query_memory_region(addr, PAGE_SIZE);
+            if i < 2 {
+                assert!(res.is_ok());
+                assert_eq!(res.unwrap(), attr_initial);
+            } else {
+                assert!(res.is_err());
+            }
+        }
+
+        // Now map the entire range with new attributes (should overwrite old and fill unmapped)
+        let res = pt.map_memory_region(base_address, total_size, attr_new);
+        assert!(res.is_ok());
+
+        // Confirm all pages are mapped with the new attributes
+        for i in 0..4 {
+            let addr = base_address + i * PAGE_SIZE;
+            let res = pt.query_memory_region(addr, PAGE_SIZE);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), attr_new);
+        }
     });
 }
 
@@ -1079,9 +1251,7 @@ fn test_large_page_splitting() {
 
                 let res = match action {
                     TestAction::Unmap => pt.unmap_memory_region(split_range.address, split_range.size),
-                    TestAction::Remap => {
-                        pt.remap_memory_region(split_range.address, split_range.size, remap_attributes)
-                    }
+                    TestAction::Remap => pt.map_memory_region(split_range.address, split_range.size, remap_attributes),
                 };
                 assert!(res.is_ok());
                 assert_eq!(page_allocator.pages_allocated(), num_pages + page_increase);
@@ -1176,7 +1346,7 @@ fn test_install_page_table() {
                 _ => Arch::DEFAULT_ATTRIBUTES | MemoryAttributes::ExecuteProtect,
             };
 
-            let res = pt.remap_memory_region(test_address, test_size, test_attributes);
+            let res = pt.map_memory_region(test_address, test_size, test_attributes);
             if res.is_err() {
                 log::error!("Page fault occurred while remapping address: {test_address:#x}");
                 continue;
