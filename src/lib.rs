@@ -117,6 +117,9 @@ pub enum PtError {
 
     /// The base address and range would cause an underflow when performing page table operations.
     SubtractionUnderflow,
+
+    /// An internal error occurred. This usually indicates a bug in the paging implementation.
+    InternalError,
 }
 
 #[derive(Debug, PartialEq)]
@@ -163,7 +166,8 @@ bitflags! {
 /// and provides the interface for managing page tables.
 pub trait PageTable {
     /// Function to map the designated memory region to with provided
-    /// attributes.
+    /// attributes. The requested memory region will be mapped with the specified
+    /// attributes, regardless of the current mapping state of the region.
     ///
     /// ## Arguments
     /// * `address` - The memory address to map.
@@ -178,9 +182,9 @@ pub trait PageTable {
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
 
     /// Function to unmap the memory region provided by the caller. The
-    /// requested memory region must be fully mapped prior to this call. Unlike
-    /// remap_memory_region, the entire region does not have to possess the same
-    /// attribute for this operation.
+    /// requested memory region must be fully mapped prior to this call. The
+    /// entire region does not need to have the same mapping state in order
+    /// to unmap it.
     ///
     /// ## Arguments
     /// * `address` - The memory address to map.
@@ -189,19 +193,6 @@ pub trait PageTable {
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()>;
-
-    /// Function to remap the memory region provided by the caller. The memory
-    /// provided has to be previously mapped and has the same memory attributes
-    /// for the entire memory region.
-    ///
-    /// ## Arguments
-    /// * `address` - The memory address to map.
-    /// * `size` - The memory size to map.
-    /// * `attributes` - The memory attributes to map.
-    ///
-    /// ## Errors
-    /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
 
     /// Function to install the page table from this page table instance.
     ///

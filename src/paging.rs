@@ -256,15 +256,24 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
 
         // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
-        // of the self map. This can only occur in the query, due to map/remap/unmap explicitly ensuring we are not
+        // of the self map. This can only occur in the query, due to map/unmap explicitly ensuring we are not
         // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
         // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
         // work around this by simply iterating on the indices instead of the iterator
         let len = table.slice.len();
         for i in 0..len {
             let entry = &mut table.slice[i];
-            if !entry.get_present_bit()
-                && Arch::level_supports_pa_entry(level)
+            // Check if this is a large page in need of splitting. We only split if the attributes of this entry
+            // are changing
+            if entry.get_present_bit()
+                && entry.points_to_pa(level)
+                && entry.get_attributes() != attributes
+                && (!va.is_level_aligned(level) || va.length_through(end_va)? < level.entry_va_size())
+            {
+                self.split_large_page(va, entry, state, level)?;
+            }
+
+            if Arch::level_supports_pa_entry(level)
                 && va.is_level_aligned(level)
                 && va.length_through(end_va)? >= level.entry_va_size()
             {
@@ -272,17 +281,10 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                 // so we can map the whole range in one go.
                 entry.update_fields(attributes, va.into(), true, level, va)?;
             } else {
-                let next_level = match level.next_level() {
-                    Some(next_level) => next_level,
-                    None => {
-                        // We are trying to map a page but it is already mapped. The caller has an inconsistent state
-                        // of the page table
-                        log::error!(
-                            "Paging crate failed to map memory region at VA {va:#x?} as the entry is already valid",
-                        );
-                        return Err(PtError::InconsistentMappingAcrossRange);
-                    }
-                };
+                let next_level = level.next_level().ok_or_else(|| {
+                    log::error!("Failed to map memory region at VA {va:#x?} as the level is the lowest level and cannot be split");
+                    PtError::InternalError
+                })?;
 
                 if !entry.get_present_bit() {
                     let pa = self.allocate_page(state)?;
@@ -335,7 +337,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
 
         // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
-        // of the self map. This can only occur in the query, due to map/remap/unmap explicitly ensuring we are not
+        // of the self map. This can only occur in the query, due to map/unmap explicitly ensuring we are not
         // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
         // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
         // work around this by simply iterating on the indices instead of the iterator
@@ -344,6 +346,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             let entry = &mut table.slice[i];
             // Check if this is a large page in need of splitting.
             if entry.points_to_pa(level)
+                && entry.get_present_bit()
                 && (!va.is_level_aligned(level) || va.length_through(end_va)? < level.entry_va_size())
             {
                 self.split_large_page(va, entry, state, level)?;
@@ -384,75 +387,6 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         Ok(())
     }
 
-    fn remap_memory_region_internal(
-        &mut self,
-        start_va: VirtualAddress,
-        end_va: VirtualAddress,
-        level: PageLevel,
-        base: PhysicalAddress,
-        attributes: MemoryAttributes,
-        state: PageTableState,
-    ) -> PtResult<()> {
-        let mut va = start_va;
-
-        let state_with_address = match state {
-            PageTableState::ActiveSelfMapped => PageTableStateWithAddress::SelfMapped(start_va),
-            _ => PageTableStateWithAddress::NotSelfMapped(base),
-        };
-        let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
-
-        // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
-        // of the self map. This can only occur in the query, due to map/remap/unmap explicitly ensuring we are not
-        // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
-        // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
-        // work around this by simply iterating on the indices instead of the iterator
-        let len = table.slice.len();
-        for i in 0..len {
-            let entry = &mut table.slice[i];
-            if !entry.get_present_bit() {
-                return Err(PtError::NoMapping);
-            }
-
-            // Check if this is a large page in need of splitting.
-            if entry.points_to_pa(level)
-                && (!va.is_level_aligned(level) || va.length_through(end_va)? < level.entry_va_size())
-            {
-                self.split_large_page(va, entry, state, level)?;
-            }
-
-            if entry.points_to_pa(level) {
-                entry.update_fields(attributes, va.into(), true, level, va)?;
-            } else {
-                let next_level = level.next_level().unwrap();
-                let next_base = entry.get_next_address();
-
-                // split the va range appropriately for the next level pages
-
-                // start of the next level va. It will be same as current va
-                let next_level_start_va = va;
-
-                // get max va addressable by current entry
-                let curr_va_ceil = va.round_up(level);
-
-                // end of next level va. It will be minimum of next va and end va
-                let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
-
-                self.remap_memory_region_internal(
-                    next_level_start_va,
-                    next_level_end_va,
-                    next_level,
-                    next_base,
-                    attributes,
-                    state,
-                )?;
-            }
-
-            va = va.get_next_va(level)?;
-        }
-
-        Ok(())
-    }
-
     fn query_memory_region_internal(
         &self,
         start_va: VirtualAddress,
@@ -470,7 +404,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         };
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
         // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
-        // of the self map. This can only occur in the query, due to map/remap/unmap explicitly ensuring we are not
+        // of the self map. This can only occur in the query, due to map/unmap explicitly ensuring we are not
         // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
         // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
         // work around this by simply iterating on the indices instead of the iterator
@@ -565,15 +499,11 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         state: PageTableState,
         level: PageLevel,
     ) -> PtResult<()> {
-        if level.is_lowest_level() {
-            log::error!(
-                "Failed to split large page at VA {:#x?} as the level is the lowest level and cannot be split",
-                va
-            );
-            return Err(PtError::InvalidParameter);
-        }
+        let next_level = level.next_level().ok_or_else(|| {
+            log::error!("Failed to split large page at VA {:#x?} as this is the lowest level", va);
+            PtError::InvalidParameter
+        })?;
 
-        let next_level = level.next_level().unwrap();
         if !entry.points_to_pa(level) {
             log::error!("Failed to split large page at VA {va:#x?} as the entry does not point to a physical address",);
             return Err(PtError::InvalidParameter);
@@ -769,44 +699,6 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             PageLevel::root_level(self.paging_type),
             self.base,
             self.get_state(),
-        )
-    }
-
-    pub fn remap_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
-        let address = VirtualAddress::new(address);
-
-        self.validate_address_range(address, size)?;
-
-        let max_va = Arch::get_max_va(self.paging_type)?;
-
-        // Overflow check, size is 0-based
-        let top_va = (address + (size - 1))?;
-        if top_va > max_va {
-            return Err(PtError::InvalidMemoryRange);
-        }
-
-        let start_va = address;
-        let end_va = (address + (size - 1))?;
-        let state = self.get_state();
-
-        // make sure the memory region has same attributes set
-        let mut prev_attributes = RangeMappingState::Uninitialized;
-        self.query_memory_region_internal(
-            start_va,
-            end_va,
-            PageLevel::root_level(self.paging_type),
-            self.base,
-            &mut prev_attributes,
-            state,
-        )?;
-
-        self.remap_memory_region_internal(
-            start_va,
-            end_va,
-            PageLevel::root_level(self.paging_type),
-            self.base,
-            attributes,
-            state,
         )
     }
 
@@ -1211,17 +1103,6 @@ mod tests {
         let addr = 0xFFFF_FFFF_FFFF_0000;
         let size = 0x2000; // This will make top_va > max_va
         let res = pt.map_memory_region(addr, size, MemoryAttributes::empty());
-        assert_eq!(res, Err(PtError::InvalidMemoryRange));
-
-        allocator.cleanup();
-    }
-
-    #[test]
-    fn test_remap_memory_region_top_va_overflow() {
-        let (mut pt, allocator) = make_table();
-        let addr = 0xFFFF_FFFF_FFFF_0000;
-        let size = 0x2000;
-        let res = pt.remap_memory_region(addr, size, MemoryAttributes::empty());
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
 
         allocator.cleanup();
