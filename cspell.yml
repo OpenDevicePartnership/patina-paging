@@ -17,7 +17,7 @@ ignorePaths:
   - "**/*.asm"
   - "Makefile.toml"
   - "deny.toml"
-ignoreRegExpList: ["/0x[0-9a-fA-F]+/", ".*asm!\\(.*?\\);"]
+ignoreRegExpList: ["/0x[0-9a-fA-F]+/", ".*asm!\\([\\s\\S]*?\\);"]
 minWordLength: 5
 caseSensitive: false
 allowCompoundWords: true
