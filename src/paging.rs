@@ -355,7 +355,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             // This is at least either the entirety of a large page or a single page.
             if entry.get_present_bit() {
                 if entry.points_to_pa(level) {
-                    entry.set_present_bit(false, va);
+                    entry.unmap(va);
                 } else {
                     // This should always have another level if this is not a PA entry.
                     let next_level = level.next_level().unwrap();
@@ -929,6 +929,9 @@ mod tests {
         fn dump_entry_header() {
             // Dummy implementation for test
             println!("DummyPTE Header");
+        }
+        fn unmap(&mut self, _va: VirtualAddress) {
+            self.0 = 0;
         }
     }
 

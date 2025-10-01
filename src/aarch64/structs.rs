@@ -308,6 +308,13 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
 
         Ok(())
     }
+
+    fn unmap(&mut self, va: VirtualAddress) {
+        // PageTableEntryAArch64 is Copy, so we can make a copy to modify and then swap it in
+        let mut entry = *self;
+        entry.0 = 0;
+        self.swap_entry(entry.0, va.into());
+    }
 }
 
 #[cfg(test)]
