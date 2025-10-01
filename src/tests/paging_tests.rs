@@ -1280,6 +1280,66 @@ fn test_large_page_splitting() {
 }
 
 #[test]
+fn test_map_unmap_remap_large_page_subregion() {
+    // This test maps a large page (2MB), does an unmap for that, then maps a 4KB subregion within that range.
+    let large_page_size = 0x200000; // 2MB
+    let base_address = 0x400000;
+    let subregion_offset = 0x10000; // 64KB offset into the large page
+    let subregion_address = base_address + subregion_offset;
+    let subregion_size = PAGE_SIZE;
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(base_address, large_page_size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages + 1, paging_type); // +1 for possible PT split
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let large_attr = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        let subregion_attr = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
+
+        // Map the full 2MB large page
+        let res = pt.map_memory_region(base_address, large_page_size, large_attr);
+        assert!(res.is_ok());
+
+        // Confirm the full range is mapped with large_attr
+        for offset in (0..large_page_size).step_by(PAGE_SIZE as usize) {
+            let res = pt.query_memory_region(base_address + offset, PAGE_SIZE);
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), large_attr);
+        }
+
+        // Unmap the full 2MB large page
+        let res = pt.unmap_memory_region(base_address, large_page_size);
+        assert!(res.is_ok());
+
+        // Confirm the full range is unmapped
+        for offset in (0..large_page_size).step_by(PAGE_SIZE as usize) {
+            let res = pt.query_memory_region(base_address + offset, PAGE_SIZE);
+            assert!(res.is_err());
+        }
+
+        // Map a 4KB subregion within the original large page range
+        let res = pt.map_memory_region(subregion_address, subregion_size, subregion_attr);
+        assert!(res.is_ok());
+
+        // Confirm only the subregion is mapped, rest is unmapped
+        for offset in (0..large_page_size).step_by(PAGE_SIZE as usize) {
+            let addr = base_address + offset;
+            let res = pt.query_memory_region(addr, PAGE_SIZE);
+            if addr == subregion_address {
+                assert!(res.is_ok());
+                assert_eq!(res.unwrap(), subregion_attr);
+            } else {
+                assert!(res.is_err());
+            }
+        }
+    });
+}
+
+#[test]
 fn test_install_page_table() {
     let address = 0x1000;
 

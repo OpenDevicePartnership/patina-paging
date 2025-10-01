@@ -276,6 +276,17 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
     fn entry_ptr_address(&self) -> u64 {
         self as *const _ as u64
     }
+
+    fn unmap(&mut self, va: VirtualAddress) {
+        // PageTableEntryX64 is Copy, so we can make a copy to modify and then swap it in
+        let mut copy = *self;
+        copy.0 = 0;
+        let prev_valid = self.present();
+        self.swap(&copy);
+        if prev_valid {
+            invalidate_tlb(va);
+        }
+    }
 }
 
 #[cfg(test)]

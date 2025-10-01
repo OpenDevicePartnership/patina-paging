@@ -49,4 +49,5 @@ pub(crate) trait PageTableEntry {
     fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()>;
     fn points_to_pa(&self, level: PageLevel) -> bool;
     fn entry_ptr_address(&self) -> u64;
+    fn unmap(&mut self, va: VirtualAddress);
 }
