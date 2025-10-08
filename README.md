@@ -170,6 +170,6 @@ General paging related documentation `docs\paging.md`
 [ci]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/ci-workflow.yml/badge.svg?branch=main&event=push
 [_ci]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/ci-workflow.yml
 [miri]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/miri-workflow.yml/badge.svg?branch=main
-[_miri_]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/miri-workflow.yml
+[_miri]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/miri-workflow.yml
 [codcov]: https://codecov.io/github/OpenDevicePartnership/patina-paging/graph/badge.svg?token=TWVOCBXO2A
 [_codecov]: https://codecov.io/github/OpenDevicePartnership/patina-paging
