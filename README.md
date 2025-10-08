@@ -4,7 +4,7 @@
 [![commit]][_commit]
 [![ci]][_ci]
 [![miri]][_miri]
-[![codecov]][_codecov]
+[![cov]][_cov]
 
 ## Introduction
 
@@ -171,5 +171,5 @@ General paging related documentation `docs\paging.md`
 [_ci]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/ci-workflow.yml
 [miri]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/miri-workflow.yml/badge.svg?branch=main
 [_miri]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/miri-workflow.yml
-[codcov]: https://codecov.io/github/OpenDevicePartnership/patina-paging/graph/badge.svg?token=TWVOCBXO2A
-[_codecov]: https://codecov.io/github/OpenDevicePartnership/patina-paging
+[cov]: https://codecov.io/github/OpenDevicePartnership/patina-paging/graph/badge.svg?token=TWVOCBXO2A
+[_cov]: https://codecov.io/github/OpenDevicePartnership/patina-paging
