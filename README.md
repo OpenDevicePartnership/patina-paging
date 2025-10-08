@@ -1,5 +1,10 @@
 # CPU Paging Support
 
+[![release]][_release]
+[![commit]][_commit]
+[![ci]][_ci]
+[![miri]][_miri]
+
 ## Introduction
 
 This repo include the X64/AArch64 paging logic. You can generate API documentation by running `cargo make doc`. To
@@ -156,3 +161,12 @@ pub trait PageAllocator {
 
 More reference test cases are in `src\tests\x64_paging_tests.rs`
 General paging related documentation `docs\paging.md`
+
+[release]: https://img.shields.io/crates/v/patina_paging
+[_release]: https://github.com/OpenDevicePartnership/patina-paging/releases/latest
+[commit]: https://img.shields.io/github/commits-since/OpenDevicePartnership/patina-paging/latest/main?include_prereleases
+[_commit]: https://github.com/OpenDevicePartnership/patina-paging/commits/main/
+[ci]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/ci-workflow.yml/badge.svg?branch=main&event=push
+[_ci]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/ci-workflow.yml
+[miri]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/miri-workflow.yml/badge.svg?branch=main
+[_miri_]: https://github.com/OpenDevicePartnership/patina-paging/actions/workflows/miri-workflow.yml
