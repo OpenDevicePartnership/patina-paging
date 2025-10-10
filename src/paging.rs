@@ -410,7 +410,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         // work around this by simply iterating on the indices instead of the iterator
         let len = table.slice.len();
         for i in 0..len {
-            let entry = &mut table.slice[i];
+            let entry = &table.slice[i];
 
             if !entry.get_present_bit() {
                 // if we found an entry that is not present after finding entries that were already mapped,
@@ -565,14 +565,39 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
     ) -> PtResult<()> {
         let mut va = start_va;
 
+        // special case handling for zero VA and self map
+        if va == Arch::get_zero_va(self.paging_type)? {
+            log::info!("VA {va:#x?} is the zero VA");
+        } else if u64::from(va) == Arch::get_self_mapped_base(PageLevel::Level1, va, self.paging_type) {
+            log::info!("VA {va:#x?} is the self-mapped VA, only dumping the root entry");
+            let entry = get_entry::<Arch>(
+                PageLevel::root_level(self.paging_type),
+                self.paging_type,
+                PageTableStateWithAddress::NotSelfMapped(base),
+                va.get_index(PageLevel::root_level(self.paging_type)),
+            )?;
+            entry.dump_entry(va, PageLevel::root_level(self.paging_type))?;
+            return Ok(());
+        }
+
         let state_with_address = match state {
             PageTableState::ActiveSelfMapped => PageTableStateWithAddress::SelfMapped(start_va),
             _ => PageTableStateWithAddress::NotSelfMapped(base),
         };
         let table = PageTableRange::<Arch>::new(level, start_va, end_va, self.paging_type, state_with_address)?;
-        for entry in table.slice.iter() {
+        // there is a limitation in Rust's slice::iter_mut that will crash if we try to use a slice for the top level
+        // of the self map. This can only occur in the query, due to map/unmap explicitly ensuring we are not
+        // attempting those operations on the self map VA, but this pattern is replicated to all the other functions
+        // for consistency. See https://github.com/rust-lang/rust/issues/146911 for more details. As such, we need to
+        // work around this by simply iterating on the indices instead of the iterator
+        let len = table.slice.len();
+        for i in 0..len {
+            let entry = &table.slice[i];
+
+            entry.dump_entry(va, level)?;
             if !entry.get_present_bit() && !level.is_lowest_level() {
-                return Err(PtError::NoMapping);
+                va = va.get_next_va(level)?;
+                continue;
             }
 
             // split the va range appropriately for the next level pages
@@ -586,7 +611,6 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             // end of next level va. It will be minimum of next va and end va
             let next_level_end_va = VirtualAddress::min(curr_va_ceil, end_va);
 
-            entry.dump_entry(start_va, level)?;
             if entry.get_present_bit() && !entry.points_to_pa(level) {
                 let next_base = entry.get_next_address();
                 self.dump_page_tables_internal(
