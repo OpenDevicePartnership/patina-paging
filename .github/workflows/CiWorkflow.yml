@@ -16,10 +16,6 @@ on:
         required: false
         default: ""
         type: string
-    secrets:
-      PATINA_CRATES_IO_TOKEN:
-        description: "Token to access the crates.io registry"
-        required: true
 
 jobs:
   basic_ci:
@@ -70,27 +66,6 @@ jobs:
       - name: 🛠️ Download Rust Tools 🛠️
         uses: ./.github/actions/rust-tool-cache
 
-      - name: Setup Cred Provider
-        if: runner.os == 'Linux'
-        run: |
-          mkdir -p ~/.cargo
-          cat <<EOF >> ~/.cargo/config.toml
-          [registry]
-          global-credential-providers = ["cargo:token"]
-          EOF
-
-      - name: Setup Cred Provider
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $path = "$HOME\.cargo\config.toml"
-          New-Item -ItemType Directory -Force -Path "$HOME\.cargo" | Out-Null
-          "[registry]" | Out-File -Append -FilePath $path
-          'global-credential-providers = ["cargo:token"]' | Out-File -Append -FilePath $path
-
-      - name: Login to Registry
-        run: cargo login "${{ secrets.PATINA_CRATES_IO_TOKEN }}"
-
       - name: Run cargo-fmt
         run: cargo fmt --all --check
         env:
@@ -105,7 +80,7 @@ jobs:
           RUSTC_BOOTSTRAP: 1
 
       - name: Crate Release Dry Run
-        run: cargo release --no-tag --workspace --no-push --allow-branch '*'
+        run: cargo release alpha --no-tag --workspace --no-push --allow-branch '*'
         env:
           RUSTC_BOOTSTRAP: 1
 
