@@ -209,6 +209,11 @@ impl PageTableHal for PageTableArchX64 {
             },
         }
     }
+
+    fn invalidate_tlb_all() {
+        // SAFETY: The CR3 is not being changed, but re-written to flush the TLB.
+        unsafe { write_cr3(read_cr3()) };
+    }
 }
 
 /// Write CR3 register. Also invalidates TLB.

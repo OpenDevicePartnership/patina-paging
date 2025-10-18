@@ -272,6 +272,10 @@ impl PageTableHal for PageTableArchAArch64 {
             }
         }
     }
+
+    fn invalidate_tlb_all() {
+        reg::invalidate_tlb();
+    }
 }
 #[cfg(test)]
 mod hal_tests {
