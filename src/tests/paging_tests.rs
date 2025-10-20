@@ -12,6 +12,7 @@ use crate::{
     MemoryAttributes, PageTable, PagingType, PtError, PtResult,
     aarch64::{AArch64PageTable, PageTableArchAArch64},
     arch::PageTableHal,
+    page_allocator::PageAllocatorStub,
     structs::{PAGE_SIZE, PageLevel, VirtualAddress},
     tests::test_page_allocator::TestPageAllocator,
     x64::{PageTableArchX64, X64PageTable},
@@ -39,6 +40,8 @@ macro_rules! all_configs {
             #[allow(unused)]
             type Arch = PageTableArchX64;
             type PageTableType = X64PageTable<TestPageAllocator>;
+            #[allow(unused)]
+            type PageTableTypeStub = X64PageTable<PageAllocatorStub>;
             let paging_type = PagingType::Paging5Level;
             $body(paging_type)
         }
@@ -47,6 +50,8 @@ macro_rules! all_configs {
             #[allow(unused)]
             type Arch = PageTableArchX64;
             type PageTableType = X64PageTable<TestPageAllocator>;
+            #[allow(unused)]
+            type PageTableTypeStub = X64PageTable<PageAllocatorStub>;
             let paging_type = PagingType::Paging4Level;
             $body(paging_type)
         }
@@ -55,6 +60,8 @@ macro_rules! all_configs {
             #[allow(unused)]
             type Arch = PageTableArchAArch64;
             type PageTableType = AArch64PageTable<TestPageAllocator>;
+            #[allow(unused)]
+            type PageTableTypeStub = AArch64PageTable<PageAllocatorStub>;
             let paging_type = PagingType::Paging4Level;
             $body(paging_type)
         }
@@ -1138,8 +1145,9 @@ fn test_from_existing_page_table() {
         assert_eq!(page_allocator.pages_allocated(), num_pages);
 
         // Create a new page table from the existing one
-        let page_allocator = TestPageAllocator::new(0, paging_type);
-        let new_pt = unsafe { PageTableType::from_existing(pt.into_page_table_root(), page_allocator, paging_type) };
+        let page_allocator = PageAllocatorStub::new();
+        let new_pt =
+            unsafe { PageTableTypeStub::from_existing(pt.into_page_table_root(), page_allocator, paging_type) };
         assert!(new_pt.is_ok());
         let new_pt = new_pt.unwrap();
 
