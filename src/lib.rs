@@ -120,6 +120,9 @@ pub enum PtError {
 
     /// An internal error occurred. This usually indicates a bug in the paging implementation.
     InternalError,
+
+    /// Page table allocation failed.
+    AllocationFailure,
 }
 
 #[derive(Debug, PartialEq)]

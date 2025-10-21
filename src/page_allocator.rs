@@ -28,3 +28,34 @@ pub trait PageAllocator {
     ///
     fn allocate_page(&mut self, align: u64, size: u64, is_root: bool) -> PtResult<u64>;
 }
+
+/// A PageAllocator implementation that always fails to allocate pages. This can be useful when inspecting existing page
+/// tables where no new allocations are needed.
+#[derive(Default)]
+pub struct PageAllocatorStub;
+
+impl PageAllocatorStub {
+    /// Create a new PageAllocatorStub.
+    pub const fn new() -> Self {
+        PageAllocatorStub {}
+    }
+}
+
+impl PageAllocator for PageAllocatorStub {
+    fn allocate_page(&mut self, _align: u64, _size: u64, _is_root: bool) -> PtResult<u64> {
+        Err(crate::PtError::AllocationFailure)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::structs::PAGE_SIZE;
+
+    #[test]
+    fn test_page_allocator_stub() {
+        let mut allocator = PageAllocatorStub::new();
+        let result = allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false);
+        assert!(result.is_err());
+    }
+}
