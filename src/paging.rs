@@ -356,6 +356,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             if entry.get_present_bit() {
                 if entry.points_to_pa(level) {
                     entry.unmap(va);
+                    self.invalidate_selfmap(va, state, level)?;
                 } else {
                     // This should always have another level if this is not a PA entry.
                     let next_level = level.next_level().unwrap();
@@ -528,22 +529,8 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         // whichever operation called this function.
         entry.update_fields(Arch::DEFAULT_ATTRIBUTES, pa, false, level, va)?;
 
-        if matches!(state, PageTableState::ActiveSelfMapped) {
-            // invalidate the self map VA for the region covered by the large page. The next level of the self map
-            // may get pulled in by speculative execution, so we need to ensure the wrong mapping is not in the TLB
-            // before we have the correct mapping in place.
-            // this function gets called multiple times to split from larger pages to smaller pages, so we only invalidate
-            // once for the new page table we created
-            if let Ok(tb_entry) = get_entry::<Arch>(
-                next_level,
-                self.paging_type,
-                PageTableStateWithAddress::SelfMapped(va),
-                va.get_index(next_level),
-            ) {
-                // Invalidate the TLB entry for the self-mapped region
-                Arch::invalidate_tlb(tb_entry.entry_ptr_address().into());
-            }
-        }
+        // Invalidate the selfmap when needed.
+        self.invalidate_selfmap(va, state, level)?;
 
         self.map_memory_region_internal(
             large_page_start.into(),
@@ -623,6 +610,37 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             }
 
             va = va.get_next_va(level)?;
+        }
+
+        Ok(())
+    }
+
+    fn invalidate_selfmap(&self, va: VirtualAddress, state: PageTableState, level: PageLevel) -> PtResult<()> {
+        if !matches!(state, PageTableState::ActiveSelfMapped) {
+            return Ok(());
+        }
+
+        match level {
+            PageLevel::Level1 => {
+                // Nothing to do, self-map cannot reference level 1 physical addresses.
+            }
+            PageLevel::Level2 => {
+                // Invalidate the self map VA for the region covered by the large page. The next level of the self map
+                // may get pulled in by speculative execution, so we need to ensure the wrong mapping invalidated before
+                // the entry may be used again.
+                if let Ok(tb_entry) =
+                    get_entry::<Arch>(PageLevel::Level1, self.paging_type, PageTableStateWithAddress::SelfMapped(va), 0)
+                {
+                    // Invalidate the TLB entry for the self-mapped region
+                    Arch::invalidate_tlb(tb_entry.entry_ptr_address().into());
+                }
+            }
+            _ => {
+                // For pages larger then level2, there are multiple levels of self map that could have been
+                // speculatively pulled in, instead of walking all these we will simply invalidate the full
+                // TLB in this uncommon scenario.
+                Arch::invalidate_tlb_all();
+            }
         }
 
         Ok(())
@@ -900,6 +918,7 @@ mod tests {
         fn level_supports_pa_entry(_level: PageLevel) -> bool {
             true
         }
+        fn invalidate_tlb_all() {}
     }
 
     #[derive(Debug, Clone, Copy, PartialEq)]

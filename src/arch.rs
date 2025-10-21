@@ -23,6 +23,7 @@ pub(crate) trait PageTableHal {
     fn paging_type_supported(paging_type: PagingType) -> PtResult<()>;
     fn get_zero_va(paging_type: PagingType) -> PtResult<VirtualAddress>;
     fn invalidate_tlb(va: VirtualAddress);
+    fn invalidate_tlb_all();
     fn get_max_va(page_type: PagingType) -> PtResult<VirtualAddress>;
     fn is_table_active(base: u64) -> bool;
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
