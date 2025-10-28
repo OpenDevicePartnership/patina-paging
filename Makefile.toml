@@ -2,7 +2,6 @@
 default_to_workspace = false
 
 [env]
-RUSTC_BOOTSTRAP = 1
 BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings=html"
 UEFI_CRATES = "-p patina_paging"
 BUILD_CRATES = "-p patina_paging"

@@ -6,18 +6,20 @@
 //!
 //! SPDX-License-Identifier: Apache-2.0
 //!
-use crate::arch::{PageTableEntry, PageTableHal};
-use crate::page_allocator::PageAllocator;
-use crate::structs::{PAGE_SIZE, PageLevel, PhysicalAddress, VirtualAddress};
-use crate::{MemoryAttributes, PagingType};
-use crate::{PtError, PtResult};
+use crate::{
+    MemoryAttributes, PagingType, PtError, PtResult,
+    arch::{PageTableEntry, PageTableHal},
+    page_allocator::PageAllocator,
+    structs::{PAGE_SIZE, PageLevel, PhysicalAddress, VirtualAddress},
+};
 
 // Add this import if get_entry is defined in crate::paging or another module
-use crate::paging::PageTableStateWithAddress;
-use crate::paging::get_entry;
-use std::alloc::{GlobalAlloc, Layout, System};
-use std::cell::RefCell;
-use std::rc::Rc;
+use crate::paging::{PageTableStateWithAddress, get_entry};
+use std::{
+    alloc::{GlobalAlloc, Layout, System},
+    cell::RefCell,
+    rc::Rc,
+};
 
 // This struct will create a the buffer/memory needed for building the page
 // tables
