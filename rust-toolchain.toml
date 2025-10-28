@@ -1,5 +1,5 @@
 [toolchain]
-channel = "1.89.0"
+channel = "nightly-2025-09-19" # One day post 1.90.0
 components = ["rust-src", "clippy", "rustfmt", "rust-docs"]
 
 [tools]

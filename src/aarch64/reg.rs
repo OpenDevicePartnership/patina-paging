@@ -6,8 +6,10 @@
 //!
 //! SPDX-License-Identifier: Apache-2.0
 //!
-use core::ptr;
-use core::sync::atomic::{Ordering, compiler_fence};
+use core::{
+    ptr,
+    sync::atomic::{Ordering, compiler_fence},
+};
 
 use crate::structs::{PAGE_SIZE, PhysicalAddress};
 

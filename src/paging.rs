@@ -7,13 +7,11 @@
 //!
 //! SPDX-License-Identifier: Apache-2.0
 //!
-use core::marker::PhantomData;
-use core::slice;
+use core::{marker::PhantomData, slice};
 
 use crate::{
     MemoryAttributes, PagingType, PtError, PtResult, RangeMappingState,
-    arch::PageTableEntry,
-    arch::PageTableHal,
+    arch::{PageTableEntry, PageTableHal},
     page_allocator::PageAllocator,
     structs::{PAGE_SIZE, PageLevel, PhysicalAddress, SELF_MAP_INDEX, VirtualAddress, ZERO_VA_INDEX},
 };
@@ -880,8 +878,10 @@ impl<'a, Arch: PageTableHal> PageTableRange<'a, Arch> {
 #[coverage(off)]
 mod tests {
     use super::*;
-    use std::alloc::{Layout, alloc_zeroed};
-    use std::sync::atomic::{AtomicBool, AtomicU64};
+    use std::{
+        alloc::{Layout, alloc_zeroed},
+        sync::atomic::{AtomicBool, AtomicU64},
+    };
 
     static ACTIVE: AtomicBool = AtomicBool::new(false);
     static BASE: AtomicU64 = AtomicU64::new(0);

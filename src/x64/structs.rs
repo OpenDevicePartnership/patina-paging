@@ -293,9 +293,11 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
 #[coverage(off)]
 mod tests {
     use super::*;
-    use crate::MemoryAttributes;
-    use crate::arch::PageTableEntry;
-    use crate::structs::{PageLevel, PhysicalAddress, VirtualAddress};
+    use crate::{
+        MemoryAttributes,
+        arch::PageTableEntry,
+        structs::{PageLevel, PhysicalAddress, VirtualAddress},
+    };
 
     #[test]
     fn test_update_fields_sets_present_and_base_address() {
