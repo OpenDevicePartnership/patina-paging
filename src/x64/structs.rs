@@ -7,7 +7,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use crate::{
-    MemoryAttributes, PtResult,
+    MemoryAttributes, PtError,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
     x64::{PD, PDP, PML4, PML5, PT, invalidate_tlb},
 };
@@ -125,7 +125,7 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         leaf_entry: bool,
         level: PageLevel,
         va: VirtualAddress,
-    ) -> PtResult<()> {
+    ) -> Result<(), PtError> {
         // ensure break-before-make by working on a copy and then swapping. PageTableEntryX64 derives Copy, so this
         // will create a copy of the entry to modify
         let mut copy = *self;
@@ -193,7 +193,7 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         attributes
     }
 
-    fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()> {
+    fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> Result<(), PtError> {
         let nx = self.nx() as u64;
         let available_high = self.available_high() as u64;
         let page_table_base_address = self.page_table_base_address();

@@ -7,7 +7,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use crate::{
-    MemoryAttributes, PtError, PtResult,
+    MemoryAttributes, PtError,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
 };
 use bitfield_struct::bitfield;
@@ -102,7 +102,7 @@ impl PageTableEntryAArch64 {
         }
     }
 
-    fn set_attributes(&mut self, attributes: MemoryAttributes) -> PtResult<()> {
+    fn set_attributes(&mut self, attributes: MemoryAttributes) -> Result<(), PtError> {
         // This change pretty much follows the GcdAttributeToPageAttribute
         match attributes & MemoryAttributes::CacheAttributesMask {
             MemoryAttributes::Uncacheable => {
@@ -161,7 +161,7 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
         block: bool,
         level: PageLevel,
         va: VirtualAddress,
-    ) -> PtResult<()> {
+    ) -> Result<(), PtError> {
         if !pa.is_page_aligned() {
             return Err(PtError::UnalignedPageBase);
         }
@@ -248,7 +248,7 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
         );
     }
 
-    fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> PtResult<()> {
+    fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> Result<(), PtError> {
         let valid = self.valid() as u64;
         let table_desc = self.table_desc() as u64;
         let attribute_index = self.attribute_index();

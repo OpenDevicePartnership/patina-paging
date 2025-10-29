@@ -11,7 +11,7 @@ use core::{
     ops::{Add, Sub},
 };
 
-use crate::{PagingType, PtError, PtResult};
+use crate::{PagingType, PtError};
 
 // Constants for common sizes.
 pub const SIZE_4KB: u64 = 0x1000;
@@ -129,7 +129,7 @@ impl VirtualAddress {
     /// This will return the next virtual address that is aligned to the current entry.
     /// If the next address overflows, it will return the maximum virtual address, which occurs when querying the
     /// self map.
-    pub fn get_next_va(&self, level: PageLevel) -> PtResult<VirtualAddress> {
+    pub fn get_next_va(&self, level: PageLevel) -> Result<VirtualAddress, PtError> {
         self.round_up(level).add(1)
     }
 
@@ -155,7 +155,7 @@ impl VirtualAddress {
 
     /// This will return the range length between self and end (inclusive)
     /// In the case of underflow, it will return 0
-    pub fn length_through(&self, end: VirtualAddress) -> PtResult<u64> {
+    pub fn length_through(&self, end: VirtualAddress) -> Result<u64, PtError> {
         match end.0.checked_sub(self.0) {
             Some(0) => Ok(0),
             Some(result) => Ok(result + 1),
@@ -183,7 +183,7 @@ impl Display for VirtualAddress {
 }
 
 impl Add<u64> for VirtualAddress {
-    type Output = PtResult<Self>;
+    type Output = Result<Self, PtError>;
 
     fn add(self, rhs: u64) -> Self::Output {
         match self.0.checked_add(rhs) {
@@ -194,7 +194,7 @@ impl Add<u64> for VirtualAddress {
 }
 
 impl Sub<u64> for VirtualAddress {
-    type Output = PtResult<Self>;
+    type Output = Result<Self, PtError>;
 
     fn sub(self, rhs: u64) -> Self::Output {
         match self.0.checked_sub(rhs) {
