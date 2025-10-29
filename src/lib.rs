@@ -15,18 +15,18 @@
 //! ## Examples
 //!
 //! ``` rust
-//! use patina_paging::{aarch64, x64, MemoryAttributes, PageTable, PagingType, PtResult};
+//! use patina_paging::{aarch64, x64, MemoryAttributes, PageTable, PagingType, PtError};
 //! use patina_paging::page_allocator::PageAllocator;
 //!
 //! struct MyPageAllocator;
 //! impl PageAllocator for MyPageAllocator {
-//!    fn allocate_page(&mut self, align: u64, size: u64, is_root: bool) -> PtResult<u64> {
+//!    fn allocate_page(&mut self, align: u64, size: u64, is_root: bool) -> Result<u64, PtError> {
 //!       // Return page aligned address of the allocated page, or an error.
 //!       Ok(0)
 //!    }
 //! }
 //!
-//! fn main_x64() -> PtResult<()> {
+//! fn main_x64() -> Result<(), PtError> {
 //!     // Create a X64 page table.
 //!     let mut allocator = MyPageAllocator;
 //!     let mut page_table = x64::X64PageTable::new(allocator, PagingType::Paging4Level)?;
@@ -39,7 +39,7 @@
 //!     Ok(())
 //! }
 //!
-//! fn main_aarch64() -> PtResult<()> {
+//! fn main_aarch64() -> Result<(), PtError> {
 //!     // Create a AArch64 page table.
 //!     let mut allocator = MyPageAllocator;
 //!     let mut page_table = aarch64::AArch64PageTable::new(allocator, PagingType::Paging4Level)?;
@@ -73,8 +73,6 @@ pub(crate) mod structs;
 mod tests;
 pub mod x64;
 use bitflags::bitflags;
-
-pub type PtResult<T> = Result<T, PtError>;
 
 /// Paging error codes. These are used to indicate errors that occur during
 /// paging operations. The errors are returned as a `Result` type, where
@@ -182,7 +180,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
+    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> Result<(), PtError>;
 
     /// Function to unmap the memory region provided by the caller. The
     /// requested memory region must be fully mapped prior to this call. The
@@ -195,13 +193,13 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()>;
+    fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError>;
 
     /// Function to install the page table from this page table instance.
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn install_page_table(&mut self) -> PtResult<()>;
+    fn install_page_table(&mut self) -> Result<(), PtError>;
 
     /// Function to query the mapping status and return attribute of supplied
     /// memory region if it is properly and consistently mapped.
@@ -215,7 +213,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(MemoryAttributes)` if successful else `Err(PtError)` if failed
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes>;
+    fn query_memory_region(&self, address: u64, size: u64) -> Result<MemoryAttributes, PtError>;
 
     /// Function to dump memory ranges with their attributes. It uses current
     /// cr3 as the base. This function can be used from
@@ -224,7 +222,7 @@ pub trait PageTable {
     /// ## Arguments
     /// * `address` - The memory address to map.
     /// * `size` - The memory size to map.
-    fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()>;
+    fn dump_page_tables(&self, address: u64, size: u64) -> Result<(), PtError>;
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

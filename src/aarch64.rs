@@ -11,7 +11,7 @@ use reg::ExceptionLevel;
 use structs::*;
 
 use crate::{
-    MemoryAttributes, PageTable, PagingType, PtError, PtResult,
+    MemoryAttributes, PageTable, PagingType, PtError,
     arch::PageTableHal,
     page_allocator::PageAllocator,
     paging::PageTableInternal,
@@ -73,7 +73,7 @@ pub struct AArch64PageTable<P: PageAllocator> {
 }
 
 impl<P: PageAllocator> AArch64PageTable<P> {
-    pub fn new(page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
+    pub fn new(page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
         let internal = PageTableInternal::new(page_allocator, paging_type)?;
         Ok(Self { internal })
     }
@@ -87,7 +87,7 @@ impl<P: PageAllocator> AArch64PageTable<P> {
     /// PFNs in the provided base, so that caller is responsible for ensuring
     /// safety of that base.
     ///
-    pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
+    pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
         let internal = unsafe { PageTableInternal::from_existing(base, page_allocator, paging_type)? };
         Ok(Self { internal })
     }
@@ -104,23 +104,23 @@ impl<P: PageAllocator> PageTable for AArch64PageTable<P> {
         address: u64,
         size: u64,
         attributes: crate::MemoryAttributes,
-    ) -> crate::PtResult<()> {
+    ) -> Result<(), PtError> {
         self.internal.map_memory_region(address, size, attributes)
     }
 
-    fn unmap_memory_region(&mut self, address: u64, size: u64) -> crate::PtResult<()> {
+    fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError> {
         self.internal.unmap_memory_region(address, size)
     }
 
-    fn install_page_table(&mut self) -> crate::PtResult<()> {
+    fn install_page_table(&mut self) -> Result<(), PtError> {
         self.internal.install_page_table()
     }
 
-    fn query_memory_region(&self, address: u64, size: u64) -> crate::PtResult<crate::MemoryAttributes> {
+    fn query_memory_region(&self, address: u64, size: u64) -> Result<crate::MemoryAttributes, PtError> {
         self.internal.query_memory_region(address, size)
     }
 
-    fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()> {
+    fn dump_page_tables(&self, address: u64, size: u64) -> Result<(), PtError> {
         self.internal.dump_page_tables(address, size)
     }
 }
@@ -139,14 +139,14 @@ impl PageTableHal for PageTableArchAArch64 {
         unsafe { reg::zero_page(base.into()) };
     }
 
-    fn paging_type_supported(paging_type: crate::PagingType) -> crate::PtResult<()> {
+    fn paging_type_supported(paging_type: crate::PagingType) -> Result<(), PtError> {
         match paging_type {
             crate::PagingType::Paging4Level => Ok(()),
             _ => Err(PtError::UnsupportedPagingType),
         }
     }
 
-    fn get_zero_va(paging_type: crate::PagingType) -> crate::PtResult<VirtualAddress> {
+    fn get_zero_va(paging_type: crate::PagingType) -> Result<VirtualAddress, PtError> {
         match paging_type {
             crate::PagingType::Paging4Level => Ok(ZERO_VA_4_LEVEL.into()),
             _ => Err(PtError::UnsupportedPagingType),
@@ -157,7 +157,7 @@ impl PageTableHal for PageTableArchAArch64 {
         reg::update_translation_table_entry(0, va.into());
     }
 
-    fn get_max_va(page_type: crate::PagingType) -> crate::PtResult<VirtualAddress> {
+    fn get_max_va(page_type: crate::PagingType) -> Result<VirtualAddress, PtError> {
         match page_type {
             crate::PagingType::Paging4Level => Ok(MAX_VA_4_LEVEL.into()),
             _ => Err(PtError::UnsupportedPagingType),
@@ -170,7 +170,7 @@ impl PageTableHal for PageTableArchAArch64 {
 
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
-    unsafe fn install_page_table(base: u64) -> crate::PtResult<()> {
+    unsafe fn install_page_table(base: u64) -> Result<(), PtError> {
         // This step will need to configure the MMU and then activate it on the newly created table.
 
         if !reg::is_mmu_enabled() {

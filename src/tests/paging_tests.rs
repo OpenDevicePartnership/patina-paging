@@ -9,7 +9,7 @@
 use log::{Level, LevelFilter, Metadata, Record};
 
 use crate::{
-    MemoryAttributes, PageTable, PagingType, PtError, PtResult,
+    MemoryAttributes, PageTable, PagingType, PtError,
     aarch64::{AArch64PageTable, PageTableArchAArch64},
     arch::PageTableHal,
     page_allocator::PageAllocatorStub,
@@ -94,7 +94,7 @@ fn subtree_num_pages<Arch: PageTableHal>(
     mut address: VirtualAddress,
     mut size: u64,
     level: PageLevel,
-) -> PtResult<u64> {
+) -> Result<u64, PtError> {
     assert!(address.is_page_aligned());
     assert!(size > 0);
     assert!(VirtualAddress::new(size).is_page_aligned());
@@ -141,7 +141,11 @@ fn subtree_num_pages<Arch: PageTableHal>(
     Ok(pages)
 }
 
-fn num_page_tables_required<Arch: PageTableHal>(address: u64, size: u64, paging_type: PagingType) -> PtResult<u64> {
+fn num_page_tables_required<Arch: PageTableHal>(
+    address: u64,
+    size: u64,
+    paging_type: PagingType,
+) -> Result<u64, PtError> {
     let address = VirtualAddress::new(address);
     if size == 0 || !address.is_page_aligned() {
         return Err(PtError::UnalignedAddress);

@@ -18,7 +18,7 @@ mod tests;
 use structs::{CR3_PAGE_BASE_ADDRESS_MASK, MAX_VA_4_LEVEL, MAX_VA_5_LEVEL, ZERO_VA_4_LEVEL, ZERO_VA_5_LEVEL};
 
 use crate::{
-    MemoryAttributes, PageTable, PagingType, PtResult,
+    MemoryAttributes, PageTable, PagingType, PtError,
     arch::PageTableHal,
     page_allocator::PageAllocator,
     paging::PageTableInternal,
@@ -41,7 +41,7 @@ pub struct X64PageTable<P: PageAllocator> {
 }
 
 impl<P: PageAllocator> X64PageTable<P> {
-    pub fn new(page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
+    pub fn new(page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
         let internal = PageTableInternal::new(page_allocator, paging_type)?;
         Ok(Self { internal })
     }
@@ -55,7 +55,7 @@ impl<P: PageAllocator> X64PageTable<P> {
     /// PFNs in the provided base, so that caller is responsible for ensuring
     /// safety of that base.
     ///
-    pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
+    pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
         let internal = unsafe { PageTableInternal::from_existing(base, page_allocator, paging_type)? };
         Ok(Self { internal })
     }
@@ -72,26 +72,26 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
         address: u64,
         size: u64,
         attributes: crate::MemoryAttributes,
-    ) -> crate::PtResult<()> {
+    ) -> Result<(), PtError> {
         check_canonical_range(address, size, self.internal.paging_type)?;
         self.internal.map_memory_region(address, size, attributes)
     }
 
-    fn unmap_memory_region(&mut self, address: u64, size: u64) -> crate::PtResult<()> {
+    fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError> {
         check_canonical_range(address, size, self.internal.paging_type)?;
         self.internal.unmap_memory_region(address, size)
     }
 
-    fn install_page_table(&mut self) -> crate::PtResult<()> {
+    fn install_page_table(&mut self) -> Result<(), PtError> {
         self.internal.install_page_table()
     }
 
-    fn query_memory_region(&self, address: u64, size: u64) -> crate::PtResult<crate::MemoryAttributes> {
+    fn query_memory_region(&self, address: u64, size: u64) -> Result<crate::MemoryAttributes, PtError> {
         check_canonical_range(address, size, self.internal.paging_type)?;
         self.internal.query_memory_region(address, size)
     }
 
-    fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()> {
+    fn dump_page_tables(&self, address: u64, size: u64) -> Result<(), PtError> {
         self.internal.dump_page_tables(address, size)
     }
 }
@@ -124,14 +124,14 @@ impl PageTableHal for PageTableArchX64 {
         unsafe { ptr::write_bytes(Into::<u64>::into(page) as *mut u8, 0, PAGE_SIZE as usize) };
     }
 
-    fn paging_type_supported(paging_type: PagingType) -> PtResult<()> {
+    fn paging_type_supported(paging_type: PagingType) -> Result<(), PtError> {
         match paging_type {
             PagingType::Paging5Level => Ok(()),
             PagingType::Paging4Level => Ok(()),
         }
     }
 
-    fn get_zero_va(paging_type: PagingType) -> PtResult<VirtualAddress> {
+    fn get_zero_va(paging_type: PagingType) -> Result<VirtualAddress, PtError> {
         match paging_type {
             PagingType::Paging5Level => Ok(ZERO_VA_5_LEVEL.into()),
             PagingType::Paging4Level => Ok(ZERO_VA_4_LEVEL.into()),
@@ -142,7 +142,7 @@ impl PageTableHal for PageTableArchX64 {
         invalidate_tlb(va);
     }
 
-    fn get_max_va(paging_type: PagingType) -> PtResult<VirtualAddress> {
+    fn get_max_va(paging_type: PagingType) -> Result<VirtualAddress, PtError> {
         match paging_type {
             PagingType::Paging5Level => Ok(MAX_VA_5_LEVEL.into()),
             PagingType::Paging4Level => Ok(MAX_VA_4_LEVEL.into()),
@@ -155,7 +155,7 @@ impl PageTableHal for PageTableArchX64 {
 
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
-    unsafe fn install_page_table(base: u64) -> PtResult<()> {
+    unsafe fn install_page_table(base: u64) -> Result<(), PtError> {
         unsafe {
             write_cr3(base);
         }
@@ -247,7 +247,7 @@ fn read_cr3() -> u64 {
 }
 
 /// Checks if the given address is canonical.
-fn check_canonical_range(address: u64, size: u64, paging_type: PagingType) -> PtResult<()> {
+fn check_canonical_range(address: u64, size: u64, paging_type: PagingType) -> Result<(), PtError> {
     // For a canonical address, the bits 63 though the max bit supported by the
     // paging type must be all 0s or all 1s. Get the mask for this range.
     let max_bit = paging_type.linear_address_bits() - 1;

@@ -62,7 +62,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()>;
+    fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> Result<(), PtError>;
 
     /// Function to unmap the memory region provided by the caller. The
     /// requested memory region must be fully mapped prior to this call. The
@@ -75,13 +75,13 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()>;
+    fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError>;
 
     /// Function to install the page table from this page table instance.
     ///
     /// ## Errors
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
-    fn install_page_table(&self) -> PtResult<()>;
+    fn install_page_table(&self) -> Result<(), PtError>;
 
     /// Function to query the mapping status and return attribute of supplied
     /// memory region if it is properly and consistently mapped.
@@ -95,7 +95,7 @@ pub trait PageTable {
     ///
     /// ## Errors
     /// * Returns `Ok(MemoryAttributes)` if successful else `Err(PtError)` if failed
-    fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes>;
+    fn query_memory_region(&self, address: u64, size: u64) -> Result<MemoryAttributes, PtError>;
 
     /// Function to dump memory ranges with their attributes. It uses current
     /// cr3 as the base.
@@ -137,8 +137,8 @@ pub trait PageAllocator {
     /// * `size` - on x64 this will be 4KB page size.
     ///
     /// ## Returns
-    /// * `PtResult<u64>` - Physical address of the allocated page.
-    fn allocate_page(&mut self, align: u64, size: u64) -> PtResult<u64>;
+    /// * `Result<u64, PtError>` - Physical address of the allocated page.
+    fn allocate_page(&mut self, align: u64, size: u64) -> Result<u64, PtError>;
 }
 ```
 

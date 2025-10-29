@@ -7,7 +7,7 @@
 //! SPDX-License-Identifier: Apache-2.0
 //!
 use crate::{
-    MemoryAttributes, PagingType, PtError, PtResult,
+    MemoryAttributes, PagingType, PtError,
     arch::{PageTableEntry, PageTableHal},
     page_allocator::PageAllocator,
     structs::{PAGE_SIZE, PageLevel, PhysicalAddress, VirtualAddress},
@@ -201,13 +201,13 @@ impl TestPageAllocator {
         self.ref_impl.borrow().get_memory_base()
     }
 
-    fn get_page(&self, index: u64) -> PtResult<*const u64> {
+    fn get_page(&self, index: u64) -> Result<*const u64, PtError> {
         self.ref_impl.borrow().get_page(index)
     }
 }
 
 impl PageAllocator for TestPageAllocator {
-    fn allocate_page(&mut self, align: u64, size: u64, _is_root: bool) -> PtResult<u64> {
+    fn allocate_page(&mut self, align: u64, size: u64, _is_root: bool) -> Result<u64, PtError> {
         assert!(size == PAGE_SIZE);
         self.ref_impl.borrow_mut().allocate_page(align, size)
     }
@@ -235,7 +235,7 @@ impl TestPageAllocatorImpl {
         Self { memory: (ptr, layout), page_index: 0, max_pages: num_pages }
     }
 
-    fn allocate_page(&mut self, _align: u64, _size: u64) -> PtResult<u64> {
+    fn allocate_page(&mut self, _align: u64, _size: u64) -> Result<u64, PtError> {
         if self.page_index >= self.max_pages {
             return Err(PtError::OutOfResources);
         }
@@ -245,7 +245,7 @@ impl TestPageAllocatorImpl {
         Ok(ptr)
     }
 
-    fn get_page(&self, index: u64) -> PtResult<*const u64> {
+    fn get_page(&self, index: u64) -> Result<*const u64, PtError> {
         if index >= self.page_index {
             return Err(PtError::OutOfResources);
         }

@@ -10,7 +10,7 @@
 use core::{marker::PhantomData, slice};
 
 use crate::{
-    MemoryAttributes, PagingType, PtError, PtResult, RangeMappingState,
+    MemoryAttributes, PagingType, PtError, RangeMappingState,
     arch::{PageTableEntry, PageTableHal},
     page_allocator::PageAllocator,
     structs::{PAGE_SIZE, PageLevel, PhysicalAddress, SELF_MAP_INDEX, VirtualAddress, ZERO_VA_INDEX},
@@ -38,7 +38,7 @@ pub struct PageTableInternal<P: PageAllocator, Arch: PageTableHal> {
 }
 
 impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
-    pub fn new(mut page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
+    pub fn new(mut page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
         Arch::paging_type_supported(paging_type)?;
         let root_level = PageLevel::root_level(paging_type);
 
@@ -118,7 +118,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
     /// PFNs in the provided base, so that caller is responsible for ensuring
     /// safety of that base.
     ///
-    pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> PtResult<Self> {
+    pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
         Arch::paging_type_supported(paging_type)?;
 
         let base = PhysicalAddress::new(base);
@@ -134,7 +134,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         self.base.into()
     }
 
-    pub fn allocate_page(&mut self, state: PageTableState) -> PtResult<PhysicalAddress> {
+    pub fn allocate_page(&mut self, state: PageTableState) -> Result<PhysicalAddress, PtError> {
         let base = self.page_allocator.allocate_page(PAGE_SIZE, PAGE_SIZE, false)?;
         let base_pa = PhysicalAddress::new(base);
         if !base_pa.is_page_aligned() {
@@ -244,7 +244,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         base: PhysicalAddress,
         attributes: MemoryAttributes,
         state: PageTableState,
-    ) -> PtResult<()> {
+    ) -> Result<(), PtError> {
         let mut va = start_va;
 
         let state_with_address = match state {
@@ -325,7 +325,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         level: PageLevel,
         base: PhysicalAddress,
         state: PageTableState,
-    ) -> PtResult<()> {
+    ) -> Result<(), PtError> {
         let mut va = start_va;
 
         let state_with_address = match state {
@@ -394,7 +394,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         base: PhysicalAddress,
         prev_attributes: &mut RangeMappingState,
         state: PageTableState,
-    ) -> PtResult<MemoryAttributes> {
+    ) -> Result<MemoryAttributes, PtError> {
         let mut va = start_va;
 
         let state_with_address = match state {
@@ -497,7 +497,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         entry: &mut Arch::PTE,
         state: PageTableState,
         level: PageLevel,
-    ) -> PtResult<()> {
+    ) -> Result<(), PtError> {
         let next_level = level.next_level().ok_or_else(|| {
             log::error!("Failed to split large page at VA {:#x?} as this is the lowest level", va);
             PtError::InvalidParameter
@@ -547,7 +547,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         level: PageLevel,
         base: PhysicalAddress,
         state: PageTableState,
-    ) -> PtResult<()> {
+    ) -> Result<(), PtError> {
         let mut va = start_va;
 
         // special case handling for zero VA and self map
@@ -613,7 +613,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         Ok(())
     }
 
-    fn invalidate_selfmap(&self, va: VirtualAddress, state: PageTableState, level: PageLevel) -> PtResult<()> {
+    fn invalidate_selfmap(&self, va: VirtualAddress, state: PageTableState, level: PageLevel) -> Result<(), PtError> {
         if !matches!(state, PageTableState::ActiveSelfMapped) {
             return Ok(());
         }
@@ -644,7 +644,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         Ok(())
     }
 
-    fn validate_address_range(&self, address: VirtualAddress, size: u64) -> PtResult<()> {
+    fn validate_address_range(&self, address: VirtualAddress, size: u64) -> Result<(), PtError> {
         if size == 0 {
             return Err(PtError::InvalidMemoryRange);
         }
@@ -690,7 +690,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         }
     }
 
-    pub fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> PtResult<()> {
+    pub fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> Result<(), PtError> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -717,7 +717,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         )
     }
 
-    pub fn unmap_memory_region(&mut self, address: u64, size: u64) -> PtResult<()> {
+    pub fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -742,12 +742,12 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         )
     }
 
-    pub fn install_page_table(&mut self) -> PtResult<()> {
+    pub fn install_page_table(&mut self) -> Result<(), PtError> {
         // SAFETY: The page table structure should guarantee that the page table is correct.
         unsafe { Arch::install_page_table(self.base.into()) }
     }
 
-    pub fn query_memory_region(&self, address: u64, size: u64) -> PtResult<MemoryAttributes> {
+    pub fn query_memory_region(&self, address: u64, size: u64) -> Result<MemoryAttributes, PtError> {
         let address = VirtualAddress::new(address);
 
         self.validate_address_range(address, size)?;
@@ -766,7 +766,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         )
     }
 
-    pub fn dump_page_tables(&self, address: u64, size: u64) -> PtResult<()> {
+    pub fn dump_page_tables(&self, address: u64, size: u64) -> Result<(), PtError> {
         if self.validate_address_range(address.into(), size).is_err() {
             log::error!("Invalid address range for page table dump! Address: {address:#x?}, Size: {size:#x?}");
             return Err(PtError::InvalidMemoryRange);
@@ -830,7 +830,7 @@ pub(crate) fn get_entry<'a, Arch: PageTableHal>(
     paging_type: PagingType,
     state: PageTableStateWithAddress,
     index: u64,
-) -> PtResult<&'a mut Arch::PTE> {
+) -> Result<&'a mut Arch::PTE, PtError> {
     // SAFETY: We are using the page table as provided to the HW and are parsing it in the same manner as defined
     // by the architecture. This is inherently unsafe because we are trusting that the page table is valid. The
     // rest of the code in this module is designed to ensure that the page table is valid and consistent.
@@ -854,7 +854,7 @@ impl<'a, Arch: PageTableHal> PageTableRange<'a, Arch> {
         end_va: VirtualAddress,
         paging_type: PagingType,
         state: PageTableStateWithAddress,
-    ) -> PtResult<Self> {
+    ) -> Result<Self, PtError> {
         // SAFETY: We are using the page table as provided to the HW and are parsing it in the same manner as defined
         // by the architecture. This is inherently unsafe because we are trusting that the page table is valid. The
         // rest of the code in this module is designed to ensure that the page table is valid and consistent.
@@ -894,24 +894,24 @@ mod tests {
         const MAX_ENTRIES: usize = 512;
         const DEFAULT_ATTRIBUTES: MemoryAttributes = MemoryAttributes::empty();
 
-        fn paging_type_supported(_paging_type: PagingType) -> PtResult<()> {
+        fn paging_type_supported(_paging_type: PagingType) -> Result<(), PtError> {
             Ok(())
         }
         fn get_self_mapped_base(_level: PageLevel, _va: VirtualAddress, _paging_type: PagingType) -> u64 {
             // for the test we can't use the real self map, so just return the PT base
             BASE.load(std::sync::atomic::Ordering::Relaxed)
         }
-        fn get_zero_va(_paging_type: PagingType) -> PtResult<VirtualAddress> {
+        fn get_zero_va(_paging_type: PagingType) -> Result<VirtualAddress, PtError> {
             Ok(VirtualAddress::new(0x1000))
         }
-        fn get_max_va(_paging_type: PagingType) -> PtResult<VirtualAddress> {
+        fn get_max_va(_paging_type: PagingType) -> Result<VirtualAddress, PtError> {
             Ok(VirtualAddress::new(0xFFFF_FFFF_FFFF_0000))
         }
         fn is_table_active(_base: u64) -> bool {
             ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
         }
         unsafe fn zero_page(_va: VirtualAddress) {}
-        unsafe fn install_page_table(_base: u64) -> PtResult<()> {
+        unsafe fn install_page_table(_base: u64) -> Result<(), PtError> {
             Ok(())
         }
         fn invalidate_tlb(_va: VirtualAddress) {}
@@ -954,7 +954,7 @@ mod tests {
             present: bool,
             _level: PageLevel,
             _va: VirtualAddress,
-        ) -> PtResult<()> {
+        ) -> Result<(), PtError> {
             let mut addr: u64 = pa.into();
             addr &= !0xFFF;
             self.0 = addr | attrs.bits() | if present { 0x8000_0000_0000_0000 } else { 0 };
@@ -963,7 +963,7 @@ mod tests {
         fn get_attributes(&self) -> MemoryAttributes {
             MemoryAttributes::from_bits_truncate(self.0 & 0x0000_0000_0000_0FFF)
         }
-        fn dump_entry(&self, _va: VirtualAddress, _level: PageLevel) -> PtResult<()> {
+        fn dump_entry(&self, _va: VirtualAddress, _level: PageLevel) -> Result<(), PtError> {
             Ok(())
         }
         fn entry_ptr_address(&self) -> u64 {
@@ -999,7 +999,7 @@ mod tests {
         }
     }
     impl PageAllocator for DummyAllocator {
-        fn allocate_page(&mut self, _size: u64, _align: u64, is_root: bool) -> PtResult<u64> {
+        fn allocate_page(&mut self, _size: u64, _align: u64, is_root: bool) -> Result<u64, PtError> {
             let layout = Layout::from_size_align(PAGE_SIZE as usize, PAGE_SIZE as usize).unwrap();
             let ptr = unsafe { alloc_zeroed(layout) };
             if ptr.is_null() {

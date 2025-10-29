@@ -1,4 +1,4 @@
-use crate::PtResult;
+use crate::PtError;
 
 /// PageAllocator trait facilitates `allocate_page()` method for allocating new
 /// pages. This trait must be implemented by the consumer of this library.
@@ -24,9 +24,9 @@ pub trait PageAllocator {
     ///
     /// ## Returns
     ///
-    /// * `PtResult<u64>` - Physical address of the allocated page.
+    /// * `Result<u64, PtError>` - Physical address of the allocated page.
     ///
-    fn allocate_page(&mut self, align: u64, size: u64, is_root: bool) -> PtResult<u64>;
+    fn allocate_page(&mut self, align: u64, size: u64, is_root: bool) -> Result<u64, PtError>;
 }
 
 /// A PageAllocator implementation that always fails to allocate pages. This can be useful when inspecting existing page
@@ -42,7 +42,7 @@ impl PageAllocatorStub {
 }
 
 impl PageAllocator for PageAllocatorStub {
-    fn allocate_page(&mut self, _align: u64, _size: u64, _is_root: bool) -> PtResult<u64> {
+    fn allocate_page(&mut self, _align: u64, _size: u64, _is_root: bool) -> Result<u64, PtError> {
         Err(crate::PtError::AllocationFailure)
     }
 }
