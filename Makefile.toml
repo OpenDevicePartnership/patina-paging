@@ -5,7 +5,7 @@ default_to_workspace = false
 BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings=html"
 UEFI_CRATES = "-p patina_paging"
 BUILD_CRATES = "-p patina_paging"
-COV_FLAGS = { value = "--lcov --profile test --ignore-filename-regex **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
+COV_FLAGS = { value = "--profile test --ignore-filename-regex **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
 
 [env.development]
 RUSTC_PROFILE = "dev"
@@ -67,17 +67,30 @@ clear = true
 run_task = [{ name = ["check_no_std", "check_std", "check_tests"], parallel = true }]
 
 [tasks.test]
-description = "Builds all rust tests in the workspace. Example `cargo make test`"
-clear = true
-command = "cargo"
-args = ["test"]
-
-[tasks.coverage]
-description = "Build and run all tests and calculate coverage."
+description = "Run tests and collect coverage data without generating reports."
 install_crate = false
 clear = true
 command = "cargo"
-args = ["llvm-cov", "@@split(COV_FLAGS, )", "--output-path", "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target/lcov.info"]
+args = ["llvm-cov", "@@split(COV_FLAGS, )", "--no-report"]
+
+[tasks.coverage-lcov]
+description = "Generate an LCOV coverage report from collected data."
+install_crate = false
+clear = true
+command = "cargo"
+args = ["llvm-cov", "report", "--lcov", "--output-path", "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target/lcov.info"]
+
+[tasks.coverage-html]
+description = "Generate an HTML coverage report from collected data."
+install_crate = false
+clear = true
+command = "cargo"
+args = ["llvm-cov", "report", "--html", "--output-dir", "${CARGO_MAKE_WORKSPACE_WORKING_DIRECTORY}/target/coverage"]
+
+[tasks.coverage]
+description = "Build and run all tests and calculate coverage (runs test once and generates LCOV and HTML reports)."
+dependencies = ["test", "coverage-lcov", "coverage-html"]
+clear = true
 
 [tasks.clippy]
 description = "Run cargo clippy."
@@ -122,7 +135,6 @@ dependencies = [
     "cspell",
     "build-x64",
     "build-aarch64",
-    "test",
     "coverage",
     "fmt",
     "doc",
