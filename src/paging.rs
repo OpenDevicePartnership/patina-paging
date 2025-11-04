@@ -353,6 +353,12 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             // This is at least either the entirety of a large page or a single page.
             if entry.get_present_bit() {
                 if entry.points_to_pa(level) {
+                    if !level.is_lowest_level() {
+                        log::info!(
+                            "Unmapping large page VA {va:#X?} at level {level:?} pt entry address: {:#X?}",
+                            entry.entry_ptr_address()
+                        );
+                    }
                     entry.unmap(va);
                     self.invalidate_selfmap(va, state, level)?;
                 } else {
@@ -498,6 +504,11 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         state: PageTableState,
         level: PageLevel,
     ) -> Result<(), PtError> {
+        log::info!(
+            "Splitting large page at VA {va:#X?} at level {level:?} pt entry address: {:#X?}",
+            entry.entry_ptr_address()
+        );
+
         let next_level = level.next_level().ok_or_else(|| {
             log::error!("Failed to split large page at VA {:#x?} as this is the lowest level", va);
             PtError::InvalidParameter
