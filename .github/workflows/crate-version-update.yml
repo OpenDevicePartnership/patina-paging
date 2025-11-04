@@ -1,0 +1,31 @@
+# @file crate-version-updater
+#
+# A Github workflow that creates or updates a pull request to update the crate version numbers of local crates to match
+# the version specified in the current draft release tag.
+#
+# This workflow will only create a PR when triggered manually. However, it will run automatically after the "Update
+# Release Draft" workflow completes, to update the PR if it already exists.
+#
+##
+# Copyright (c) Microsoft Corporation.
+# SPDX-License-Identifier: Apache-2.0
+##
+name: Create Crate Version Update PR
+
+on:
+  workflow_run:
+    workflows: ["Update Release Draft"]
+    types: ["completed"]
+
+  workflow_dispatch:
+
+jobs:
+  crate-version-update-pr:
+    name: Run
+    uses: OpenDevicePartnership/patina-devops/.github/workflows/CrateVersionUpdater.yml@v0.2.2
+    with:
+      ignore-prefix: 'v'
+      create-pr: ${{ github.event_name == 'workflow_dispatch' }}
+    secrets: inherit
+    permissions:
+      contents: write
