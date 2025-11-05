@@ -25,8 +25,13 @@ words:
   - archs
   - civac
   - efiapi
+  - impls
+  - mdbook
   - mfence
   - nshst
+  - pdata
+  - pdbaltpath
+  - pdbhelper
   - sctlr
   - sysreg
   - uncacheable
