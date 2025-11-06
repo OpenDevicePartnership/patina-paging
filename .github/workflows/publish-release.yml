@@ -17,7 +17,7 @@ on:
 jobs:
   release:
     name: Release
-    uses: OpenDevicePartnership/patina-devops/.github/workflows/ReleaseWorkflow.yml@v0.2.2
+    uses: OpenDevicePartnership/patina-devops/.github/workflows/ReleaseWorkflow.yml@v0.3.0
     with:
       ignore-prefix: 'v'
     secrets: inherit
