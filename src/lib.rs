@@ -89,7 +89,7 @@ pub enum PtError {
     /// No mapping exists for the entire range.
     NoMapping,
 
-    /// The memory range is mapped with different attributes.
+    /// The attributes attempting to be set are incompatible
     IncompatibleMemoryAttributes,
 
     /// Provided base address is not aligned to the page size.
@@ -121,6 +121,9 @@ pub enum PtError {
 
     /// Page table allocation failed.
     AllocationFailure,
+
+    /// The attributes across the range are not the same
+    NonUniformMemoryAttributes,
 }
 
 #[derive(Debug, PartialEq)]

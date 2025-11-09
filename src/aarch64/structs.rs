@@ -106,6 +106,12 @@ impl PageTableEntryAArch64 {
         // This change pretty much follows the GcdAttributeToPageAttribute
         match attributes & MemoryAttributes::CacheAttributesMask {
             MemoryAttributes::Uncacheable => {
+                if !attributes.contains(MemoryAttributes::ExecuteProtect) {
+                    // Per ARM ARM v8 section B2.7.2, it is a programming error to have
+                    // any device memory that is executable.
+                    log::error!("Executable uncacheable memory is not allowed");
+                    return Err(PtError::IncompatibleMemoryAttributes);
+                }
                 self.set_attribute_index(0);
                 self.set_shareable(0);
             }
@@ -123,7 +129,7 @@ impl PageTableEntryAArch64 {
             }
             _ => {
                 log::error!("Invalid memory attributes: {attributes:?}");
-                return Err(PtError::InvalidParameter);
+                return Err(PtError::IncompatibleMemoryAttributes);
             }
         }
 
@@ -435,5 +441,24 @@ mod tests {
         let level = PageLevel::Level3;
         // Should not panic or error
         let _ = desc.dump_entry(va, level);
+    }
+
+    #[test]
+    fn test_set_attributes_uncacheable_execute_protect_error() {
+        let mut desc = PageTableEntryAArch64::new();
+        let attrs = MemoryAttributes::Uncacheable;
+        let res = desc.set_attributes(attrs);
+        assert!(matches!(res, Err(PtError::IncompatibleMemoryAttributes)));
+
+        let res = desc.set_attributes(attrs | MemoryAttributes::ExecuteProtect);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn test_set_attributes_with_multiple_cache_attrs() {
+        let mut desc = PageTableEntryAArch64::new();
+        let attrs = MemoryAttributes::Uncacheable | MemoryAttributes::WriteCombining;
+        let res = desc.set_attributes(attrs);
+        assert!(matches!(res, Err(PtError::IncompatibleMemoryAttributes)));
     }
 }
