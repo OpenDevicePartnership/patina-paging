@@ -438,7 +438,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     RangeMappingState::Unmapped => return Err(PtError::InconsistentMappingAcrossRange),
                     RangeMappingState::Mapped(attrs) => {
                         if *attrs != current_attributes {
-                            return Err(PtError::IncompatibleMemoryAttributes);
+                            return Err(PtError::NonUniformMemoryAttributes);
                         }
                     }
                 }
