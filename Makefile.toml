@@ -66,12 +66,20 @@ description = "Checks rust code for errors. Example `cargo make check`"
 clear = true
 run_task = [{ name = ["check_no_std", "check_std", "check_tests"], parallel = true }]
 
+[tasks.llvm-cov-clean]
+description = "Clean coverage data"
+private = true
+install_crate = false
+command = "cargo"
+args = ["llvm-cov", "clean", "--workspace"]
+
 [tasks.test]
 description = "Run tests and collect coverage data without generating reports."
 install_crate = false
 clear = true
 command = "cargo"
 args = ["llvm-cov", "@@split(COV_FLAGS, )", "--no-report"]
+dependencies = ["llvm-cov-clean"]
 
 [tasks.coverage-lcov]
 description = "Generate an LCOV coverage report from collected data."
