@@ -140,11 +140,11 @@ bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
     pub struct MemoryAttributes: u64 {
         // Memory Caching Attributes
-        const Uncacheable       = 0x00000000_00000001u64;
+        const Uncached       = 0x00000000_00000001u64;
         const WriteCombining    = 0x00000000_00000002u64;
         const WriteThrough      = 0x00000000_00000004u64;
         const Writeback         = 0x00000000_00000008u64;
-        const UncacheableExport = 0x00000000_00000010u64;
+        const UncachedExport = 0x00000000_00000010u64;
         const WriteProtect      = 0x00000000_00001000u64;
 
         // Memory Access Attributes
@@ -153,11 +153,11 @@ bitflags! {
         const ReadOnly          = 0x00000000_00020000u64;   // Maps to Read/Write bit on X64
 
 
-        const CacheAttributesMask = Self::Uncacheable.bits() |
+        const CacheAttributesMask = Self::Uncached.bits() |
                                    Self::WriteCombining.bits() |
                                    Self::WriteThrough.bits() |
                                    Self::Writeback.bits() |
-                                   Self::UncacheableExport.bits() |
+                                   Self::UncachedExport.bits() |
                                    Self::WriteProtect.bits();
 
         const AccessAttributesMask = Self::ReadProtect.bits() |
@@ -177,8 +177,8 @@ pub trait PageTable {
     /// * `address` - The memory address to map.
     /// * `size` - The memory size to map.
     /// * `attributes` - The memory attributes to map. The acceptable
-    ///   input will be ExecuteProtect, ReadOnly, as well as Uncacheable,
-    ///   WriteCombining, WriteThrough, Writeback, UncacheableExport
+    ///   input will be ExecuteProtect, ReadOnly, as well as Uncached,
+    ///   WriteCombining, WriteThrough, Writeback, UncachedExport
     ///   Compatible attributes can be "Ored"
     ///
     /// ## Errors

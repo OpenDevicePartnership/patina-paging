@@ -105,11 +105,11 @@ impl PageTableEntryAArch64 {
     fn set_attributes(&mut self, attributes: MemoryAttributes) -> Result<(), PtError> {
         // This change pretty much follows the GcdAttributeToPageAttribute
         match attributes & MemoryAttributes::CacheAttributesMask {
-            MemoryAttributes::Uncacheable => {
+            MemoryAttributes::Uncached => {
                 if !attributes.contains(MemoryAttributes::ExecuteProtect) {
                     // Per ARM ARM v8 section B2.7.2, it is a programming error to have
                     // any device memory that is executable.
-                    log::error!("Executable uncacheable memory is not allowed");
+                    log::error!("Executable Uncached memory is not allowed");
                     return Err(PtError::IncompatibleMemoryAttributes);
                 }
                 self.set_attribute_index(0);
@@ -213,11 +213,11 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
             attributes = MemoryAttributes::ReadProtect;
         } else {
             match self.attribute_index() {
-                0 => attributes |= MemoryAttributes::Uncacheable,
+                0 => attributes |= MemoryAttributes::Uncached,
                 1 => attributes |= MemoryAttributes::WriteCombining,
                 2 => attributes |= MemoryAttributes::WriteThrough,
                 3 => attributes |= MemoryAttributes::Writeback,
-                _ => attributes |= MemoryAttributes::Uncacheable,
+                _ => attributes |= MemoryAttributes::Uncached,
             }
 
             if self.access_permission() == 2 {
@@ -405,12 +405,12 @@ mod tests {
     }
 
     #[test]
-    fn test_get_attributes_uncacheable() {
+    fn test_get_attributes_uncached() {
         let mut desc = PageTableEntryAArch64::new();
         desc.set_valid(true);
         desc.set_attribute_index(0);
         let attrs = desc.get_attributes();
-        assert!(attrs.contains(MemoryAttributes::Uncacheable));
+        assert!(attrs.contains(MemoryAttributes::Uncached));
     }
 
     #[test]
@@ -444,9 +444,9 @@ mod tests {
     }
 
     #[test]
-    fn test_set_attributes_uncacheable_execute_protect_error() {
+    fn test_set_attributes_uncached_execute_protect_error() {
         let mut desc = PageTableEntryAArch64::new();
-        let attrs = MemoryAttributes::Uncacheable;
+        let attrs = MemoryAttributes::Uncached;
         let res = desc.set_attributes(attrs);
         assert!(matches!(res, Err(PtError::IncompatibleMemoryAttributes)));
 
@@ -457,7 +457,7 @@ mod tests {
     #[test]
     fn test_set_attributes_with_multiple_cache_attrs() {
         let mut desc = PageTableEntryAArch64::new();
-        let attrs = MemoryAttributes::Uncacheable | MemoryAttributes::WriteCombining;
+        let attrs = MemoryAttributes::Uncached | MemoryAttributes::WriteCombining;
         let res = desc.set_attributes(attrs);
         assert!(matches!(res, Err(PtError::IncompatibleMemoryAttributes)));
     }
