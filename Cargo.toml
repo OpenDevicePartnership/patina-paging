@@ -11,7 +11,7 @@ keywords = ["paging"]
 features = ["doc"]
 
 [dependencies]
-bitfield-struct = "0.10"
+bitfield-struct = "0.12"
 bitflags = "2.6.0"
 log = { version = "^0.4", default-features = false }
 cfg-if = "1.0.0"
