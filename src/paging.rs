@@ -275,6 +275,12 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                 && va.is_level_aligned(level)
                 && va.length_through(end_va)? >= level.entry_va_size()
             {
+                if !level.is_lowest_level() {
+                    log::info!(
+                        "OSDDEBUG2 mapping large page at VA {va:#X?} at level {level:?} pt entry address: {:#X?}",
+                        entry.entry_ptr_address()
+                    );
+                }
                 // This entry is large enough to be a whole entry for this supporting level,
                 // so we can map the whole range in one go.
                 entry.update_fields(attributes, va.into(), true, level, va)?;
@@ -353,6 +359,12 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             // This is at least either the entirety of a large page or a single page.
             if entry.get_present_bit() {
                 if entry.points_to_pa(level) {
+                    if !level.is_lowest_level() {
+                        log::info!(
+                            "Unmapping large page VA {va:#X?} at level {level:?} pt entry address: {:#X?}",
+                            entry.entry_ptr_address()
+                        );
+                    }
                     entry.unmap(va);
                     self.invalidate_selfmap(va, state, level)?;
                 } else {
@@ -498,6 +510,11 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         state: PageTableState,
         level: PageLevel,
     ) -> Result<(), PtError> {
+        log::info!(
+            "Splitting large page at VA {va:#X?} at level {level:?} pt entry address: {:#X?}",
+            entry.entry_ptr_address()
+        );
+
         let next_level = level.next_level().ok_or_else(|| {
             log::error!("Failed to split large page at VA {:#x?} as this is the lowest level", va);
             PtError::InvalidParameter
@@ -618,28 +635,30 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             return Ok(());
         }
 
-        match level {
-            PageLevel::Level1 => {
-                // Nothing to do, self-map cannot reference level 1 physical addresses.
-            }
-            PageLevel::Level2 => {
-                // Invalidate the self map VA for the region covered by the large page. The next level of the self map
-                // may get pulled in by speculative execution, so we need to ensure the wrong mapping invalidated before
-                // the entry may be used again.
-                if let Ok(tb_entry) =
-                    get_entry::<Arch>(PageLevel::Level1, self.paging_type, PageTableStateWithAddress::SelfMapped(va), 0)
-                {
-                    // Invalidate the TLB entry for the self-mapped region
-                    Arch::invalidate_tlb(tb_entry.entry_ptr_address().into());
-                }
-            }
-            _ => {
-                // For pages larger then level2, there are multiple levels of self map that could have been
-                // speculatively pulled in, instead of walking all these we will simply invalidate the full
-                // TLB in this uncommon scenario.
-                Arch::invalidate_tlb_all();
-            }
-        }
+        Arch::invalidate_tlb_all();
+
+        // match level {
+        //     PageLevel::Level1 => {
+        //         // Nothing to do, self-map cannot reference level 1 physical addresses.
+        //     }
+        //     PageLevel::Level2 => {
+        //         // Invalidate the self map VA for the region covered by the large page. The next level of the self map
+        //         // may get pulled in by speculative execution, so we need to ensure the wrong mapping invalidated before
+        //         // the entry may be used again.
+        //         if let Ok(tb_entry) =
+        //             get_entry::<Arch>(PageLevel::Level1, self.paging_type, PageTableStateWithAddress::SelfMapped(va), 0)
+        //         {
+        //             // Invalidate the TLB entry for the self-mapped region
+        //             Arch::invalidate_tlb(tb_entry.entry_ptr_address().into());
+        //         }
+        //     }
+        //     _ => {
+        //         // For pages larger then level2, there are multiple levels of self map that could have been
+        //         // speculatively pulled in, instead of walking all these we will simply invalidate the full
+        //         // TLB in this uncommon scenario.
+        //         Arch::invalidate_tlb_all();
+        //     }
+        // }
 
         Ok(())
     }
@@ -665,6 +684,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
     /// If our page table base is not in cr3, self-mapped entries won't work for this page table. Similarly, if the
     /// expected self-map entry is not present or does not point to the page table base, we can't use the self-map.
     fn get_state(&self) -> PageTableState {
+        unsafe { core::arch::asm!("dsb sy", "isb sy") };
         if !Arch::is_table_active(self.base.into()) {
             return PageTableState::Inactive;
         }
@@ -684,8 +704,10 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         };
 
         if !self_map_entry.get_present_bit() || self_map_entry.get_next_address() != self.base {
+            unsafe { core::arch::asm!("dsb sy", "isb sy") };
             PageTableState::ActiveIdentityMapped
         } else {
+            unsafe { core::arch::asm!("dsb sy", "isb sy") };
             PageTableState::ActiveSelfMapped
         }
     }
@@ -707,14 +729,17 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let start_va = address;
         let end_va = (address + (size - 1))?;
 
-        self.map_memory_region_internal(
+        let r = self.map_memory_region_internal(
             start_va,
             end_va,
             PageLevel::root_level(self.paging_type),
             self.base,
             attributes,
             self.get_state(),
-        )
+        );
+
+        Arch::invalidate_tlb_all();
+        r
     }
 
     pub fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError> {
@@ -733,13 +758,15 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let start_va = address;
         let end_va = (address + (size - 1))?;
 
-        self.unmap_memory_region_internal(
+        let r = self.unmap_memory_region_internal(
             start_va,
             end_va,
             PageLevel::root_level(self.paging_type),
             self.base,
             self.get_state(),
-        )
+        );
+        Arch::invalidate_tlb_all();
+        r
     }
 
     pub fn install_page_table(&mut self) -> Result<(), PtError> {
@@ -820,6 +847,8 @@ pub unsafe fn get_table<'a, T, Arch: PageTableHal>(
         PageTableStateWithAddress::NotSelfMapped(phys) => phys.into(),
     };
 
+    unsafe { core::arch::asm!("dsb sy", "isb sy") };
+
     // SAFETY: Architecturally, the page table is laid out as an array of entries of type T, and we are trusting that
     // the base address is valid and points to a page table of the correct type.
     unsafe { slice::from_raw_parts_mut(base as *mut T, Arch::MAX_ENTRIES) }
@@ -858,6 +887,7 @@ impl<'a, Arch: PageTableHal> PageTableRange<'a, Arch> {
         // SAFETY: We are using the page table as provided to the HW and are parsing it in the same manner as defined
         // by the architecture. This is inherently unsafe because we are trusting that the page table is valid. The
         // rest of the code in this module is designed to ensure that the page table is valid and consistent.
+        unsafe { core::arch::asm!("dsb sy", "isb sy") };
         let slice = unsafe { get_table::<Arch::PTE, Arch>(level, paging_type, state) };
         let start = start_va.get_index(level) as usize;
         let end = end_va.get_index(level) as usize;

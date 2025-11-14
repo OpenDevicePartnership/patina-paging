@@ -189,6 +189,8 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
         copy.set_table_desc(level == PageLevel::Level1 || !block);
         self.swap_entry(copy.0, va.into());
 
+        unsafe { core::arch::asm!("tlbi alle2", "dsb nsh", "isb sy", options(nostack)) };
+
         // TODO: need to flush the cache if operating on the active page table
         Ok(())
     }
@@ -238,6 +240,7 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
         let mut entry = *self;
         entry.set_valid(value);
         self.swap_entry(entry.0, va.into());
+        unsafe { core::arch::asm!("tlbi alle2", "dsb nsh", "isb sy", options(nostack)) };
     }
 
     fn points_to_pa(&self, level: PageLevel) -> bool {
