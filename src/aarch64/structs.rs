@@ -16,7 +16,7 @@ use bitfield_struct::bitfield;
 use crate::arch::PageTableEntry;
 
 // This is the maximum virtual address that can be used in the system because of our artificial restriction to use
-// the zero VA and self map index in the top level page table. This is a temporary restriction
+// the zero VA and self map index in the top level page table.
 pub(crate) const MAX_VA_4_LEVEL: u64 = 0x0000_FEFF_FFFF_FFFF;
 
 const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
@@ -33,9 +33,8 @@ pub(crate) const ZERO_VA_4_LEVEL: u64 = 0xFF00_0000_0000;
 // TTBR1. Bits 63:48 of the VA are used to select the root, so the self map must be at the top of the address space that
 // corresponds to TTBR0, as that is the only root that this crate currently uses. However, this limits the address range
 // supported by this crate as we steal the last two entries in the top level page table for the zero VA and the self
-// map. The crate explicitly panics if such high level addresses are used, but this will be fixed in a future version
-// of this crate so as not to artificially limit the address range lower than what is physically addressable by the
-// CPU.
+// map. The crate explicitly panics if such high level addresses are used. This is a permanent restriction because the
+// UEFI spec explicitly does not allow using TTBR1.
 pub(crate) const FOUR_LEVEL_LEVEL4_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_F000;
 pub(crate) const FOUR_LEVEL_LEVEL3_SELF_MAP_BASE: u64 = 0xFFFF_FFE0_0000;
 pub(crate) const FOUR_LEVEL_LEVEL2_SELF_MAP_BASE: u64 = 0xFFFF_C000_0000;
