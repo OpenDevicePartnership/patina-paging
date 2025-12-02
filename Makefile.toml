@@ -84,7 +84,7 @@ description = "Run tests and collect coverage data without generating reports."
 install_crate = false
 clear = true
 command = "cargo"
-args = ["llvm-cov", "@@split(COV_FLAGS, )", "--no-report"]
+args = ["llvm-cov", "@@split(COV_FLAGS, )", "--no-report", "--doctests"]
 dependencies = ["llvm-cov-clean"]
 
 [tasks.coverage-lcov]
