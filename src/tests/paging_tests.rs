@@ -8,15 +8,19 @@
 //!
 use log::{Level, LevelFilter, Metadata, Record};
 
+extern crate std;
+
 use crate::{
     MemoryAttributes, PageTable, PagingType, PtError,
     aarch64::{AArch64PageTable, PageTableArchAArch64},
-    arch::PageTableHal,
+    arch::{PageTableEntry, PageTableHal},
     page_allocator::PageAllocatorStub,
-    structs::{PAGE_SIZE, PageLevel, VirtualAddress},
+    structs::{PAGE_SIZE, PageLevel, SIZE_2MB, VirtualAddress},
     tests::test_page_allocator::TestPageAllocator,
     x64::{PageTableArchX64, X64PageTable},
 };
+
+use std::slice;
 
 macro_rules! all_archs {
     ($body:expr) => {{
@@ -1449,6 +1453,66 @@ fn test_install_page_table() {
             if res.is_err() {
                 log::error!("Page fault occurred while querying address: {test_address:#x}");
                 continue;
+            }
+        }
+    });
+}
+
+#[test]
+fn test_map_large_page_remap_subset_with_same_attributes() {
+    // This test maps a large page (2MB) then does another map for a 4KB subregion within that range with the same
+    // attributes to ensure no splitting occurs.
+    let large_page_size = 0x200000;
+    let base_address = 0x400000; // Purposefully choose a 2MB aligned address
+    let subregion_size = SIZE_2MB - PAGE_SIZE;
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(base_address, large_page_size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages + 1, paging_type); // +1 for possible PT split
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attr = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+
+        // Map the full 2MB large page
+        let res = pt.map_memory_region(base_address, large_page_size, attr);
+        assert!(res.is_ok());
+
+        // Confirm the range is mapped with the expected attributes
+        let res = pt.query_memory_region(base_address, SIZE_2MB);
+        assert!(res.is_ok());
+        assert_eq!(res.unwrap(), attr);
+
+        // Remap the subregion with the same attributes
+        let res = pt.map_memory_region(base_address, subregion_size, attr);
+        assert!(res.is_ok());
+
+        // Confirm we didn't split the large page by walking the page tables manually
+        let mut current_level = match paging_type {
+            PagingType::Paging5Level => PageLevel::Level5,
+            PagingType::Paging4Level => PageLevel::Level4,
+        };
+        let va = VirtualAddress::new(base_address);
+        let mut pt_base = pt.into_page_table_root();
+
+        loop {
+            let index = va.get_index(current_level);
+            // SAFETY: Architecturally, the page table is laid out as an array of entries of type T, and we are trusting that
+            // the base address is valid and points to a page table of the correct type.
+            let pt =
+                unsafe { slice::from_raw_parts_mut(pt_base as *mut <Arch as PageTableHal>::PTE, Arch::MAX_ENTRIES) };
+            let entry = pt.get(index as usize).unwrap();
+            if current_level == PageLevel::Level2 {
+                // At level 2, should still be a large page entry
+                assert!(entry.points_to_pa(current_level));
+                break;
+            } else {
+                assert!(entry.get_present_bit());
+                current_level = current_level.next_level().unwrap();
+                pt_base = entry.get_next_address().into();
             }
         }
     });
