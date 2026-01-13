@@ -261,14 +261,19 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let len = table.slice.len();
         for i in 0..len {
             let entry = &mut table.slice[i];
-            // Check if this is a large page in need of splitting. We only split if the attributes of this entry
-            // are changing
+            // Check if this is a large page in need of splitting.
             if entry.get_present_bit()
                 && entry.points_to_pa(level)
-                && entry.get_attributes() != attributes
                 && (!va.is_level_aligned(level) || va.length_through(end_va)? < level.entry_va_size())
             {
-                self.split_large_page(va, entry, state, level)?;
+                // We only split if the attributes of this entry are changing, otherwise, skip this entry and move
+                // to the next
+                if entry.get_attributes() != attributes {
+                    self.split_large_page(va, entry, state, level)?;
+                } else {
+                    va = va.get_next_va(level)?;
+                    continue;
+                }
             }
 
             if Arch::level_supports_pa_entry(level)
@@ -283,6 +288,15 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     log::error!("Failed to map memory region at VA {va:#x?} as the level is the lowest level and cannot be split");
                     PtError::InternalError
                 })?;
+
+                // never recurse if we are at a leaf level
+                if entry.get_present_bit() && entry.points_to_pa(level) {
+                    log::error!(
+                        "Attempting to map memory region at VA {va:#X?} at level {level:?} pt entry address: {:#X?}, trying to recurse on a leaf entry",
+                        entry.entry_ptr_address()
+                    );
+                    return Err(PtError::InternalError);
+                }
 
                 if !entry.get_present_bit() {
                     let pa = self.allocate_page(state)?;
