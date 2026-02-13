@@ -151,7 +151,7 @@ bitflags! {
         const ReadProtect       = 0x00000000_00002000u64;   // Maps to Present bit on X64
         const ExecuteProtect    = 0x00000000_00004000u64;   // Maps to NX bit on X64
         const ReadOnly          = 0x00000000_00020000u64;   // Maps to Read/Write bit on X64
-
+        const SpecialPurpose    = 0x00000000_00040000u64;   // Special-purpose memory
 
         const CacheAttributesMask = Self::Uncached.bits() |
                                    Self::WriteCombining.bits() |
