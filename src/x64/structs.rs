@@ -9,8 +9,9 @@
 use crate::{
     MemoryAttributes, PtError,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
-    x64::{PD, PDP, PML4, PML5, PT, invalidate_tlb},
+    x64::{PD, PDP, PML4, PML5, PT, invalidate_tlb, disable_write_protection, enable_write_protection},
 };
+use core::arch::asm;
 use bitfield_struct::bitfield;
 use core::ptr::write_volatile;
 
@@ -81,7 +82,14 @@ impl PageTableEntryX64 {
             self.set_read_write(true);
         }
 
-        self.set_user_supervisor(true);
+
+        #[cfg(feature = "mm_supv")]
+        if attributes.contains(MemoryAttributes::SpecialPurpose) {
+            self.set_user_supervisor(false);
+        } else {
+            self.set_user_supervisor(true);
+        }
+
         self.set_write_through(false);
         self.set_cache_disabled(false);
         self.set_page_size(false);
@@ -148,7 +156,15 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         }
 
         let prev_valid = self.present();
+
+        #[cfg(feature = "mm_supv")]
+        let cr0 = disable_write_protection();
+
         self.swap(&copy);
+
+        #[cfg(feature = "mm_supv")]
+        enable_write_protection(cr0);
+
         if prev_valid {
             invalidate_tlb(va);
         }
@@ -164,7 +180,15 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         let mut copy = *self;
         copy.set_present(value);
         let prev_valid = self.present();
+
+        #[cfg(feature = "mm_supv")]
+        let cr0 = disable_write_protection();
+
         self.swap(&copy);
+
+        #[cfg(feature = "mm_supv")]
+        enable_write_protection(cr0);
+
         if prev_valid {
             invalidate_tlb(va);
         }
@@ -188,6 +212,11 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
 
         if self.nx() {
             attributes |= MemoryAttributes::ExecuteProtect;
+        }
+
+        #[cfg(feature = "mm_supv")]
+        if !self.user_supervisor() {
+            attributes |= MemoryAttributes::SpecialPurpose;
         }
 
         attributes
@@ -282,7 +311,15 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         let mut copy = *self;
         copy.0 = 0;
         let prev_valid = self.present();
+
+        #[cfg(feature = "mm_supv")]
+        let cr0 = disable_write_protection();
+
         self.swap(&copy);
+
+        #[cfg(feature = "mm_supv")]
+        enable_write_protection(cr0);
+
         if prev_valid {
             invalidate_tlb(va);
         }

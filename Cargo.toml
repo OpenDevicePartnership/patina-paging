@@ -18,6 +18,7 @@ cfg-if = "1.0.0"
 
 [features]
 doc = []
+mm_supv = []
 
 [profile.test]
 opt-level = 0
