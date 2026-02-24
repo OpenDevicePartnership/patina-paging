@@ -46,6 +46,17 @@ pub(crate) trait PageTableEntry {
     fn set_present_bit(&mut self, value: bool, va: VirtualAddress);
     fn get_next_address(&self) -> PhysicalAddress;
     fn get_attributes(&self) -> MemoryAttributes;
+
+    /// Returns the access attributes that non-leaf (table) entries impose on
+    /// their children. On architectures where every level uses the same access
+    /// bits (x86_64), the default — delegating to [`get_attributes`] — is
+    /// correct.  On architectures with separate hierarchical fields (AArch64
+    /// `ap_table`/`uxn_table`/`pxn_table`), this must be overridden to read
+    /// those fields instead.
+    fn get_inheritable_attributes(&self) -> MemoryAttributes {
+        self.get_attributes()
+    }
+
     fn dump_entry_header();
     fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> Result<(), PtError>;
     fn points_to_pa(&self, level: PageLevel) -> bool;
