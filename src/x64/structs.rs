@@ -11,7 +11,6 @@ use crate::{
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
     x64::{PD, PDP, PML4, PML5, PT, invalidate_tlb, disable_write_protection, enable_write_protection},
 };
-use core::arch::asm;
 use bitfield_struct::bitfield;
 use core::ptr::write_volatile;
 
