@@ -408,6 +408,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         base: PhysicalAddress,
         prev_attributes: &mut RangeMappingState,
         state: PageTableState,
+        inherited_attrs: MemoryAttributes,
     ) -> Result<MemoryAttributes, PtError> {
         let mut va = start_va;
 
@@ -444,7 +445,10 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             }
 
             if entry.points_to_pa(level) {
-                let current_attributes = entry.get_attributes();
+                // Compose the leaf entry's attributes with any restrictive attributes inherited from
+                // parent page table entries. On x86_64, U/S, R/W, and NX are "most restrictive wins"
+                // across all levels, which maps to OR of the restrictive flag bits.
+                let current_attributes = entry.get_attributes() | inherited_attrs;
                 match prev_attributes {
                     RangeMappingState::Uninitialized => {
                         *prev_attributes = RangeMappingState::Mapped(current_attributes)
@@ -481,6 +485,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     next_base,
                     prev_attributes,
                     state,
+                    inherited_attrs | entry.get_attributes(),
                 ) {
                     Ok(_) | Err(PtError::NoMapping) => {}
                     Err(e) => return Err(e),
@@ -782,6 +787,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             self.base,
             &mut prev_attributes,
             self.get_state(),
+            MemoryAttributes::empty(),
         )
     }
 
