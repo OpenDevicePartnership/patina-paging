@@ -367,12 +367,6 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             // This is at least either the entirety of a large page or a single page.
             if entry.get_present_bit() {
                 if entry.points_to_pa(level) {
-                    if !level.is_lowest_level() {
-                        log::info!(
-                            "Unmapping large page VA {va:#X?} at level {level:?} pt entry address: {:#X?}",
-                            entry.entry_ptr_address()
-                        );
-                    }
                     entry.unmap(va);
                     self.invalidate_selfmap(va, state, level)?;
                 } else {
