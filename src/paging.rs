@@ -400,6 +400,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn query_memory_region_internal(
         &self,
         start_va: VirtualAddress,
@@ -408,6 +409,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         base: PhysicalAddress,
         prev_attributes: &mut RangeMappingState,
         state: PageTableState,
+        inherited_attrs: MemoryAttributes,
     ) -> Result<MemoryAttributes, PtError> {
         let mut va = start_va;
 
@@ -444,7 +446,12 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             }
 
             if entry.points_to_pa(level) {
-                let current_attributes = entry.get_attributes();
+                // Compose the leaf entry's attributes with any restrictive attributes inherited from
+                // parent page table entries. The HW enforces "most restrictive wins" across all
+                // levels, which maps to OR of the restrictive flag bits in MemoryAttributes.
+                // Inherited attributes are accumulated via get_inheritable_attributes() on non-leaf
+                // entries, which handles arch-specific differences (e.g., AArch64 hierarchical fields).
+                let current_attributes = entry.get_attributes() | inherited_attrs;
                 match prev_attributes {
                     RangeMappingState::Uninitialized => {
                         *prev_attributes = RangeMappingState::Mapped(current_attributes)
@@ -481,6 +488,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     next_base,
                     prev_attributes,
                     state,
+                    inherited_attrs | entry.get_inheritable_attributes(),
                 ) {
                     Ok(_) | Err(PtError::NoMapping) => {}
                     Err(e) => return Err(e),
@@ -782,6 +790,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             self.base,
             &mut prev_attributes,
             self.get_state(),
+            MemoryAttributes::empty(),
         )
     }
 
