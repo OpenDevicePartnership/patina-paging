@@ -400,6 +400,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn query_memory_region_internal(
         &self,
         start_va: VirtualAddress,
@@ -446,8 +447,10 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
             if entry.points_to_pa(level) {
                 // Compose the leaf entry's attributes with any restrictive attributes inherited from
-                // parent page table entries. On x86_64, U/S, R/W, and NX are "most restrictive wins"
-                // across all levels, which maps to OR of the restrictive flag bits.
+                // parent page table entries. The HW enforces "most restrictive wins" across all
+                // levels, which maps to OR of the restrictive flag bits in MemoryAttributes.
+                // Inherited attributes are accumulated via get_inheritable_attributes() on non-leaf
+                // entries, which handles arch-specific differences (e.g., AArch64 hierarchical fields).
                 let current_attributes = entry.get_attributes() | inherited_attrs;
                 match prev_attributes {
                     RangeMappingState::Uninitialized => {
@@ -485,7 +488,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     next_base,
                     prev_attributes,
                     state,
-                    inherited_attrs | entry.get_attributes(),
+                    inherited_attrs | entry.get_inheritable_attributes(),
                 ) {
                     Ok(_) | Err(PtError::NoMapping) => {}
                     Err(e) => return Err(e),

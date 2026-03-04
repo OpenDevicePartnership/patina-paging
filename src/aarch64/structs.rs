@@ -232,6 +232,31 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
         attributes
     }
 
+    /// Returns the hierarchical access attributes from AArch64 table descriptors.
+    /// These are stored in separate bit fields (`uxn_table`, `pxn_table`,
+    /// `ap_table`) from the leaf-level attributes and restrict child entries.
+    fn get_inheritable_attributes(&self) -> MemoryAttributes {
+        let mut attributes = MemoryAttributes::empty();
+
+        // UXNTable: if set, all child entries are execute-never at EL0
+        // PXNTable: if set, all child entries are execute-never at EL1/EL2
+        // Either restriction means the page is effectively not executable.
+        if self.uxn_table() || self.pxn_table() {
+            attributes |= MemoryAttributes::ExecuteProtect;
+        }
+
+        // APTable:
+        //   0b00 - no restriction
+        //   0b01 - no EL0 access (not currently modeled in MemoryAttributes)
+        //   0b10 - read-only at all exception levels
+        //   0b11 - read-only at all exception levels, no EL0 access
+        if self.ap_table() & 0b10 != 0 {
+            attributes |= MemoryAttributes::ReadOnly;
+        }
+
+        attributes
+    }
+
     fn set_present_bit(&mut self, value: bool, va: VirtualAddress) {
         // PageTableEntryAArch64 is Copy, so we can make a copy to modify and then swap it in
         let mut entry = *self;
