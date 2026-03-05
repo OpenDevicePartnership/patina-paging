@@ -107,48 +107,41 @@ pub(crate) fn invalidate_tlb(va: VirtualAddress) {
 }
 
 pub fn disable_write_protection() -> u64 {
-    // SAFETY: This function is unsafe because it modifies control registers to disable write protection. The caller must ensure that this is done in a safe context, such as when the current code is running at a high enough privilege level and that interrupts are disabled to prevent
-    // other code from running while write protection is disabled.
+    let mut _cr0 = 0u64;
+    // SAFETY: Reading CR0 requires sufficient privilege level. The caller must ensure that this is done in a safe
+    // context and that interrupts are disabled to prevent other code from running while write protection is disabled.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
     unsafe {
-        let mut _cr0 = 0u64;
-        // Read CR0 if this is on a real system
-        #[cfg(all(not(test), target_arch = "x86_64"))]
-        {
-            asm!("mov {}, cr0", out(reg) _cr0);
-        }
-
-        // Clear the Write Protect bit (bit 16)
-        let _new_cr0 = _cr0 & !(1 << 16);
-        // Write back to CR0
-        #[cfg(all(not(test), target_arch = "x86_64"))]
-        {
-            asm!("mov cr0, {}", in(reg) _new_cr0);
-        }
-
-        _cr0
+        asm!("mov {}, cr0", out(reg) _cr0);
     }
+
+    // Clear the Write Protect bit (bit 16)
+    let _new_cr0 = _cr0 & !(1 << 16);
+    // SAFETY: Writing CR0 to disable write protection. See above safety comment.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        asm!("mov cr0, {}", in(reg) _new_cr0);
+    }
+
+    _cr0
 }
 
 pub fn enable_write_protection(cr0: u64) {
-    // SAFETY: This function is unsafe because it modifies control registers to
-    // enable write protection. It is only supposed to be used when writing to
-    // page tables in mm mode when the tables are marked as read only.
+    let mut _current_cr0 = 0u64;
+    // SAFETY: Reading CR0 requires sufficient privilege level. This is only used when writing to page tables in
+    // mm mode when the tables are marked as read only.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
     unsafe {
-        let mut _current_cr0 = 0u64;
-        // Read CR0
-        #[cfg(all(not(test), target_arch = "x86_64"))]
-        {
-            asm!("mov {}, cr0", out(reg) _current_cr0);
-        }
+        asm!("mov {}, cr0", out(reg) _current_cr0);
+    }
 
-        // Set the Write Protect bit (bit 16)
-        let _new_cr0 = _current_cr0 | (cr0 & (1 << 16));
+    // Set the Write Protect bit (bit 16)
+    let _new_cr0 = _current_cr0 | (cr0 & (1 << 16));
 
-        // Write back to CR0
-        #[cfg(all(not(test), target_arch = "x86_64"))]
-        {
-            asm!("mov cr0, {}", in(reg) _new_cr0);
-        }
+    // SAFETY: Writing CR0 to restore write protection. See above safety comment.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        asm!("mov cr0, {}", in(reg) _new_cr0);
     }
 }
 
