@@ -8,7 +8,7 @@
 default_to_workspace = false
 
 [env]
-BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings=html"
+BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings"
 UEFI_CRATES = "-p patina_paging"
 BUILD_CRATES = "-p patina_paging"
 COV_FLAGS = { value = "--profile test --ignore-filename-regex **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
