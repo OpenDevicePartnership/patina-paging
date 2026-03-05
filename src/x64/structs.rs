@@ -83,7 +83,7 @@ impl PageTableEntryX64 {
 
 
         #[cfg(feature = "mm_supv")]
-        if attributes.contains(MemoryAttributes::SpecialPurpose) {
+        if attributes.contains(MemoryAttributes::Supervisor) {
             self.set_user_supervisor(false);
         } else {
             self.set_user_supervisor(true);
@@ -215,7 +215,7 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
 
         #[cfg(feature = "mm_supv")]
         if !self.user_supervisor() {
-            attributes |= MemoryAttributes::SpecialPurpose;
+            attributes |= MemoryAttributes::Supervisor;
         }
 
         attributes

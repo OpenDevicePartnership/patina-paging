@@ -164,7 +164,7 @@ bitflags! {
         const AccessAttributesMask = Self::ReadProtect.bits() |
                                     Self::ExecuteProtect.bits() |
                                     Self::ReadOnly.bits() |
-                                    Self::SpecialPurpose.bits();
+                                    Self::Supervisor.bits();
         #[cfg(not(feature = "mm_supv"))]
         const AccessAttributesMask = Self::ReadProtect.bits() |
                                     Self::ExecuteProtect.bits() |
