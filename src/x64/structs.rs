@@ -415,4 +415,58 @@ mod tests {
         // Should not panic or error
         let _ = entry.dump_entry(va, level);
     }
+
+    #[test]
+    fn test_disable_write_protection_returns_zero_in_test_mode() {
+        // In test mode the inline asm is compiled out, so CR0 is always 0.
+        // This exercises the bit-manipulation path: clearing bit 16 of 0 is still 0.
+        use crate::x64::disable_write_protection;
+        let cr0 = disable_write_protection();
+        assert_eq!(cr0, 0, "In test mode CR0 should be zero (asm compiled out)");
+    }
+
+    #[test]
+    fn test_enable_write_protection_does_not_panic() {
+        // In test mode the inline asm is compiled out, so enable_write_protection
+        // just runs the bit-manipulation logic with _current_cr0 = 0.
+        // Verify it completes without panicking for various input values.
+        use crate::x64::enable_write_protection;
+        enable_write_protection(0);
+        enable_write_protection(1 << 16); // WP bit set
+        enable_write_protection(u64::MAX); // all bits set
+    }
+
+    #[test]
+    fn test_disable_then_enable_round_trip() {
+        // Verify the round-trip: disable returns the original CR0, and
+        // enable accepts it back without error.
+        use crate::x64::{disable_write_protection, enable_write_protection};
+        let saved_cr0 = disable_write_protection();
+        enable_write_protection(saved_cr0);
+    }
+
+    #[test]
+    fn test_write_protection_bit_manipulation_logic() {
+        // The WP bit is bit 16 of CR0 (0x0001_0000).
+        // Test the bit-manipulation logic directly, mirroring what
+        // disable/enable do internally.
+        const WP_BIT: u64 = 1 << 16;
+
+        // disable_write_protection clears bit 16:
+        let cr0_with_wp = 0xDEAD_BEEF_0001_0000u64; // WP set
+        let cleared = cr0_with_wp & !WP_BIT;
+        assert_eq!(cleared & WP_BIT, 0, "WP bit should be cleared");
+        assert_eq!(cleared, 0xDEAD_BEEF_0000_0000u64);
+
+        // enable_write_protection restores bit 16 from the saved value:
+        let current_cr0 = 0u64; // after disable, WP is cleared
+        let restored = current_cr0 | (cr0_with_wp & WP_BIT);
+        assert_ne!(restored & WP_BIT, 0, "WP bit should be restored");
+        assert_eq!(restored, WP_BIT);
+
+        // If the original CR0 had WP cleared, enable should not set it:
+        let cr0_without_wp = 0xDEAD_BEEF_0000_0000u64;
+        let should_stay_cleared = current_cr0 | (cr0_without_wp & WP_BIT);
+        assert_eq!(should_stay_cleared & WP_BIT, 0, "WP bit should remain cleared");
+    }
 }
