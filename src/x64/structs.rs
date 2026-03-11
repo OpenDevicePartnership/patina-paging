@@ -6,13 +6,13 @@
 //!
 //! SPDX-License-Identifier: Apache-2.0
 //!
+#[cfg(feature = "mm_supv")]
+use crate::x64::{disable_write_protection, enable_write_protection};
 use crate::{
     MemoryAttributes, PtError,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
     x64::{PD, PDP, PML4, PML5, PT, invalidate_tlb},
 };
-#[cfg(feature = "mm_supv")]
-use crate::x64::{disable_write_protection, enable_write_protection};
 use bitfield_struct::bitfield;
 use core::ptr::write_volatile;
 
@@ -82,7 +82,6 @@ impl PageTableEntryX64 {
         } else {
             self.set_read_write(true);
         }
-
 
         #[cfg(feature = "mm_supv")]
         if attributes.contains(MemoryAttributes::Supervisor) {
