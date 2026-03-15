@@ -74,6 +74,9 @@ pub struct AArch64PageTable<P: PageAllocator> {
 
 impl<P: PageAllocator> AArch64PageTable<P> {
     pub fn new(page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
+        if paging_type == PagingType::Paging5Level {
+            return Err(PtError::UnsupportedPagingType);
+        }
         let internal = PageTableInternal::new(page_allocator, paging_type)?;
         Ok(Self { internal })
     }
@@ -95,6 +98,41 @@ impl<P: PageAllocator> AArch64PageTable<P> {
     /// Consumes the page table structure and returns the page table root.
     pub fn into_page_table_root(self) -> u64 {
         self.internal.into_page_table_root()
+    }
+
+    /// Opens a page table manager for the currently active page tables.
+    ///
+    /// This reads the current TTBR0 register to determine the active page table
+    /// root and reads TCR.T0SZ to detect whether 4-level or 5-level paging is
+    /// active.
+    ///
+    /// # Safety
+    ///
+    /// This is unsafe because it creates a second manager for the currently
+    /// active page tables. The caller must ensure that no other code modifies
+    /// the page tables while this manager is in use.
+    ///
+    /// Additionally, the caller is responsible for ensuring that paging is enabled
+    /// and the page table is a completely valid structure.
+    ///
+    pub unsafe fn open_active(page_allocator: P) -> Result<Self, PtError> {
+        let base = reg::get_ttbr0();
+        let paging_type = detect_paging_type()?;
+        // SAFETY: The caller guarantees that the base from TTBR0 is valid and
+        // no concurrent modification will occur.
+        unsafe { Self::from_existing(base, page_allocator, paging_type) }
+    }
+}
+
+/// Detect whether 4-level or 5-level paging is active by reading TCR.T0SZ.
+fn detect_paging_type() -> Result<PagingType, PtError> {
+    let tcr = reg::get_tcr();
+    let t0sz = tcr & 0x3F; // T0SZ is bits [5:0]
+    let va_bits = 64 - t0sz;
+    match va_bits {
+        48 => Ok(PagingType::Paging4Level),
+        52 => Ok(PagingType::Paging5Level),
+        _ => Err(PtError::UnsupportedPagingType),
     }
 }
 
@@ -141,15 +179,14 @@ impl PageTableHal for PageTableArchAArch64 {
 
     fn paging_type_supported(paging_type: crate::PagingType) -> Result<(), PtError> {
         match paging_type {
-            crate::PagingType::Paging4Level => Ok(()),
-            _ => Err(PtError::UnsupportedPagingType),
+            crate::PagingType::Paging4Level | crate::PagingType::Paging5Level => Ok(()),
         }
     }
 
     fn get_zero_va(paging_type: crate::PagingType) -> Result<VirtualAddress, PtError> {
         match paging_type {
             crate::PagingType::Paging4Level => Ok(ZERO_VA_4_LEVEL.into()),
-            _ => Err(PtError::UnsupportedPagingType),
+            crate::PagingType::Paging5Level => Err(PtError::UnsupportedPagingType),
         }
     }
 
@@ -160,7 +197,7 @@ impl PageTableHal for PageTableArchAArch64 {
     fn get_max_va(page_type: crate::PagingType) -> Result<VirtualAddress, PtError> {
         match page_type {
             crate::PagingType::Paging4Level => Ok(MAX_VA_4_LEVEL.into()),
-            _ => Err(PtError::UnsupportedPagingType),
+            crate::PagingType::Paging5Level => Ok(MAX_VA_5_LEVEL.into()),
         }
     }
 
@@ -170,7 +207,12 @@ impl PageTableHal for PageTableArchAArch64 {
 
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
-    unsafe fn install_page_table(base: u64) -> Result<(), PtError> {
+    unsafe fn install_page_table(base: u64, paging_type: PagingType) -> Result<(), PtError> {
+        if paging_type != PagingType::Paging4Level {
+            log::error!("Only 4-level page tables are supported on AArch64");
+            return Err(PtError::UnsupportedPagingType);
+        }
+
         // This step will need to configure the MMU and then activate it on the newly created table.
 
         if !reg::is_mmu_enabled() {
@@ -217,6 +259,20 @@ impl PageTableHal for PageTableArchAArch64 {
 
         log::info!("Setting TCR: {tcr:#x}");
 
+        // If the MMU is already enabled and the paging type is changing, we must
+        // disable the MMU before updating TCR and TTBR0 because these registers
+        // cannot be changed atomically. Modifying them with the MMU on while the
+        // paging level changes would cause a translation fault.
+        let mmu_was_enabled = reg::is_mmu_enabled();
+        let paging_type_changing = if mmu_was_enabled { detect_paging_type().ok() != Some(paging_type) } else { false };
+
+        if paging_type_changing {
+            log::info!("Paging type is changing, disabling MMU for TCR/TTBR0 update");
+            // SAFETY: The caller of install_page_table guarantees that the
+            // current code and data are identity-mapped.
+            unsafe { reg::disable_mmu() };
+        }
+
         // Set TCR
         reg::set_tcr(tcr);
 
@@ -229,7 +285,7 @@ impl PageTableHal for PageTableArchAArch64 {
         // Set TTBR0
         reg::set_ttbr0(base);
 
-        if !reg::is_mmu_enabled() {
+        if !mmu_was_enabled || paging_type_changing {
             reg::set_alignment_check(false);
             reg::set_stack_alignment_check(true);
             reg::enable_instruction_cache();
@@ -253,23 +309,25 @@ impl PageTableHal for PageTableArchAArch64 {
     /// covers 512GB of memory, each PDP entry covers 1GB of memory, each PD entry covers 2MB of memory, and
     /// each PT entry covers 4KB of memory, but when we recurse in the self map to a given level, we shift what
     /// each entry covers to be the size of the next level down for each recursion into the self map we did.
-    fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, _paging_type: PagingType) -> u64 {
-        match level {
-            // AArch64 does not support 5-level paging, so we return an unimplemented error.
-            PageLevel::Level5 => unimplemented!(),
-            PageLevel::Level4 => FOUR_LEVEL_LEVEL4_SELF_MAP_BASE,
-            PageLevel::Level3 => FOUR_LEVEL_LEVEL3_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PageLevel::Level4)),
-            PageLevel::Level2 => {
-                FOUR_LEVEL_LEVEL2_SELF_MAP_BASE
-                    + (SIZE_2MB * va.get_index(PageLevel::Level4))
-                    + (SIZE_4KB * va.get_index(PageLevel::Level3))
-            }
-            PageLevel::Level1 => {
-                FOUR_LEVEL_LEVEL1_SELF_MAP_BASE
-                    + (SIZE_1GB * va.get_index(PageLevel::Level4))
-                    + (SIZE_2MB * va.get_index(PageLevel::Level3))
-                    + (SIZE_4KB * va.get_index(PageLevel::Level2))
-            }
+    fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
+        match paging_type {
+            PagingType::Paging4Level => match level {
+                PageLevel::Level5 => unimplemented!(),
+                PageLevel::Level4 => FOUR_LEVEL_LEVEL4_SELF_MAP_BASE,
+                PageLevel::Level3 => FOUR_LEVEL_LEVEL3_SELF_MAP_BASE + (SIZE_4KB * va.get_index(PageLevel::Level4)),
+                PageLevel::Level2 => {
+                    FOUR_LEVEL_LEVEL2_SELF_MAP_BASE
+                        + (SIZE_2MB * va.get_index(PageLevel::Level4))
+                        + (SIZE_4KB * va.get_index(PageLevel::Level3))
+                }
+                PageLevel::Level1 => {
+                    FOUR_LEVEL_LEVEL1_SELF_MAP_BASE
+                        + (SIZE_1GB * va.get_index(PageLevel::Level4))
+                        + (SIZE_2MB * va.get_index(PageLevel::Level3))
+                        + (SIZE_4KB * va.get_index(PageLevel::Level2))
+                }
+            },
+            PagingType::Paging5Level => unimplemented!("5-level self-map not supported on AArch64"),
         }
     }
 
@@ -285,7 +343,7 @@ mod hal_tests {
     #[test]
     fn test_paging_type_supported() {
         assert!(PageTableArchAArch64::paging_type_supported(PagingType::Paging4Level).is_ok());
-        assert!(PageTableArchAArch64::paging_type_supported(PagingType::Paging5Level).is_err());
+        assert!(PageTableArchAArch64::paging_type_supported(PagingType::Paging5Level).is_ok());
     }
 
     #[test]
@@ -297,11 +355,12 @@ mod hal_tests {
     #[test]
     fn test_get_max_va() {
         assert_eq!(PageTableArchAArch64::get_max_va(PagingType::Paging4Level).unwrap(), MAX_VA_4_LEVEL.into());
-        assert!(PageTableArchAArch64::get_max_va(PagingType::Paging5Level).is_err());
+        assert_eq!(PageTableArchAArch64::get_max_va(PagingType::Paging5Level).unwrap(), MAX_VA_5_LEVEL.into());
     }
 
     #[test]
     fn test_level_supports_pa_entry() {
+        assert!(!PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level5));
         assert!(!PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level4));
         assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level3));
         assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level2));

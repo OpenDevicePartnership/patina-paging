@@ -97,26 +97,21 @@ pub(crate) enum CpuFlushType {
 }
 
 pub(crate) fn get_phys_addr_bits() -> u64 {
-    // read the id_aa64mmfr0_el1 register to get the physical address bits
-    // Bits 0..3 of the id_aa64mmfr0_el1 system register encode the size of the
-    // physical address space support on this CPU:
-    // 0 == 32 bits, 1 == 36 bits, etc etc
-    // 7 and up are reserved
-    //
-    // The value is encoded as 2^(n+1) where n is the number of bits
-    // supported. So 0b0000 == 2^32 == 4GB, 0b0001 == 2^36 == 8GB, etc
-    let mut pa_bits = read_sysreg!("id_aa64mmfr0_el1", 0);
+    // Read the ID_AA64MMFR0_EL1 register to get the physical address size.
+    // Bits [3:0] (PARange) encode the supported physical address width.
+    // The encoding is NOT uniform so a lookup table is required.
+    let pa_range = read_sysreg!("id_aa64mmfr0_el1", 0) & 0xf;
 
-    // Mask off the bits we care about
-    pa_bits &= 0xf;
-
-    if pa_bits > 7 {
-        // Reserved value
-        return 0;
+    match pa_range {
+        0 => 32,
+        1 => 36,
+        2 => 40,
+        3 => 42,
+        4 => 44,
+        5 => 48,
+        6 => 52,
+        _ => 0, // Reserved
     }
-
-    // Convert the value to the number of bits
-    (pa_bits << 2) + 32
 }
 
 /// Get the current exception level (EL) of the CPU
@@ -133,10 +128,24 @@ pub(crate) fn get_current_el() -> ExceptionLevel {
     }
 }
 
+pub(crate) fn get_tcr() -> u64 {
+    match get_current_el() {
+        ExceptionLevel::EL2 => read_sysreg!("tcr_el2", 0),
+        ExceptionLevel::EL1 => read_sysreg!("tcr_el1", 0),
+    }
+}
+
 pub(crate) fn set_tcr(tcr: u64) {
     match get_current_el() {
         ExceptionLevel::EL2 => write_sysreg!("tcr_el2", tcr, BarrierType::Instruction),
         ExceptionLevel::EL1 => write_sysreg!("tcr_el1", tcr, BarrierType::Instruction),
+    }
+}
+
+pub(crate) fn get_ttbr0() -> u64 {
+    match get_current_el() {
+        ExceptionLevel::EL2 => read_sysreg!("ttbr0_el2", 0),
+        ExceptionLevel::EL1 => read_sysreg!("ttbr0_el1", 0),
     }
 }
 
@@ -210,6 +219,48 @@ pub(crate) fn enable_mmu() {
                     "dsb nsh",
                     "isb sy",
                     "msr sctlr_el1, {val}",
+                    "isb sy",
+                    val = out(reg) _,
+                    options(nostack)
+                );
+            }
+        }
+    }
+}
+
+/// Disable the MMU by clearing the M bit in SCTLR.
+pub(crate) unsafe fn disable_mmu() {
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
+    // In this case we are disabling the MMU. The caller is responsible for ensuring
+    // that execution can continue with the MMU off (identity-mapped code/data).
+    unsafe {
+        match get_current_el() {
+            ExceptionLevel::EL2 => {
+                asm!(
+                    "mrs {val}, sctlr_el2",
+                    "bic {val}, {val}, #0x1",
+                    "dsb nsh",
+                    "isb sy",
+                    "msr sctlr_el2, {val}",
+                    "isb sy",
+                    "tlbi alle2",
+                    "dsb nsh",
+                    "isb sy",
+                    val = out(reg) _,
+                    options(nostack)
+                );
+            }
+            ExceptionLevel::EL1 => {
+                asm!(
+                    "mrs {val}, sctlr_el1",
+                    "bic {val}, {val}, #0x1",
+                    "dsb nsh",
+                    "isb sy",
+                    "msr sctlr_el1, {val}",
+                    "isb sy",
+                    "tlbi vmalle1",
+                    "dsb nsh",
                     "isb sy",
                     val = out(reg) _,
                     options(nostack)

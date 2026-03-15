@@ -230,7 +230,7 @@ pub trait PageTable {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PagingType {
-    // 5-level paging, only supported on x64.
+    // 5-level paging.
     Paging5Level,
     // 4-level paging.
     Paging4Level,
@@ -240,6 +240,8 @@ impl PagingType {
     /// Gets the numbers of bits used for linear address space in this paging type.
     pub(crate) const fn linear_address_bits(self) -> u64 {
         match self {
+            // Note: AArch64 5-level paging (FEAT_LPA2) uses 52-bit VA with 16 root entries, but since that configuration
+            //       is only supported for reading existing page tables, leave 57 for simplicity.
             PagingType::Paging5Level => 57,
             PagingType::Paging4Level => 48,
         }
