@@ -55,12 +55,18 @@ fn test_map_memory_address_range_overflow_aarch64() {
 fn test_self_map() {
     struct TestConfig {
         paging_type: PagingType,
+        self_map_base: u64,
+        zero_va: u64,
     }
 
-    let test_configs = [TestConfig { paging_type: PagingType::Paging4Level }];
+    let test_configs = [TestConfig {
+        paging_type: PagingType::Paging4Level,
+        self_map_base: FOUR_LEVEL_LEVEL4_SELF_MAP_BASE,
+        zero_va: ZERO_VA_4_LEVEL,
+    }];
 
     for test_config in test_configs {
-        let TestConfig { paging_type } = test_config;
+        let TestConfig { paging_type, self_map_base, zero_va } = test_config;
 
         let page_allocator = TestPageAllocator::new(0x1000, paging_type);
         let pt = AArch64PageTable::new(page_allocator.clone(), paging_type);
@@ -69,12 +75,12 @@ fn test_self_map() {
         let pt = pt.unwrap();
 
         // ensure the self map is present
-        let res = pt.query_memory_region(FOUR_LEVEL_LEVEL4_SELF_MAP_BASE, PAGE_SIZE);
+        let res = pt.query_memory_region(self_map_base, PAGE_SIZE);
         assert!(res.is_ok());
 
         // we can't query the zero VA because in new() it is not mapped on purpose, so we just check we mapped
         // down to the PTE level
-        let res = pt.query_memory_region(ZERO_VA_4_LEVEL, PAGE_SIZE);
+        let res = pt.query_memory_region(zero_va, PAGE_SIZE);
         assert!(res.is_err());
 
         let root = pt.into_page_table_root();

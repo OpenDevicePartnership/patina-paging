@@ -59,7 +59,7 @@ macro_rules! all_configs {
             let paging_type = PagingType::Paging4Level;
             $body(paging_type)
         }
-        // Test on aarch64
+        // Test on aarch64 - 4 level
         {
             #[allow(unused)]
             type Arch = PageTableArchAArch64;

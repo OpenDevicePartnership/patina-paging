@@ -8,7 +8,7 @@
 default_to_workspace = false
 
 [env]
-BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings=html"
+BUILD_FLAGS = "--profile ${RUSTC_PROFILE} -Zbuild-std=core,compiler_builtins,alloc -Zbuild-std-features=compiler-builtins-mem -Zunstable-options --timings"
 UEFI_CRATES = "-p patina_paging"
 BUILD_CRATES = "-p patina_paging"
 COV_FLAGS = { value = "--profile test --ignore-filename-regex **/tests/*", condition = { env_not_set = ["COV_FLAGS"] } }
@@ -106,6 +106,58 @@ description = "Build and run all tests and calculate coverage (runs test once an
 dependencies = ["test", "coverage-lcov", "coverage-html"]
 clear = true
 
+[tasks.test-asan]
+description = "Run tests with AddressSanitizer enabled. Example `cargo make test-asan`. Use `cargo make test-asan --print-dll-path` to print the ASan runtime DLL directory."
+clear = true
+script_runner = "@duckscript"
+script = '''
+os = os_family
+
+if eq ${os} "windows"
+    # ASan testing is only supported on Windows x64.
+    # https://learn.microsoft.com/cpp/sanitizers/asan
+    arch = get_env PROCESSOR_ARCHITECTURE
+    if not eq ${arch} "AMD64"
+        echo "test-asan is only supported on Windows x64. Detected arch: ${arch}. Skipping."
+        exit 0
+    end
+
+    # The ASan runtime DLL (clang_rt.asan_dynamic-x86_64.dll) from the
+    # MSVC toolchain must be on PATH for ASan-instrumented test binaries to run.
+    #
+    # Resolve the VC toolset path per vswhere docs:
+    # https://github.com/microsoft/vswhere/wiki/Find-VC
+    program_files_x86 = get_env "ProgramFiles(x86)"
+    vswhere = set "${program_files_x86}/Microsoft Visual Studio/Installer/vswhere.exe"
+    output = exec "${vswhere}" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+    install_dir = trim ${output.stdout}
+    version = readfile "${install_dir}/VC/Auxiliary/Build/Microsoft.VCToolsVersion.default.txt"
+    version = trim ${version}
+    asan_dll_path = set "${install_dir}/VC/Tools/MSVC/${version}/bin/HostX64/x64"
+
+    args = get_env CARGO_MAKE_TASK_ARGS
+    if contains "${args}" "--print-dll-path"
+        asan_dll_path = replace ${asan_dll_path} / \\
+        echo "${asan_dll_path}"
+        exit 0
+    end
+
+    current_path = get_env PATH
+    set_env PATH "${asan_dll_path};${current_path}"
+elseif eq ${os} "linux"
+    # On Linux, the ASan runtime is resolved automatically by the linker.
+    noop
+else
+    echo "test-asan is not supported on ${os}. Skipping."
+    exit 0
+end
+
+set_env RUSTFLAGS "-Zsanitizer=address"
+set_env RUSTDOCFLAGS "-Zsanitizer=address"
+target = get_env CARGO_MAKE_RUST_TARGET_TRIPLE
+exec --fail-on-error cargo test --target ${target} --workspace
+'''
+
 [tasks.clippy]
 description = "Run cargo clippy."
 clear = true
@@ -130,6 +182,18 @@ clear = true
 command = "cargo"
 args = ["fmt", "--all"]
 
+[tasks.fmt-check]
+description = "Check cargo format without modifying files."
+clear = true
+command = "cargo"
+args = ["fmt", "--all", "--check"]
+
+[tasks.doc-test]
+description = "Run documentation tests."
+clear = true
+command = "cargo"
+args = ["test", "--doc"]
+
 [tasks.cspell]
 description = "Run cspell for spell checking." # npm install -g cspell@latest
 script = "cspell --quiet  --no-progress --no-summary  --dot --gitignore -e \"{.git/**,.github/**,.vscode/**}\" ."
@@ -144,12 +208,13 @@ args = ["deny", "check"]
 [tasks.all]
 description = "Run all tasks for PR readiness."
 dependencies = [
+    "fmt-check",
     "deny",
     "clippy",
     "cspell",
     "build-x64",
     "build-aarch64",
     "coverage",
-    "fmt",
+    "doc-test",
     "doc",
 ]
