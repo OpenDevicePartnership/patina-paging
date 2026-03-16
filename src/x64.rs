@@ -64,6 +64,26 @@ impl<P: PageAllocator> X64PageTable<P> {
     pub fn into_page_table_root(self) -> u64 {
         self.internal.into_page_table_root()
     }
+
+    /// Opens a page table manager for the currently active page tables.
+    ///
+    /// This reads the current CR3 register to determine the active page table
+    /// root and reads CR4.LA57 to detect whether 4-level or 5-level paging is
+    /// active.
+    ///
+    /// # Safety
+    ///
+    /// This is unsafe because it creates a second manager for the currently
+    /// active page tables. The caller must ensure that no other code modifies
+    /// the page tables while this manager is in use.
+    #[coverage(off)] // This requires hardware for meaningful testing.
+    pub unsafe fn open_active(page_allocator: P) -> Result<Self, PtError> {
+        let base = read_cr3() & CR3_PAGE_BASE_ADDRESS_MASK;
+        let paging_type = detect_paging_type()?;
+        // SAFETY: The caller guarantees that the base from CR3 is valid and
+        // no concurrent modification will occur.
+        unsafe { Self::from_existing(base, page_allocator, paging_type) }
+    }
 }
 
 impl<P: PageAllocator> PageTable for X64PageTable<P> {
@@ -155,7 +175,18 @@ impl PageTableHal for PageTableArchX64 {
 
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
-    unsafe fn install_page_table(base: u64) -> Result<(), PtError> {
+    unsafe fn install_page_table(base: u64, _paging_type: PagingType) -> Result<(), PtError> {
+        // The implementation doesn't currently support switching page table types at runtime.
+        // Skip this check in test builds since CR4 always reads as 0 (no hardware).
+        #[cfg(not(test))]
+        if _paging_type != detect_paging_type()? {
+            log::error!(
+                "Cannot install page table with paging type {:?} because it does not match the currently active paging type",
+                _paging_type
+            );
+            return Err(PtError::UnsupportedPagingType);
+        }
+
         unsafe {
             write_cr3(base);
         }
@@ -244,6 +275,32 @@ fn read_cr3() -> u64 {
     }
 
     _value
+}
+
+/// CR4.LA57 (bit 12) indicates 5-level paging is enabled.
+const CR4_LA57: u64 = 1 << 12;
+
+/// Read CR4 register.
+#[coverage(off)] // This requires hardware for meaningful testing.
+fn read_cr4() -> u64 {
+    let mut _value = 0u64;
+
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    {
+        // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
+        // In this case we are reading the CR4 register, which is a safe operation.
+        unsafe {
+            asm!("mov {}, cr4", out(reg) _value, options(nostack, preserves_flags));
+        }
+    }
+
+    _value
+}
+
+/// Detect whether 4-level or 5-level paging is active by reading CR4.LA57.
+#[coverage(off)] // This requires hardware for meaningful testing.
+fn detect_paging_type() -> Result<PagingType, PtError> {
+    if read_cr4() & CR4_LA57 != 0 { Ok(PagingType::Paging5Level) } else { Ok(PagingType::Paging4Level) }
 }
 
 /// Checks if the given address is canonical.

@@ -771,7 +771,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
     pub fn install_page_table(&mut self) -> Result<(), PtError> {
         // SAFETY: The page table structure should guarantee that the page table is correct.
-        unsafe { Arch::install_page_table(self.base.into()) }
+        unsafe { Arch::install_page_table(self.base.into(), self.paging_type) }
     }
 
     pub fn query_memory_region(&self, address: u64, size: u64) -> Result<MemoryAttributes, PtError> {
@@ -939,7 +939,7 @@ mod tests {
             ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
         }
         unsafe fn zero_page(_va: VirtualAddress) {}
-        unsafe fn install_page_table(_base: u64) -> Result<(), PtError> {
+        unsafe fn install_page_table(_base: u64, _paging_type: PagingType) -> Result<(), PtError> {
             Ok(())
         }
         fn invalidate_tlb(_va: VirtualAddress) {}

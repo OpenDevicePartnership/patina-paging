@@ -18,6 +18,10 @@ use crate::arch::PageTableEntry;
 // This is the maximum virtual address that can be used in the system because of our artificial restriction to use
 // the zero VA and self map index in the top level page table.
 pub(crate) const MAX_VA_4_LEVEL: u64 = 0x0000_FEFF_FFFF_FFFF;
+// AArch64 5-level paging (FEAT_LPA2) uses 52-bit VA with 16 root entries.
+// Since we only support opening existing 5-level tables (no self-map or zero VA),
+// the full 52-bit VA range is usable.
+pub(crate) const MAX_VA_5_LEVEL: u64 = 0x000F_FFFF_FFFF_FFFF;
 
 const PAGE_MAP_ENTRY_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
 
@@ -301,7 +305,7 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
         let depth = 2 * level.depth();
         let inv_depth = 8 - depth;
         let level_name = match level {
-            PageLevel::Level5 => "INVD",
+            PageLevel::Level5 => "LV-1",
             PageLevel::Level4 => "LVL0",
             PageLevel::Level3 => "LVL1",
             PageLevel::Level2 => "LVL2",

@@ -28,7 +28,7 @@ pub(crate) trait PageTableHal {
     fn is_table_active(base: u64) -> bool;
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
-    unsafe fn install_page_table(base: u64) -> Result<(), PtError>;
+    unsafe fn install_page_table(base: u64, paging_type: PagingType) -> Result<(), PtError>;
     fn level_supports_pa_entry(level: PageLevel) -> bool;
     fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64;
 }
