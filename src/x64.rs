@@ -176,6 +176,17 @@ impl PageTableHal for PageTableArchX64 {
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
     unsafe fn install_page_table(base: u64, _paging_type: PagingType) -> Result<(), PtError> {
+        // The implementation doesn't currently support switching page table types at runtime.
+        // Skip this check in test builds since CR4 always reads as 0 (no hardware).
+        #[cfg(not(test))]
+        if _paging_type != detect_paging_type()? {
+            log::error!(
+                "Cannot install page table with paging type {:?} because it does not match the currently active paging type",
+                _paging_type
+            );
+            return Err(PtError::UnsupportedPagingType);
+        }
+
         unsafe {
             write_cr3(base);
         }
