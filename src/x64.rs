@@ -76,6 +76,7 @@ impl<P: PageAllocator> X64PageTable<P> {
     /// This is unsafe because it creates a second manager for the currently
     /// active page tables. The caller must ensure that no other code modifies
     /// the page tables while this manager is in use.
+    #[coverage(off)] // This requires hardware for meaningful testing.
     pub unsafe fn open_active(page_allocator: P) -> Result<Self, PtError> {
         let base = read_cr3() & CR3_PAGE_BASE_ADDRESS_MASK;
         let paging_type = detect_paging_type()?;
@@ -269,6 +270,7 @@ fn read_cr3() -> u64 {
 const CR4_LA57: u64 = 1 << 12;
 
 /// Read CR4 register.
+#[coverage(off)] // This requires hardware for meaningful testing.
 fn read_cr4() -> u64 {
     let mut _value = 0u64;
 
@@ -285,6 +287,7 @@ fn read_cr4() -> u64 {
 }
 
 /// Detect whether 4-level or 5-level paging is active by reading CR4.LA57.
+#[coverage(off)] // This requires hardware for meaningful testing.
 fn detect_paging_type() -> Result<PagingType, PtError> {
     if read_cr4() & CR4_LA57 != 0 { Ok(PagingType::Paging5Level) } else { Ok(PagingType::Paging4Level) }
 }

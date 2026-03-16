@@ -115,6 +115,7 @@ impl<P: PageAllocator> AArch64PageTable<P> {
     /// Additionally, the caller is responsible for ensuring that paging is enabled
     /// and the page table is a completely valid structure.
     ///
+    #[coverage(off)] // This requires hardware for meaningful testing.
     pub unsafe fn open_active(page_allocator: P) -> Result<Self, PtError> {
         let base = reg::get_ttbr0();
         let paging_type = detect_paging_type()?;
@@ -125,6 +126,7 @@ impl<P: PageAllocator> AArch64PageTable<P> {
 }
 
 /// Detect whether 4-level or 5-level paging is active by reading TCR.T0SZ.
+#[coverage(off)] // This requires hardware for meaningful testing.
 fn detect_paging_type() -> Result<PagingType, PtError> {
     let tcr = reg::get_tcr();
     let t0sz = tcr & 0x3F; // T0SZ is bits [5:0]
@@ -207,6 +209,7 @@ impl PageTableHal for PageTableArchAArch64 {
 
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
+    #[coverage(off)] // This manipulates hardware registers that can't be meaningfully tested.
     unsafe fn install_page_table(base: u64, paging_type: PagingType) -> Result<(), PtError> {
         if paging_type != PagingType::Paging4Level {
             log::error!("Only 4-level page tables are supported on AArch64");
@@ -338,7 +341,7 @@ impl PageTableHal for PageTableArchAArch64 {
 #[cfg(test)]
 mod hal_tests {
     use super::*;
-    use crate::structs::PageLevel;
+    use crate::{page_allocator::PageAllocatorStub, structs::PageLevel};
 
     #[test]
     fn test_paging_type_supported() {
@@ -365,5 +368,33 @@ mod hal_tests {
         assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level3));
         assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level2));
         assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level1));
+    }
+
+    #[test]
+    fn test_cannot_create_5_level_page_table() {
+        let res = AArch64PageTable::new(PageAllocatorStub::new(), PagingType::Paging5Level);
+        assert!(res.is_err());
+        assert_eq!(res.err().unwrap(), PtError::UnsupportedPagingType);
+    }
+
+    #[test]
+    fn test_get_self_mapped_base_4_level() {
+        let va: VirtualAddress = 0u64.into();
+        assert_eq!(
+            PageTableArchAArch64::get_self_mapped_base(PageLevel::Level4, va, PagingType::Paging4Level),
+            FOUR_LEVEL_LEVEL4_SELF_MAP_BASE
+        );
+        assert_eq!(
+            PageTableArchAArch64::get_self_mapped_base(PageLevel::Level3, va, PagingType::Paging4Level),
+            FOUR_LEVEL_LEVEL3_SELF_MAP_BASE
+        );
+        assert_eq!(
+            PageTableArchAArch64::get_self_mapped_base(PageLevel::Level2, va, PagingType::Paging4Level),
+            FOUR_LEVEL_LEVEL2_SELF_MAP_BASE
+        );
+        assert_eq!(
+            PageTableArchAArch64::get_self_mapped_base(PageLevel::Level1, va, PagingType::Paging4Level),
+            FOUR_LEVEL_LEVEL1_SELF_MAP_BASE
+        );
     }
 }

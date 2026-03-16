@@ -96,6 +96,7 @@ pub(crate) enum CpuFlushType {
     EFiCpuFlushTypeInvalidate,
 }
 
+#[coverage(off)] // Not be meaningfully tested without hardware support.
 pub(crate) fn get_phys_addr_bits() -> u64 {
     // Read the ID_AA64MMFR0_EL1 register to get the physical address size.
     // Bits [3:0] (PARange) encode the supported physical address width.
@@ -128,6 +129,7 @@ pub(crate) fn get_current_el() -> ExceptionLevel {
     }
 }
 
+#[coverage(off)] // This requires hardware for meaningful testing.
 pub(crate) fn get_tcr() -> u64 {
     match get_current_el() {
         ExceptionLevel::EL2 => read_sysreg!("tcr_el2", 0),
@@ -142,6 +144,7 @@ pub(crate) fn set_tcr(tcr: u64) {
     }
 }
 
+#[coverage(off)] // This requires hardware for meaningful testing.
 pub(crate) fn get_ttbr0() -> u64 {
     match get_current_el() {
         ExceptionLevel::EL2 => read_sysreg!("ttbr0_el2", 0),
@@ -229,6 +232,7 @@ pub(crate) fn enable_mmu() {
 }
 
 /// Disable the MMU by clearing the M bit in SCTLR.
+#[coverage(off)] // This requires hardware for meaningful testing.
 pub(crate) unsafe fn disable_mmu() {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
