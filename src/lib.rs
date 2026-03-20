@@ -160,6 +160,12 @@ bitflags! {
                                    Self::UncachedExport.bits() |
                                    Self::WriteProtect.bits();
 
+        #[cfg(feature = "mm_supv")]
+        const AccessAttributesMask = Self::ReadProtect.bits() |
+                                    Self::ExecuteProtect.bits() |
+                                    Self::ReadOnly.bits() |
+                                    Self::Supervisor.bits();
+        #[cfg(not(feature = "mm_supv"))]
         const AccessAttributesMask = Self::ReadProtect.bits() |
                                     Self::ExecuteProtect.bits() |
                                     Self::ReadOnly.bits();
