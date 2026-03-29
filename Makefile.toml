@@ -97,6 +97,12 @@ command = "cargo"
 args = ["llvm-cov", "clean", "--workspace"]
 
 [tasks.test]
+description = "Runs tests with native cargo test behavior. Example `cargo make test` or `cargo make test -- --nocapture`"
+clear = true
+command = "cargo"
+args = ["test", "@@split(CARGO_MAKE_TASK_ARGS,;)"]
+
+[tasks.test-cov]
 description = "Run tests and collect coverage data without generating reports."
 install_crate = false
 clear = true
@@ -120,7 +126,7 @@ args = ["llvm-cov", "report", "--html", "--output-dir", "${CARGO_MAKE_WORKSPACE_
 
 [tasks.coverage]
 description = "Build and run all tests and calculate coverage (runs test once and generates LCOV and HTML reports)."
-dependencies = ["test", "coverage-lcov", "coverage-html"]
+dependencies = ["test-cov", "coverage-lcov", "coverage-html"]
 clear = true
 
 [tasks.test-asan]
