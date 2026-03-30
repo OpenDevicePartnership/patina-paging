@@ -132,7 +132,7 @@ fn detect_paging_type() -> Result<PagingType, PtError> {
     let t0sz = tcr & 0x3F; // T0SZ is bits [5:0]
     let va_bits = 64 - t0sz;
     match va_bits {
-        48 => Ok(PagingType::Paging4Level),
+        40..=48 => Ok(PagingType::Paging4Level),
         52 => Ok(PagingType::Paging5Level),
         _ => Err(PtError::UnsupportedPagingType),
     }
