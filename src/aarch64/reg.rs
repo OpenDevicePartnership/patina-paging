@@ -23,19 +23,18 @@ pub(crate) enum ExceptionLevel {
     EL2,
 }
 
-/// This enum is used to specify the type of barrier to use when writing to a system register and in which order.
-enum BarrierType {
-    Instruction,
-    DataInstruction,
-}
-
 cfg_if::cfg_if! {
     if #[cfg(all(not(test), target_arch = "aarch64"))] {
         use core::arch::{asm, global_asm};
         global_asm!(include_str!("replace_table_entry.asm"));
+        global_asm!(include_str!("install_page_tables.asm"));
         // Use efiapi for the consistent calling convention.
         unsafe extern "efiapi" {
             pub(crate) fn replace_live_xlat_entry(entry_ptr: u64, val: u64, addr: u64);
+            fn install_new_page_tables(ttbr0: u64, tcr: u64, mair: u64);
+        }
+        unsafe extern "C" {
+            static install_new_page_tables_size: u32;
         }
     }
 }
@@ -51,42 +50,6 @@ macro_rules! read_sysreg {
       asm!(concat!("mrs {}, ", $reg), out(reg) _value, options(nostack, preserves_flags));
     }
     _value
-  }};
-}
-
-macro_rules! write_sysreg {
-  ($reg:expr, $value:expr) => {{
-    // no barrier required case
-    let _value: u64 = $value;
-    let _ = $reg; // Helps prevent identical code being generated in tests.
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are writing to a
-    // system register, which is a safe operation as long as the caller ensures that the value being written is valid
-    // for that register.
-    unsafe {
-      asm!(concat!("msr ", $reg, ", {}"), in(reg) _value, options(nostack, preserves_flags));
-    }
-  }};
-  ($reg:expr, $value:expr, $barrier:expr) => {{
-    // barrier required case
-    let _value: u64 = $value;
-    let _ = $reg; // Helps prevent identical code being generated in tests.
-    let _barrier: BarrierType = $barrier;
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    match _barrier {
-      // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are writing to a
-      // system register, which is a safe operation as long as the caller ensures that the value being written is valid
-      // for that register.
-      BarrierType::Instruction => unsafe {
-        asm!(concat!("msr ", $reg, ", {}"), "isb sy", in(reg) _value, options(nostack, preserves_flags));
-      },
-      // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are writing to a
-      // system register, which is a safe operation as long as the caller ensures that the value being written is valid
-      // for that register.
-      BarrierType::DataInstruction => unsafe {
-        asm!(concat!("msr ", $reg, ", {}"), "dsb sy", "isb sy", in(reg) _value, options(nostack, preserves_flags));
-      }
-    }
   }};
 }
 
@@ -137,35 +100,11 @@ pub(crate) fn get_tcr() -> u64 {
     }
 }
 
-pub(crate) fn set_tcr(tcr: u64) {
-    match get_current_el() {
-        ExceptionLevel::EL2 => write_sysreg!("tcr_el2", tcr, BarrierType::Instruction),
-        ExceptionLevel::EL1 => write_sysreg!("tcr_el1", tcr, BarrierType::Instruction),
-    }
-}
-
 #[coverage(off)] // This requires hardware for meaningful testing.
 pub(crate) fn get_ttbr0() -> u64 {
     match get_current_el() {
         ExceptionLevel::EL2 => read_sysreg!("ttbr0_el2", 0),
         ExceptionLevel::EL1 => read_sysreg!("ttbr0_el1", 0),
-    }
-}
-
-pub(crate) fn set_ttbr0(ttbr0: u64) {
-    match get_current_el() {
-        ExceptionLevel::EL2 => write_sysreg!("ttbr0_el2", ttbr0, BarrierType::Instruction),
-        ExceptionLevel::EL1 => write_sysreg!("ttbr0_el1", ttbr0, BarrierType::Instruction),
-    }
-
-    // Invalidate the TLB after setting TTBR0
-    invalidate_tlb();
-}
-
-pub(crate) fn set_mair(mair: u64) {
-    match get_current_el() {
-        ExceptionLevel::EL2 => write_sysreg!("mair_el2", mair, BarrierType::Instruction),
-        ExceptionLevel::EL1 => write_sysreg!("mair_el1", mair, BarrierType::Instruction),
     }
 }
 
@@ -190,150 +129,6 @@ pub(crate) fn invalidate_tlb() {
             ExceptionLevel::EL1 => {
                 asm!("tlbi alle1", "dsb nsh", "isb sy", options(nostack));
             }
-        }
-    }
-}
-
-pub(crate) fn enable_mmu() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
-    // In this case we are enabling the MMU, which is a safe operation as long as the caller ensures
-    // that the page tables are properly set up.
-    unsafe {
-        match get_current_el() {
-            ExceptionLevel::EL2 => {
-                asm!(
-                    "mrs {val}, sctlr_el2",
-                    "orr {val}, {val}, #0x1",
-                    "tlbi alle2",
-                    "dsb nsh",
-                    "isb sy",
-                    "msr sctlr_el2, {val}",
-                    "isb sy",
-                    val = out(reg) _,
-                    options(nostack)
-                );
-            }
-            ExceptionLevel::EL1 => {
-                asm!(
-                    "mrs {val}, sctlr_el1",
-                    "orr {val}, {val}, #0x1",
-                    "tlbi vmalle1",
-                    "dsb nsh",
-                    "isb sy",
-                    "msr sctlr_el1, {val}",
-                    "isb sy",
-                    val = out(reg) _,
-                    options(nostack)
-                );
-            }
-        }
-    }
-}
-
-/// Disable the MMU by clearing the M bit in SCTLR.
-#[coverage(off)] // This requires hardware for meaningful testing.
-pub(crate) unsafe fn disable_mmu() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
-    // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
-    // In this case we are disabling the MMU. The caller is responsible for ensuring
-    // that execution can continue with the MMU off (identity-mapped code/data).
-    unsafe {
-        match get_current_el() {
-            ExceptionLevel::EL2 => {
-                asm!(
-                    "mrs {val}, sctlr_el2",
-                    "bic {val}, {val}, #0x1",
-                    "dsb nsh",
-                    "isb sy",
-                    "msr sctlr_el2, {val}",
-                    "isb sy",
-                    "tlbi alle2",
-                    "dsb nsh",
-                    "isb sy",
-                    val = out(reg) _,
-                    options(nostack)
-                );
-            }
-            ExceptionLevel::EL1 => {
-                asm!(
-                    "mrs {val}, sctlr_el1",
-                    "bic {val}, {val}, #0x1",
-                    "dsb nsh",
-                    "isb sy",
-                    "msr sctlr_el1, {val}",
-                    "isb sy",
-                    "tlbi vmalle1",
-                    "dsb nsh",
-                    "isb sy",
-                    val = out(reg) _,
-                    options(nostack)
-                );
-            }
-        }
-    }
-}
-
-pub(crate) fn set_stack_alignment_check(enable: bool) {
-    match get_current_el() {
-        ExceptionLevel::EL2 => {
-            let sctlr = read_sysreg!("sctlr_el2", 0);
-            match enable {
-                true => write_sysreg!("sctlr_el2", sctlr | 0x8, BarrierType::DataInstruction),
-                false => write_sysreg!("sctlr_el2", sctlr & !0x8, BarrierType::DataInstruction),
-            }
-        }
-        ExceptionLevel::EL1 => {
-            let sctlr = read_sysreg!("sctlr_el1", 0);
-            match enable {
-                true => write_sysreg!("sctlr_el1", sctlr | 0x8, BarrierType::DataInstruction),
-                false => write_sysreg!("sctlr_el1", sctlr & !0x8, BarrierType::DataInstruction),
-            }
-        }
-    }
-}
-
-pub(crate) fn set_alignment_check(enable: bool) {
-    match get_current_el() {
-        ExceptionLevel::EL2 => {
-            let sctlr = read_sysreg!("sctlr_el2", 0);
-            match enable {
-                true => write_sysreg!("sctlr_el2", sctlr | 0x2, BarrierType::DataInstruction),
-                false => write_sysreg!("sctlr_el2", sctlr & !0x2, BarrierType::DataInstruction),
-            }
-        }
-        ExceptionLevel::EL1 => {
-            let sctlr = read_sysreg!("sctlr_el1", 0);
-            match enable {
-                true => write_sysreg!("sctlr_el1", sctlr | 0x2, BarrierType::DataInstruction),
-                false => write_sysreg!("sctlr_el1", sctlr & !0x2, BarrierType::DataInstruction),
-            }
-        }
-    }
-}
-
-pub(crate) fn enable_instruction_cache() {
-    match get_current_el() {
-        ExceptionLevel::EL2 => {
-            let sctlr = read_sysreg!("sctlr_el2", 0);
-            write_sysreg!("sctlr_el2", sctlr | 0x1000, BarrierType::DataInstruction);
-        }
-        ExceptionLevel::EL1 => {
-            let sctlr = read_sysreg!("sctlr_el1", 0);
-            write_sysreg!("sctlr_el1", sctlr | 0x1000, BarrierType::DataInstruction);
-        }
-    }
-}
-
-pub(crate) fn enable_data_cache() {
-    match get_current_el() {
-        ExceptionLevel::EL2 => {
-            let sctlr = read_sysreg!("sctlr_el2", 0);
-            write_sysreg!("sctlr_el2", sctlr | 0x4, BarrierType::DataInstruction);
-        }
-        ExceptionLevel::EL1 => {
-            let sctlr = read_sysreg!("sctlr_el1", 0);
-            write_sysreg!("sctlr_el1", sctlr | 0x4, BarrierType::DataInstruction);
         }
     }
 }
@@ -486,4 +281,33 @@ pub(crate) unsafe fn zero_page(page: u64) {
     // This cast must occur as a mutable pointer to a u8, as otherwise the compiler can optimize out the write,
     // which must not happen as that would violate break before make and have garbage in the page table.
     unsafe { ptr::write_bytes(page as *mut u8, 0, PAGE_SIZE as usize) };
+}
+
+/// Swaps the page table and related configuration registers.
+///
+/// ## Safety
+///
+/// The caller is responsible for ensuring that the provided TTBR0 is a valid address and the memory backing
+/// the page tables has the appropriate lifetime to be installed in system registers.
+#[coverage(off)]
+pub(crate) unsafe fn swap_page_tables(_ttbr0: u64, _tcr: u64, _mair: u64) {
+    #[cfg(all(not(test), target_arch = "aarch64"))]
+    {
+        // The assembly only supports EL1 & EL2. This compile-time check ensures
+        // that addition of a new exception level causes a compilation failure here.
+        const _: () = match ExceptionLevel::EL1 {
+            ExceptionLevel::EL1 | ExceptionLevel::EL2 => (),
+        };
+
+        // The assembly disables the MMU. With the MMU disabled, the caching behavior
+        // is not well defined. Make sure that the instructions required are written back
+        // to avoid executing uninitialized memory under the cache.
+        let asm_addr = install_new_page_tables as *const () as u64;
+        // SAFETY: This is just accessing an assembly defined static, there is no contention or mutability issues with this.
+        let asm_len = unsafe { install_new_page_tables_size } as u64;
+        cache_range_operation(asm_addr, asm_len, CpuFlushType::_EfiCpuFlushTypeWriteBack);
+
+        // SAFETY: The caller is responsible for ensuring a correct TTBR0 value.
+        unsafe { install_new_page_tables(_ttbr0, _tcr, _mair) };
+    }
 }
