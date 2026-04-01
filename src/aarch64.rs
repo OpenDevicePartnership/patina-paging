@@ -129,11 +129,18 @@ impl<P: PageAllocator> AArch64PageTable<P> {
 #[coverage(off)] // This requires hardware for meaningful testing.
 fn detect_paging_type() -> Result<PagingType, PtError> {
     let tcr = reg::get_tcr();
+    let tg0 = (tcr >> 14) & 0b11; // TG0 is bits [15:14]
+    if tg0 != 0 {
+        // Only 4kb granularity is supported
+        return Err(PtError::UnsupportedPagingType);
+    }
+
     let t0sz = tcr & 0x3F; // T0SZ is bits [5:0]
     let va_bits = 64 - t0sz;
+
     match va_bits {
         40..=48 => Ok(PagingType::Paging4Level),
-        52 => Ok(PagingType::Paging5Level),
+        49..=52 => Ok(PagingType::Paging5Level),
         _ => Err(PtError::UnsupportedPagingType),
     }
 }
