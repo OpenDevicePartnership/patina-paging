@@ -53,6 +53,13 @@ const TCR_PS_4TB: u64 = 3;
 const TCR_PS_16TB: u64 = 4;
 const TCR_PS_256TB: u64 = 5;
 
+// MAIR encoding:
+// Index 0: 0x00 = Device-nGnRnE           (Uncached)
+// Index 1: 0x44 = Normal Non-Cacheable    (WriteCombining)
+// Index 2: 0xBB = Normal Write-Through    (WriteThrough)
+// Index 3: 0xFF = Normal Write-Back       (WriteBack)
+const MAIR: u64 = (0x44 << 8) | (0xBB << 16) | (0xFF << 24);
+
 /// TCR_EL2.T0SZ defines the size of the VA space addressed by TTBR0_EL2. The VA space size is 2^(64 - t0sz) bytes.
 /// We always want to set the minimum size of TCR_EL2.T0SZ to 16, which gives us a 48-bit VA space. This allows
 /// us to use the self map beyond PA space (depending on platform)
@@ -223,8 +230,6 @@ impl PageTableHal for PageTableArchAArch64 {
             return Err(PtError::UnsupportedPagingType);
         }
 
-        // This step will need to configure the MMU and then activate it on the newly created table.
-
         if !reg::is_mmu_enabled() {
             // Building the page tables with the MMU is currently not tested.
             // There is no technical limitation for supporting this but creating
@@ -267,42 +272,11 @@ impl PageTableHal for PageTableArchAArch64 {
             ExceptionLevel::EL1 => TCR_EL1_DEFAULTS | (tcr_ps << TCR_EL1_IPS_SHIFT),
         };
 
-        log::info!("Setting TCR: {tcr:#x}");
+        log::info!("Installing page table. TTBR0: {base:#x} TCR: {tcr:#x} MAIR: {MAIR:#x}");
 
-        // If the MMU is already enabled and the paging type is changing, we must
-        // disable the MMU before updating TCR and TTBR0 because these registers
-        // cannot be changed atomically. Modifying them with the MMU on while the
-        // paging level changes would cause a translation fault.
-        let mmu_was_enabled = reg::is_mmu_enabled();
-        let paging_type_changing = if mmu_was_enabled { detect_paging_type().ok() != Some(paging_type) } else { false };
-
-        if paging_type_changing {
-            log::info!("Paging type is changing, disabling MMU for TCR/TTBR0 update");
-            // SAFETY: The caller of install_page_table guarantees that the
-            // current code and data are identity-mapped.
-            unsafe { reg::disable_mmu() };
-        }
-
-        // Set TCR
-        reg::set_tcr(tcr);
-
-        // EFI_MEMORY_UC ==> MAIR_ATTR_DEVICE_MEMORY
-        // EFI_MEMORY_WC ==> MAIR_ATTR_NORMAL_MEMORY_NON_CACHEABLE
-        // EFI_MEMORY_WT ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_THROUGH
-        // EFI_MEMORY_WB ==> MAIR_ATTR_NORMAL_MEMORY_WRITE_BACK
-        reg::set_mair((0x44 << 8) | (0xBB << 16) | (0xFF << 24));
-
-        // Set TTBR0
-        reg::set_ttbr0(base);
-
-        if !mmu_was_enabled || paging_type_changing {
-            reg::set_alignment_check(false);
-            reg::set_stack_alignment_check(true);
-            reg::enable_instruction_cache();
-            reg::enable_data_cache();
-
-            reg::enable_mmu();
-        }
+        // SAFETY: The caller guarantees that base points to a valid, properly
+        // constructed page table and that identity-mapping is in place.
+        unsafe { reg::swap_page_tables(base, tcr, MAIR) };
 
         Ok(())
     }
