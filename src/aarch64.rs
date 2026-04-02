@@ -18,6 +18,7 @@ use crate::{
     structs::{VirtualAddress, *},
 };
 
+#[coverage(off)] // Reg implements hardware abstractions, which cannot be meaningfully tested in unit tests.
 mod reg;
 mod structs;
 #[cfg(test)]

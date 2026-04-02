@@ -32,7 +32,14 @@ replace_live_xlat_entry:
 
   # flush translations for the target address from the TLBs
   lsr   x2, x2, #12
+  mrs   x3, CurrentEL
+  cmp   x3, #0x08
+  b.ne  1f
   tlbi  vae2, x2
+  b     2f
+1:
+  tlbi  vaae1, x2
+2:
   dsb   nsh
 
   # write updated entry
