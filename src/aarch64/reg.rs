@@ -59,7 +59,6 @@ pub(crate) enum CpuFlushType {
     EFiCpuFlushTypeInvalidate,
 }
 
-#[coverage(off)] // Not be meaningfully tested without hardware support.
 pub(crate) fn get_phys_addr_bits() -> u64 {
     // Read the ID_AA64MMFR0_EL1 register to get the physical address size.
     // Bits [3:0] (PARange) encode the supported physical address width.
@@ -92,7 +91,6 @@ pub(crate) fn get_current_el() -> ExceptionLevel {
     }
 }
 
-#[coverage(off)] // This requires hardware for meaningful testing.
 pub(crate) fn get_tcr() -> u64 {
     match get_current_el() {
         ExceptionLevel::EL2 => read_sysreg!("tcr_el2", 0),
@@ -100,7 +98,6 @@ pub(crate) fn get_tcr() -> u64 {
     }
 }
 
-#[coverage(off)] // This requires hardware for meaningful testing.
 pub(crate) fn get_ttbr0() -> u64 {
     match get_current_el() {
         ExceptionLevel::EL2 => read_sysreg!("ttbr0_el2", 0),
@@ -184,8 +181,9 @@ pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva
 
 // AArch64 related cache functions
 pub(crate) fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
-    let cacheline_alignment = data_cache_line_len() - 1;
-    let mut aligned_addr = start - (start & cacheline_alignment);
+    let cacheline_size = data_cache_line_len();
+    let cacheline_mask = cacheline_size - 1;
+    let mut aligned_addr = start & !cacheline_mask;
     let end_addr = start + length;
 
     loop {
@@ -195,7 +193,7 @@ pub(crate) fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
             CpuFlushType::EFiCpuFlushTypeInvalidate => invalidate_data_cache_entry_by_mva(aligned_addr),
         }
 
-        aligned_addr += cacheline_alignment;
+        aligned_addr += cacheline_size;
         if aligned_addr >= end_addr {
             break;
         }
