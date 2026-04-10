@@ -68,6 +68,9 @@ pub(crate) mod arch;
 pub mod page_allocator;
 pub(crate) mod paging;
 pub(crate) mod structs;
+
+// Re-export commonly used page size constants.
+pub use structs::{SIZE_1GB, SIZE_2MB, SIZE_4KB};
 #[cfg(test)]
 #[coverage(off)]
 mod tests;

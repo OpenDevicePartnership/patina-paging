@@ -10,7 +10,7 @@
 use core::arch::asm;
 use core::ptr;
 
-mod structs;
+pub mod structs;
 #[cfg(test)]
 #[coverage(off)]
 mod tests;
