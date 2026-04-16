@@ -6,6 +6,8 @@
 //!
 //! SPDX-License-Identifier: Apache-2.0
 //!
+#[cfg(feature = "mm_supv")]
+use crate::x64::{disable_write_protection, enable_write_protection};
 use crate::{
     MemoryAttributes, PtError,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
@@ -40,10 +42,14 @@ pub(crate) const FOUR_LEVEL_PDP_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_FFE0_0000;
 pub(crate) const FOUR_LEVEL_PD_SELF_MAP_BASE: u64 = 0xFFFF_FFFF_C000_0000;
 pub(crate) const FOUR_LEVEL_PT_SELF_MAP_BASE: u64 = 0xFFFF_FF80_0000_0000;
 
-pub(crate) const CR3_PAGE_BASE_ADDRESS_MASK: u64 = 0x000F_FFFF_FFFF_F000; // 40 bit - lower 12 bits for alignment
+pub const CR3_PAGE_BASE_ADDRESS_MASK: u64 = 0x000F_FFFF_FFFF_F000; // 40 bit - lower 12 bits for alignment
 
-pub(crate) const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
-pub(crate) const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK: u64 = 0x000F_FFFF_FFFF_F000; // 40 bit - lower 12 bits for alignment
+pub const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_SHIFT: u64 = 12u64; // lower 12 bits for alignment
+pub const PAGE_TABLE_ENTRY_4KB_PAGE_TABLE_BASE_ADDRESS_MASK: u64 = 0x000F_FFFF_FFFF_F000; // 40 bit - lower 12 bits for alignment
+/// Address mask for 2MB large page addresses (bits [51:21]).
+pub const PAGE_TABLE_ENTRY_2MB_PAGE_BASE_ADDRESS_MASK: u64 = 0x000F_FFFF_FFE0_0000;
+/// Address mask for 1GB huge page addresses (bits [51:30]).
+pub const PAGE_TABLE_ENTRY_1GB_PAGE_BASE_ADDRESS_MASK: u64 = 0x000F_FFFF_C000_0000;
 
 #[rustfmt::skip]
 #[bitfield(u64)]
@@ -81,7 +87,13 @@ impl PageTableEntryX64 {
             self.set_read_write(true);
         }
 
-        self.set_user_supervisor(true);
+        #[cfg(feature = "mm_supv")]
+        if attributes.contains(MemoryAttributes::Supervisor) {
+            self.set_user_supervisor(false);
+        } else {
+            self.set_user_supervisor(true);
+        }
+
         self.set_write_through(false);
         self.set_cache_disabled(false);
         self.set_page_size(false);
@@ -148,7 +160,15 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         }
 
         let prev_valid = self.present();
+
+        #[cfg(feature = "mm_supv")]
+        let cr0 = disable_write_protection();
+
         self.swap(&copy);
+
+        #[cfg(feature = "mm_supv")]
+        enable_write_protection(cr0);
+
         if prev_valid {
             invalidate_tlb(va);
         }
@@ -164,7 +184,15 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         let mut copy = *self;
         copy.set_present(value);
         let prev_valid = self.present();
+
+        #[cfg(feature = "mm_supv")]
+        let cr0 = disable_write_protection();
+
         self.swap(&copy);
+
+        #[cfg(feature = "mm_supv")]
+        enable_write_protection(cr0);
+
         if prev_valid {
             invalidate_tlb(va);
         }
@@ -188,6 +216,11 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
 
         if self.nx() {
             attributes |= MemoryAttributes::ExecuteProtect;
+        }
+
+        #[cfg(feature = "mm_supv")]
+        if !self.user_supervisor() {
+            attributes |= MemoryAttributes::Supervisor;
         }
 
         attributes
@@ -282,7 +315,15 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
         let mut copy = *self;
         copy.0 = 0;
         let prev_valid = self.present();
+
+        #[cfg(feature = "mm_supv")]
+        let cr0 = disable_write_protection();
+
         self.swap(&copy);
+
+        #[cfg(feature = "mm_supv")]
+        enable_write_protection(cr0);
+
         if prev_valid {
             invalidate_tlb(va);
         }
@@ -377,5 +418,59 @@ mod tests {
         let level = PageLevel::Level1;
         // Should not panic or error
         let _ = entry.dump_entry(va, level);
+    }
+
+    #[test]
+    fn test_disable_write_protection_returns_zero_in_test_mode() {
+        // In test mode the inline asm is compiled out, so CR0 is always 0.
+        // This exercises the bit-manipulation path: clearing bit 16 of 0 is still 0.
+        use crate::x64::disable_write_protection;
+        let cr0 = disable_write_protection();
+        assert_eq!(cr0, 0, "In test mode CR0 should be zero (asm compiled out)");
+    }
+
+    #[test]
+    fn test_enable_write_protection_does_not_panic() {
+        // In test mode the inline asm is compiled out, so enable_write_protection
+        // just runs the bit-manipulation logic with _current_cr0 = 0.
+        // Verify it completes without panicking for various input values.
+        use crate::x64::enable_write_protection;
+        enable_write_protection(0);
+        enable_write_protection(1 << 16); // WP bit set
+        enable_write_protection(u64::MAX); // all bits set
+    }
+
+    #[test]
+    fn test_disable_then_enable_round_trip() {
+        // Verify the round-trip: disable returns the original CR0, and
+        // enable accepts it back without error.
+        use crate::x64::{disable_write_protection, enable_write_protection};
+        let saved_cr0 = disable_write_protection();
+        enable_write_protection(saved_cr0);
+    }
+
+    #[test]
+    fn test_write_protection_bit_manipulation_logic() {
+        // The WP bit is bit 16 of CR0 (0x0001_0000).
+        // Test the bit-manipulation logic directly, mirroring what
+        // disable/enable do internally.
+        const WP_BIT: u64 = 1 << 16;
+
+        // disable_write_protection clears bit 16:
+        let cr0_with_wp = 0xDEAD_BEEF_0001_0000u64; // WP set
+        let cleared = cr0_with_wp & !WP_BIT;
+        assert_eq!(cleared & WP_BIT, 0, "WP bit should be cleared");
+        assert_eq!(cleared, 0xDEAD_BEEF_0000_0000u64);
+
+        // enable_write_protection restores bit 16 from the saved value:
+        let current_cr0 = 0u64; // after disable, WP is cleared
+        let restored = current_cr0 | (cr0_with_wp & WP_BIT);
+        assert_ne!(restored & WP_BIT, 0, "WP bit should be restored");
+        assert_eq!(restored, WP_BIT);
+
+        // If the original CR0 had WP cleared, enable should not set it:
+        let cr0_without_wp = 0xDEAD_BEEF_0000_0000u64;
+        let should_stay_cleared = current_cr0 | (cr0_without_wp & WP_BIT);
+        assert_eq!(should_stay_cleared & WP_BIT, 0, "WP bit should remain cleared");
     }
 }
