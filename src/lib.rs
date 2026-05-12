@@ -68,6 +68,9 @@ pub(crate) mod arch;
 pub mod page_allocator;
 pub(crate) mod paging;
 pub(crate) mod structs;
+
+// Re-export commonly used page size constants.
+pub use structs::{SIZE_1GB, SIZE_2MB, SIZE_4KB};
 #[cfg(test)]
 #[coverage(off)]
 mod tests;
@@ -160,6 +163,12 @@ bitflags! {
                                    Self::UncachedExport.bits() |
                                    Self::WriteProtect.bits();
 
+        #[cfg(feature = "mm_supv")]
+        const AccessAttributesMask = Self::ReadProtect.bits() |
+                                    Self::ExecuteProtect.bits() |
+                                    Self::ReadOnly.bits() |
+                                    Self::Supervisor.bits();
+        #[cfg(not(feature = "mm_supv"))]
         const AccessAttributesMask = Self::ReadProtect.bits() |
                                     Self::ExecuteProtect.bits() |
                                     Self::ReadOnly.bits();
