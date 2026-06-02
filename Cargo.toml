@@ -18,3 +18,5 @@ cfg-if = "1.0.0"
 
 [features]
 doc = []
+# All no_std features to test in CI
+ci_features = []
