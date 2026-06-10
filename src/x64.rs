@@ -18,7 +18,7 @@ mod tests;
 use structs::{CR3_PAGE_BASE_ADDRESS_MASK, MAX_VA_4_LEVEL, MAX_VA_5_LEVEL, ZERO_VA_4_LEVEL, ZERO_VA_5_LEVEL};
 
 use crate::{
-    MemoryAttributes, PageTable, PagingType, PtError,
+    MappedRegion, MemoryAttributes, PageTable, PagingType, PtError,
     arch::PageTableHal,
     page_allocator::PageAllocator,
     paging::PageTableInternal,
@@ -63,6 +63,23 @@ impl<P: PageAllocator> X64PageTable<P> {
     /// Consumes the page table structure and returns the page table root.
     pub fn into_page_table_root(self) -> u64 {
         self.internal.into_page_table_root()
+    }
+
+    /// Returns an iterator over every present leaf mapping in the page table.
+    ///
+    /// The iterator performs a depth-first walk of the page table hierarchy,
+    /// yielding one [`MappedRegion`] for each present leaf entry. Region
+    /// attributes include any restrictions inherited from parent table entries.
+    ///
+    /// `start_address` controls where the walk begins. `None` walks the entire
+    /// table from virtual address 0. `Some(addr)` skips ahead so the first
+    /// reported region is the mapping that contains `addr` (or the next mapping
+    /// after it), avoiding a walk of earlier portions of the table.
+    ///
+    /// The crate's reserved self-map and zero-VA root entries are skipped so the
+    /// iterator only reports genuine mappings.
+    pub fn iter_mapped_regions(&self, start_address: Option<u64>) -> impl Iterator<Item = MappedRegion> + '_ {
+        self.internal.iter_mapped_regions(start_address)
     }
 
     /// Opens a page table manager for the currently active page tables.

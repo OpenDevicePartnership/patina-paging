@@ -10,11 +10,14 @@
 use core::{marker::PhantomData, slice};
 
 use crate::{
-    MemoryAttributes, PagingType, PtError, RangeMappingState,
+    MappedRegion, MemoryAttributes, PagingType, PtError, RangeMappingState,
     arch::{PageTableEntry, PageTableHal},
     page_allocator::PageAllocator,
     structs::{PAGE_SIZE, PageLevel, PhysicalAddress, SELF_MAP_INDEX, VirtualAddress, ZERO_VA_INDEX},
 };
+
+/// Maximum page table depth is 5-level paging.
+const MAX_PAGE_TABLE_DEPTH: usize = 5;
 
 /// Tracks the supported states of the page tables. Specifically, whether the page
 /// tables are actively installed and whether they are self-mapped. This will change
@@ -816,6 +819,184 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
         Ok(())
     }
+
+    /// Returns an iterator over every present leaf mapping in the page table.
+    ///
+    /// The iterator performs a depth-first walk of the page table hierarchy,
+    /// yielding one [`MappedRegion`] for each present leaf entry. Region
+    /// attributes include any restrictions inherited from parent table entries.
+    ///
+    /// `start_address` controls where the walk begins. `None` walks the entire
+    /// table from virtual address 0. `Some(addr)` skips ahead so the first
+    /// reported region is the mapping that contains `addr` (or the next mapping
+    /// after it), avoiding a walk of earlier portions of the table when the
+    /// caller only cares about mappings at or above a known address.
+    ///
+    /// The crate's reserved self-map and zero-VA root entries are skipped so the
+    /// iterator only reports genuine mappings.
+    pub fn iter_mapped_regions(&self, start_address: Option<u64>) -> PageTableIterator<'_, Arch> {
+        PageTableIterator::new(self.base, self.paging_type, self.get_state(), start_address)
+    }
+}
+
+/// A single frame in the [`PageTableIterator`] traversal stack, tracking the
+/// progress through one page table at a particular level.
+#[derive(Clone, Copy)]
+struct WalkFrame {
+    /// The level of the page table this frame is iterating.
+    level: PageLevel,
+    /// The virtual address corresponding to index 0 of this table.
+    base_va: u64,
+    /// The next entry index to examine within this table.
+    index: usize,
+    /// Restrictive attributes inherited from parent table entries.
+    inherited: MemoryAttributes,
+    /// The physical base address of this table (used when not self-mapped).
+    base: PhysicalAddress,
+}
+
+/// Computes the first entry index to examine within a page table whose index-0
+/// entry maps `base_va`, so iteration begins at or after `start_va`.
+fn seek_start_index(start_va: u64, base_va: u64, level: PageLevel) -> usize {
+    if start_va <= base_va { 0 } else { VirtualAddress::new(start_va).get_index(level) as usize }
+}
+
+/// A depth-first iterator over the present leaf mappings of a page table.
+pub(crate) struct PageTableIterator<'a, Arch: PageTableHal> {
+    paging_type: PagingType,
+    state: PageTableState,
+    root_level: PageLevel,
+    skip_reserved_root_entries: bool,
+    start_va: u64,
+    frames: [WalkFrame; MAX_PAGE_TABLE_DEPTH],
+    depth: usize,
+    _marker: PhantomData<&'a Arch>,
+}
+
+impl<Arch: PageTableHal> PageTableIterator<'_, Arch> {
+    fn new(base: PhysicalAddress, paging_type: PagingType, state: PageTableState, start_address: Option<u64>) -> Self {
+        let root_level = PageLevel::root_level(paging_type);
+
+        // Set the start address if not None, otherwise starts at VA 0.
+        let start_va = start_address.map_or(0, |addr| addr & ((1u64 << paging_type.linear_address_bits()) - 1));
+
+        let root_frame = WalkFrame {
+            level: root_level,
+            base_va: 0,
+            index: seek_start_index(start_va, 0, root_level),
+            inherited: MemoryAttributes::empty(),
+            base,
+        };
+
+        // Determine whether the reserved root entries actually belong to this crate's self-map.
+        // We only skip the self-map and zero-VA root indices when the root self-map entry is present
+        // and points back to the page table base. Otherwise (e.g. a page table not created by this
+        // crate), those indices may contain genuine mappings that must be reported.
+        let skip_reserved_root_entries = match get_entry::<Arch>(
+            root_level,
+            paging_type,
+            PageTableStateWithAddress::NotSelfMapped(base),
+            SELF_MAP_INDEX,
+        ) {
+            Ok(entry) => entry.get_present_bit() && entry.get_next_address() == base,
+            Err(_) => false,
+        };
+
+        Self {
+            paging_type,
+            state,
+            root_level,
+            skip_reserved_root_entries,
+            start_va,
+            frames: [root_frame; MAX_PAGE_TABLE_DEPTH],
+            depth: 1,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Sign-extends a raw, additively-computed virtual address into canonical
+    /// form for the active paging type.
+    fn canonicalize(&self, va: u64) -> u64 {
+        let bits = self.paging_type.linear_address_bits();
+        if (va >> (bits - 1)) & 1 == 1 { va | (u64::MAX << bits) } else { va }
+    }
+}
+
+impl<Arch: PageTableHal> Iterator for PageTableIterator<'_, Arch> {
+    type Item = MappedRegion;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.depth > 0 {
+            let frame_idx = self.depth - 1;
+            let frame = self.frames[frame_idx];
+
+            // Exhausted this table: pop back to the parent.
+            if frame.index >= Arch::MAX_ENTRIES {
+                self.depth -= 1;
+                continue;
+            }
+
+            let level = frame.level;
+            let index = frame.index;
+            self.frames[frame_idx].index += 1;
+
+            // Skip self-map and zero-VA, when these root entries are this crate's reserved entries.
+            if self.skip_reserved_root_entries
+                && level == self.root_level
+                && (index as u64 == SELF_MAP_INDEX || index as u64 == ZERO_VA_INDEX)
+            {
+                continue;
+            }
+
+            // Re-derive the table for this frame.
+            let state_with_address = match self.state {
+                PageTableState::ActiveSelfMapped => {
+                    PageTableStateWithAddress::SelfMapped(VirtualAddress::new(frame.base_va))
+                }
+                _ => PageTableStateWithAddress::NotSelfMapped(frame.base),
+            };
+
+            // SAFETY: We are using the page table as provided to the HW and are parsing it in the same manner as defined
+            // by the architecture. This is inherently unsafe because we are trusting that the page table is valid. The
+            // rest of the code in this module is designed to ensure that the page table is valid and consistent.
+            let slice = unsafe { get_table::<Arch::PTE, Arch>(level, self.paging_type, state_with_address) };
+            let entry = &slice[index];
+
+            if !entry.get_present_bit() {
+                continue;
+            }
+
+            let entry_va = frame.base_va + (index as u64) * level.entry_va_size();
+
+            if entry.points_to_pa(level) {
+                let attributes = entry.get_attributes() | frame.inherited;
+                let pa: u64 = entry.get_next_address().into();
+                return Some(MappedRegion {
+                    va: self.canonicalize(entry_va),
+                    pa,
+                    size: level.entry_va_size(),
+                    attributes,
+                });
+            }
+
+            // Intermediate entry: descend into the child table.
+            let Some(next_level) = level.next_level() else {
+                // A non-leaf entry at the lowest level is malformed; skip it.
+                continue;
+            };
+            let child = WalkFrame {
+                level: next_level,
+                base_va: entry_va,
+                index: seek_start_index(self.start_va, entry_va, next_level),
+                inherited: frame.inherited | entry.get_inheritable_attributes(),
+                base: entry.get_next_address(),
+            };
+            self.frames[self.depth] = child;
+            self.depth += 1;
+        }
+
+        None
+    }
 }
 
 // This enum is used in get_table to determine the page table state and how to interpret the base address.
@@ -1189,6 +1370,22 @@ mod tests {
         let size = 0x2000;
         let res = pt.unmap_memory_region(addr, size);
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
+
+        allocator.cleanup();
+    }
+
+    #[test]
+    fn test_iter_mapped_regions_self_mapped_state() {
+        // Exercise the iterator's self-mapped state handling. `DummyArch` resolves every self-mapped
+        // level to the page table base, so the walk reads the root table for each level. A freshly
+        // created table exposes no genuine leaf mappings, so the iterator yields nothing, but the
+        // `ActiveSelfMapped` branch of the iterator's state handling is still executed.
+        let (pt, allocator) = make_table();
+
+        let count =
+            PageTableIterator::<DummyArch>::new(pt.base, pt.paging_type, PageTableState::ActiveSelfMapped, None)
+                .count();
+        assert_eq!(count, 0, "a freshly created table exposes no genuine mappings");
 
         allocator.cleanup();
     }
