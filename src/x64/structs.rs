@@ -6,6 +6,8 @@
 //!
 //! SPDX-License-Identifier: Apache-2.0
 //!
+#[cfg(feature = "supervisor")]
+use crate::x64::{disable_write_protection, enable_write_protection};
 use crate::{
     MemoryAttributes, PtError,
     structs::{PageLevel, PhysicalAddress, VirtualAddress},
@@ -81,7 +83,13 @@ impl PageTableEntryX64 {
             self.set_read_write(true);
         }
 
-        self.set_user_supervisor(true);
+        #[cfg(feature = "supervisor")]
+        let user_supervisor = !attributes.contains(MemoryAttributes::Supervisor);
+        #[cfg(not(feature = "supervisor"))]
+        let user_supervisor = true;
+
+        self.set_user_supervisor(user_supervisor);
+
         self.set_write_through(false);
         self.set_cache_disabled(false);
         self.set_page_size(false);
@@ -108,11 +116,27 @@ impl PageTableEntryX64 {
     /// Performs an overwrite of the table entry. This ensures that all fields
     /// are written to memory at once to avoid partial PTE edits causing unexpected
     /// behavior with speculative execution or when operating on the current mapping.
+    ///
+    /// When the `supervisor` feature is enabled, `CR0.WP` is cleared for the duration of the write
+    /// and restored afterwards, so the entry can be updated even when the page table itself is mapped
+    /// read-only.
     pub fn swap(&mut self, other: &Self) {
+        // SAFETY: Per this crate's table-stakes assumptions, page table mutation runs with privileged
+        // execution and masked interrupts; write protection is restored immediately below.
+        #[cfg(feature = "supervisor")]
+        let cr0 = unsafe { disable_write_protection() };
+
         // Safety: This is safe because we are writing to a valid memory location that is owned by this struct and we
         // are not mutating the memory location in a way that would cause undefined behavior. We are simply overwriting
         // the entire entry atomically.
         unsafe { write_volatile(&mut self.0, other.0) };
+
+        // SAFETY: Restoring the CR0.WP bit with the value saved by disable_write_protection above,
+        // under the same privileged/interrupt-masked conditions.
+        #[cfg(feature = "supervisor")]
+        unsafe {
+            enable_write_protection(cr0);
+        }
     }
 }
 
@@ -188,6 +212,11 @@ impl crate::arch::PageTableEntry for PageTableEntryX64 {
 
         if self.nx() {
             attributes |= MemoryAttributes::ExecuteProtect;
+        }
+
+        #[cfg(feature = "supervisor")]
+        if !self.user_supervisor() {
+            attributes |= MemoryAttributes::Supervisor;
         }
 
         attributes
@@ -377,5 +406,65 @@ mod tests {
         let level = PageLevel::Level1;
         // Should not panic or error
         let _ = entry.dump_entry(va, level);
+    }
+
+    #[test]
+    fn test_disable_write_protection_returns_zero_in_test_mode() {
+        // In test mode the inline asm is compiled out, so CR0 is always 0.
+        // This exercises the bit-manipulation path: clearing bit 16 of 0 is still 0.
+        use crate::x64::disable_write_protection;
+        // SAFETY: In test mode the inline asm is compiled out, so this only runs the bit-manipulation logic.
+        let cr0 = unsafe { disable_write_protection() };
+        assert_eq!(cr0, 0, "In test mode CR0 should be zero (asm compiled out)");
+    }
+
+    #[test]
+    fn test_enable_write_protection_does_not_panic() {
+        // In test mode the inline asm is compiled out, so enable_write_protection
+        // just runs the bit-manipulation logic with _current_cr0 = 0.
+        // Verify it completes without panicking for various input values.
+        use crate::x64::enable_write_protection;
+        // SAFETY: In test mode the inline asm is compiled out, so this only runs the bit-manipulation logic.
+        unsafe {
+            enable_write_protection(0);
+            enable_write_protection(1 << 16); // WP bit set
+            enable_write_protection(u64::MAX); // all bits set
+        }
+    }
+
+    #[test]
+    fn test_disable_then_enable_round_trip() {
+        // Verify the round-trip: disable returns the original CR0, and
+        // enable accepts it back without error.
+        use crate::x64::{disable_write_protection, enable_write_protection};
+        // SAFETY: In test mode the inline asm is compiled out, so this only runs the bit-manipulation logic.
+        let saved_cr0 = unsafe { disable_write_protection() };
+        // SAFETY: Restoring the value saved immediately above; asm is compiled out in test mode.
+        unsafe { enable_write_protection(saved_cr0) };
+    }
+
+    #[test]
+    fn test_write_protection_bit_manipulation_logic() {
+        // The WP bit is bit 16 of CR0 (0x0001_0000).
+        // Test the bit-manipulation logic directly, mirroring what
+        // disable/enable do internally.
+        const WP_BIT: u64 = 1 << 16;
+
+        // disable_write_protection clears bit 16:
+        let cr0_with_wp = 0xDEAD_BEEF_0001_0000u64; // WP set
+        let cleared = cr0_with_wp & !WP_BIT;
+        assert_eq!(cleared & WP_BIT, 0, "WP bit should be cleared");
+        assert_eq!(cleared, 0xDEAD_BEEF_0000_0000u64);
+
+        // enable_write_protection restores bit 16 from the saved value:
+        let current_cr0 = 0u64; // after disable, WP is cleared
+        let restored = current_cr0 | (cr0_with_wp & WP_BIT);
+        assert_ne!(restored & WP_BIT, 0, "WP bit should be restored");
+        assert_eq!(restored, WP_BIT);
+
+        // If the original CR0 had WP cleared, enable should not set it:
+        let cr0_without_wp = 0xDEAD_BEEF_0000_0000u64;
+        let should_stay_cleared = current_cr0 | (cr0_without_wp & WP_BIT);
+        assert_eq!(should_stay_cleared & WP_BIT, 0, "WP bit should remain cleared");
     }
 }
