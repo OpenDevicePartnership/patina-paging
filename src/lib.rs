@@ -166,6 +166,20 @@ bitflags! {
     }
 }
 
+/// A struct representing a mapped memory region, self-mapped or zero-VA are excluded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MappedRegion {
+    /// The starting virtual address of the region, in canonical form.
+    pub va: u64,
+    /// The physical address the region maps to.
+    pub pa: u64,
+    /// The size of the region in bytes.
+    pub size: u64,
+    /// The effective memory attributes for the region, including restrictions
+    /// inherited from parent table entries.
+    pub attributes: MemoryAttributes,
+}
+
 /// PageTable trait is implemented by all concrete page table implementations
 /// and provides the interface for managing page tables.
 pub trait PageTable {

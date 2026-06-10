@@ -1517,3 +1517,343 @@ fn test_map_large_page_remap_subset_with_same_attributes() {
         }
     });
 }
+
+#[test]
+fn test_iter_mapped_regions_covers_simple_mapping() {
+    let address = 0;
+    let size = 0x400000; // 4MB
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        pt.map_memory_region(address, size, attributes).unwrap();
+
+        let mut total = 0u64;
+        let mut count = 0u64;
+        for region in pt.iter_mapped_regions(None) {
+            // Every reported region must lie within the mapped range.
+            assert!(
+                region.va >= address && (region.va + region.size) <= address + size,
+                "region {region:#x?} escapes the mapped range"
+            );
+            // The mapping is identity, so the physical and virtual bases match.
+            assert_eq!(region.pa, region.va, "expected identity mapping for region {region:#x?}");
+            // Effective attributes must match what was mapped (no restrictive parents).
+            assert_eq!(region.attributes, attributes, "unexpected attributes for region {region:#x?}");
+            total += region.size;
+            count += 1;
+        }
+
+        assert_eq!(total, size, "iterated regions must cover the full mapping exactly");
+        assert!(count >= 1, "expected at least one mapped region");
+    });
+}
+
+#[test]
+fn test_iter_mapped_regions_skips_reserved_entries() {
+    // A freshly created table contains only the crate's reserved self-map and
+    // zero-VA entries, which must never be reported as genuine mappings.
+    all_configs!(|paging_type| {
+        let page_allocator = TestPageAllocator::new(16, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
+
+        assert_eq!(
+            pt.iter_mapped_regions(None).count(),
+            0,
+            "an unmapped table must yield no regions (self-map/zero-VA skipped)"
+        );
+    });
+}
+
+#[test]
+fn test_iter_mapped_regions_multiple_disjoint() {
+    let region_a = (0x40000000u64, SIZE_2MB); // 1GB base, read-only
+    let region_b = (0x80000000u64, SIZE_2MB); // 2GB base, execute-protected
+
+    all_configs!(|paging_type| {
+        // Sum of the per-region requirements is a safe over-estimate of the
+        // pages needed when both are mapped into the same table.
+        let pages_a = num_page_tables_required::<Arch>(region_a.0, region_a.1, paging_type).unwrap();
+        let pages_b = num_page_tables_required::<Arch>(region_b.0, region_b.1, paging_type).unwrap();
+        let page_allocator = TestPageAllocator::new(pages_a + pages_b, paging_type);
+        let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
+
+        let attr_a = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        let attr_b = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
+        pt.map_memory_region(region_a.0, region_a.1, attr_a).unwrap();
+        pt.map_memory_region(region_b.0, region_b.1, attr_b).unwrap();
+
+        let mut total_a = 0u64;
+        let mut total_b = 0u64;
+        for region in pt.iter_mapped_regions(None) {
+            if region.va >= region_a.0 && region.va < region_a.0 + region_a.1 {
+                assert_eq!(region.attributes, attr_a, "region A attributes mismatch: {region:#x?}");
+                total_a += region.size;
+            } else if region.va >= region_b.0 && region.va < region_b.0 + region_b.1 {
+                assert_eq!(region.attributes, attr_b, "region B attributes mismatch: {region:#x?}");
+                total_b += region.size;
+            } else {
+                panic!("unexpected region outside the mapped ranges: {region:#x?}");
+            }
+        }
+
+        assert_eq!(total_a, region_a.1, "region A was not fully covered");
+        assert_eq!(total_b, region_b.1, "region B was not fully covered");
+    });
+}
+
+#[test]
+fn test_iter_mapped_regions_canonicalizes_high_half() {
+    // Mapping in the higher half forces the iterator to sign-extend the
+    // additively-computed virtual address back into canonical form. x64
+    // 5-level paging is used because it cleanly supports a higher-half identity
+    // mapping at this base.
+    let paging_type = PagingType::Paging5Level;
+    let address = 0xFF00_0000_0000_0000u64;
+    let size = SIZE_2MB;
+
+    let num_pages = num_page_tables_required::<PageTableArchX64>(address, size, paging_type).unwrap();
+    let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+    let mut pt = X64PageTable::new(page_allocator.clone(), paging_type).unwrap();
+
+    let attributes = MemoryAttributes::ReadOnly;
+    pt.map_memory_region(address, size, attributes).unwrap();
+
+    let mut total = 0u64;
+    let mut min_va = u64::MAX;
+    for region in pt.iter_mapped_regions(None) {
+        assert!(
+            region.va >= address && (region.va + region.size) <= address + size,
+            "region {region:#x?} escapes the mapped range starting at {address:#x}"
+        );
+        min_va = min_va.min(region.va);
+        total += region.size;
+    }
+
+    assert_eq!(min_va, address, "iterator must report canonical higher-half VAs");
+    assert_eq!(total, size, "iterated regions must cover the full mapping");
+}
+
+#[test]
+fn test_iter_mapped_regions_reports_reserved_indices_for_foreign_table() {
+    // The iterator only skips the reserved self-map and zero-VA root indices when the root self-map
+    // entry actually points back to the page table base (i.e. a table created and self-mapped by this
+    // crate). For a page table not created by this crate, those indices may hold genuine mappings and
+    // must be reported rather than silently dropped.
+    use crate::structs::{SELF_MAP_INDEX, ZERO_VA_INDEX};
+
+    let paging_type = PagingType::Paging4Level;
+    let address = 0u64;
+    let size = SIZE_2MB;
+
+    let num_pages = num_page_tables_required::<PageTableArchX64>(address, size, paging_type).unwrap();
+    let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+    let mut pt = X64PageTable::new(page_allocator.clone(), paging_type).unwrap();
+
+    // Map a single genuine region so the table has at least one real leaf to report and a valid
+    // intermediate sub-table chain at root index 0.
+    let attributes = MemoryAttributes::ReadOnly;
+    pt.map_memory_region(address, size, attributes).unwrap();
+
+    // While self-mapped detection holds, the reserved root entries are skipped: only the genuine
+    // mapping is reported.
+    let self_mapped_count = pt.iter_mapped_regions(None).count();
+    assert_eq!(self_mapped_count, 1, "self-mapped table should report only the genuine mapping");
+
+    let base = pt.into_page_table_root();
+
+    // Make this look like a page table not created by this crate by pointing the reserved root
+    // indices at the genuine, valid sub-table chain already built for index 0. This keeps the walk
+    // memory-safe (it descends into real allocated tables) while ensuring the root self-map entry no
+    // longer points back to `base`, so the iterator must not skip the reserved indices.
+    // SAFETY: `base` is the root of a valid page table we just created; we index within its bounds.
+    let root = unsafe {
+        slice::from_raw_parts_mut(base as *mut <PageTableArchX64 as PageTableHal>::PTE, PageTableArchX64::MAX_ENTRIES)
+    };
+    let genuine_root_entry = root[0];
+    assert!(genuine_root_entry.get_present_bit(), "root index 0 should be present after mapping");
+    root[SELF_MAP_INDEX as usize] = genuine_root_entry;
+    root[ZERO_VA_INDEX as usize] = genuine_root_entry;
+
+    // Reopen the same physical table as a foreign table. Its self-map entry no longer points to the
+    // base, so the iterator must not skip the reserved indices and instead reports the leaves reached
+    // through them.
+    // SAFETY: `base` points to the valid page table constructed above.
+    let foreign = unsafe { X64PageTable::from_existing(base, page_allocator.clone(), paging_type).unwrap() };
+
+    let foreign_count = foreign.iter_mapped_regions(None).count();
+    assert!(
+        foreign_count > self_mapped_count,
+        "foreign table must report the reserved-index entries instead of skipping them \
+         (self-mapped: {self_mapped_count}, foreign: {foreign_count})"
+    );
+}
+
+#[test]
+fn test_iter_mapped_regions_start_address_skips_earlier() {
+    // Two disjoint mappings. Starting the walk at the second region's base must skip the first
+    // region entirely and report only the second.
+    let region_a = (0x40000000u64, SIZE_2MB); // 1GB, read-only
+    let region_b = (0x80000000u64, SIZE_2MB); // 2GB, execute-protected
+
+    all_configs!(|paging_type| {
+        let pages_a = num_page_tables_required::<Arch>(region_a.0, region_a.1, paging_type).unwrap();
+        let pages_b = num_page_tables_required::<Arch>(region_b.0, region_b.1, paging_type).unwrap();
+        let page_allocator = TestPageAllocator::new(pages_a + pages_b, paging_type);
+        let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
+
+        let attr_a = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        let attr_b = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
+        pt.map_memory_region(region_a.0, region_a.1, attr_a).unwrap();
+        pt.map_memory_region(region_b.0, region_b.1, attr_b).unwrap();
+
+        // Starting at region B's base, region A must not appear.
+        let mut total_b = 0u64;
+        let mut count = 0u64;
+        for region in pt.iter_mapped_regions(Some(region_b.0)) {
+            assert!(region.va >= region_b.0, "region {region:#x?} precedes the requested start {:#x}", region_b.0);
+            assert_eq!(region.attributes, attr_b, "only region B should be reported: {region:#x?}");
+            total_b += region.size;
+            count += 1;
+        }
+        assert!(count >= 1, "expected region B to be reported");
+        assert_eq!(total_b, region_b.1, "region B must be fully covered starting at its base");
+    });
+}
+
+#[test]
+fn test_iter_mapped_regions_start_within_region() {
+    // A start address that falls inside a mapped region must still report that region; the reported
+    // VA may begin before the requested start.
+    let address = 0x40000000u64; // 1GB
+    let size = 0x400000u64; // 4MB
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        pt.map_memory_region(address, size, attributes).unwrap();
+
+        // Start one page into the mapping; the containing region must still be reported first.
+        let start = address + PAGE_SIZE;
+        let first = pt.iter_mapped_regions(Some(start)).next().expect("expected at least one region");
+        assert!(
+            first.va <= start && start < first.va + first.size,
+            "first region {first:#x?} must contain the start address {start:#x}"
+        );
+    });
+}
+
+#[test]
+fn test_iter_mapped_regions_start_zero_matches_none() {
+    // Passing Some(0) must behave identically to None: the entire table is walked.
+    let address = 0u64;
+    let size = 0x400000u64; // 4MB
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        pt.map_memory_region(address, size, attributes).unwrap();
+
+        let none_regions: std::vec::Vec<_> = pt.iter_mapped_regions(None).collect();
+        let some_zero_regions: std::vec::Vec<_> = pt.iter_mapped_regions(Some(0)).collect();
+        assert!(!none_regions.is_empty(), "expected at least one region");
+        assert_eq!(none_regions, some_zero_regions, "Some(0) must match None");
+    });
+}
+
+#[test]
+fn test_iter_mapped_regions_start_after_all_mappings_is_empty() {
+    // A start address beyond every mapping must yield no regions.
+    let address = 0x40000000u64; // 1GB
+    let size = SIZE_2MB;
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        pt.map_memory_region(address, size, attributes).unwrap();
+
+        // Begin past the end of the single mapping.
+        let start = address + size;
+        assert_eq!(
+            pt.iter_mapped_regions(Some(start)).count(),
+            0,
+            "no regions should be reported when starting past every mapping"
+        );
+    });
+}
+
+#[test]
+fn test_iter_mapped_regions_start_address_high_half() {
+    // A canonical higher-half start address must be normalized so the higher-half mapping is still
+    // located and reported. x64 5-level paging cleanly supports a higher-half identity mapping here.
+    let paging_type = PagingType::Paging5Level;
+    let address = 0xFF00_0000_0000_0000u64;
+    let size = SIZE_2MB;
+
+    let num_pages = num_page_tables_required::<PageTableArchX64>(address, size, paging_type).unwrap();
+    let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+    let mut pt = X64PageTable::new(page_allocator.clone(), paging_type).unwrap();
+
+    let attributes = MemoryAttributes::ReadOnly;
+    pt.map_memory_region(address, size, attributes).unwrap();
+
+    // Starting exactly at the higher-half base must report the mapping with a canonical VA.
+    let mut total = 0u64;
+    let mut count = 0u64;
+    for region in pt.iter_mapped_regions(Some(address)) {
+        assert!(
+            region.va >= address && (region.va + region.size) <= address + size,
+            "region {region:#x?} escapes the mapped range starting at {address:#x}"
+        );
+        total += region.size;
+        count += 1;
+    }
+    assert!(count >= 1, "expected the higher-half mapping to be reported");
+    assert_eq!(total, size, "iterated regions must cover the full higher-half mapping");
+}
+
+#[test]
+fn test_iter_mapped_regions_start_seeks_deep_non_root_index() {
+    // Pin down the "seek directly to the target index" behavior at a non-root level. Eight contiguous
+    // 2MB pages populate a single L2 table (indices 0..8). Starting five entries in must skip L2[0..5]
+    // entirely and land exactly on L2[5], proving the lazy per-level seek works once the traversal
+    // stack has descended below the root rather than only at index 0.
+    let base = 0x40000000u64; // 1GB-aligned: the eight 2MB pages share one L2 table.
+    let size = 8 * SIZE_2MB;
+
+    all_configs!(|paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(base, size, paging_type).unwrap();
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        pt.map_memory_region(base, size, attributes).unwrap();
+
+        // Start at the sixth 2MB page; the walk must skip the first five L2 entries and begin at L2[5].
+        let start = base + 5 * SIZE_2MB;
+        let regions: std::vec::Vec<_> = pt.iter_mapped_regions(Some(start)).map(|r| (r.va, r.size)).collect();
+
+        assert_eq!(
+            regions.len(),
+            3,
+            "exactly the three pages at or after the start must remain (L2[5..8]): {regions:#x?}"
+        );
+        assert_eq!(regions[0].0, base + 5 * SIZE_2MB, "first region must be the entry containing the start");
+        assert_eq!(regions[1].0, base + 6 * SIZE_2MB, "second region must follow contiguously");
+        assert_eq!(regions[2].0, base + 7 * SIZE_2MB, "third region must follow contiguously");
+        let total: u64 = regions.iter().map(|(_, s)| *s).sum();
+        assert_eq!(total, 3 * SIZE_2MB, "exactly three 2MB pages must remain after the deep seek");
+    });
+}
