@@ -12,6 +12,24 @@
 //! This crate currently contains two concrete implementations of the [`PageTable`]
 //! trait: [`x64::X64PageTable`] and [`aarch64::AArch64PageTable`].
 //!
+//! ## Safety Assumptions
+//!
+//! This crate is intended for low-level firmware and kernel environments.
+//! Using it assumes table-stakes execution conditions:
+//! - The caller is running at a privilege level that can safely read/write paging control registers.
+//! - Interrupts are disabled while performing page-table mutations that temporarily relax protections.
+//!
+//! Callers are responsible for upholding these conditions when invoking APIs that touch hardware paging state.
+//!
+//! ## Features
+//!
+//! - `supervisor`: Accepts the `MemoryAttributes::Supervisor` attribute and enforces it on X64 by
+//!   clearing the User/Supervisor bit of the affected page table entries, restricting those pages to
+//!   supervisor-mode access. This feature also disables CPU write protection (clears `CR0.WP`) before
+//!   mutating a page table entry and re-enables it immediately afterward, so the entry can be updated
+//!   if the page tables are mapped read-only. This feature is only supported on X64. Enabling it for a
+//!   non-X64 target (e.g. aarch64) has no effect.
+//!
 //! ## Examples
 //!
 //! ``` rust
@@ -160,6 +178,12 @@ bitflags! {
                                    Self::UncachedExport.bits() |
                                    Self::WriteProtect.bits();
 
+        #[cfg(all(feature = "supervisor", target_arch = "x86_64"))]
+        const AccessAttributesMask = Self::ReadProtect.bits() |
+                                    Self::ExecuteProtect.bits() |
+                                    Self::ReadOnly.bits() |
+                                    Self::Supervisor.bits();
+        #[cfg(not(all(feature = "supervisor", target_arch = "x86_64")))]
         const AccessAttributesMask = Self::ReadProtect.bits() |
                                     Self::ExecuteProtect.bits() |
                                     Self::ReadOnly.bits();

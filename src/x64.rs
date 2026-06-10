@@ -143,6 +143,75 @@ pub(crate) fn invalidate_tlb(va: VirtualAddress) {
     };
 }
 
+/// Disables CPU write protection by clearing the `CR0.WP` bit and returns the previous value of `CR0`
+/// so the caller can restore it via [`enable_write_protection`].
+///
+/// # Safety
+///
+/// Disabling write protection removes the CPU's enforcement of read-only page mappings for
+/// supervisor-mode writes, relaxing a memory-safety guarantee for the whole processor. The caller
+/// must ensure that:
+///
+/// - Execution is at a privilege level permitted to write `CR0` (ring 0).
+/// - Interrupts are masked while write protection is disabled so that no other code executes while
+///   the guarantee is relaxed.
+/// - Write protection is restored via [`enable_write_protection`] with the returned value before any
+///   code relies on the read-only protection of a page, keeping the unprotected window as narrow as
+///   possible.
+pub unsafe fn disable_write_protection() -> u64 {
+    let mut _cr0 = 0u64;
+    // SAFETY: This crate assumes privileged execution and interrupt masking while mutating page tables.
+    // Reading CR0 relies on those table-stakes conditions.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        asm!("mov {}, cr0", out(reg) _cr0);
+    }
+
+    // Clear the Write Protect bit (bit 16)
+    let _new_cr0 = _cr0 & !(1 << 16);
+    // SAFETY: Writing CR0 to disable WP relies on the same crate-level table-stakes assumptions above.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        if _new_cr0 != _cr0 {
+            asm!("mov cr0, {}", in(reg) _new_cr0);
+        }
+    }
+
+    _cr0
+}
+
+/// Restores CPU write protection by setting the `CR0.WP` bit from the saved value previously
+/// returned by [`disable_write_protection`].
+///
+/// # Safety
+///
+/// Writing `CR0` is a privileged operation that affects the whole processor's enforcement of
+/// read-only page mappings. The caller must ensure that:
+///
+/// - Execution is at a privilege level permitted to write `CR0` (ring 0).
+/// - The `cr0` value originates from a prior [`disable_write_protection`] call so the `CR0.WP` bit
+///   is restored to its intended state rather than an arbitrary value.
+pub unsafe fn enable_write_protection(cr0: u64) {
+    let mut _current_cr0 = 0u64;
+    // SAFETY: This crate assumes privileged execution and interrupt masking while mutating page tables.
+    // Reading CR0 relies on those table-stakes conditions.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        asm!("mov {}, cr0", out(reg) _current_cr0);
+    }
+
+    // Set the Write Protect bit (bit 16)
+    let _new_cr0 = _current_cr0 | (cr0 & (1 << 16));
+
+    // SAFETY: Writing CR0 to restore WP relies on the same crate-level table-stakes assumptions above.
+    #[cfg(all(not(test), target_arch = "x86_64"))]
+    unsafe {
+        if _new_cr0 != _current_cr0 {
+            asm!("mov cr0, {}", in(reg) _new_cr0);
+        }
+    }
+}
+
 pub(crate) struct PageTableArchX64;
 
 impl PageTableHal for PageTableArchX64 {
