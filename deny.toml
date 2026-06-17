@@ -91,8 +91,6 @@ exceptions = [
     # Each entry is the crate and version constraint, and its specific allow
     # list
     #{ allow = ["Zlib"], crate = "adler32" },
-    { allow = ["0BSD"], crate = "managed" },
-    { allow = ["BSD-3-Clause"], crate = "alloc-no-stdlib" },
     { allow = ["Unicode-3.0"], crate = "unicode-ident" }
 ]
 
@@ -171,8 +169,6 @@ deny = [
 skip = [
     #"ansi_term@0.11.0",
     #{ crate = "ansi_term@0.11.0", reason = "you can specify a reason why it can't be updated/removed" },
-
-    { crate = "bitflags", reason = "Need https://github.com/gz/rust-x86/pull/150 to be merged into rust-x86." }
 ]
 # Similarly to `skip` allows you to skip certain crates during duplicate
 # detection. Unlike skip, it also includes the entire tree of transitive
