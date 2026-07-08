@@ -21,3 +21,8 @@ doc = []
 supervisor = []
 # All no_std features to test in CI
 ci_features = ["supervisor"]
+
+[lints.rust]
+# Set by cargo-llvm-cov during coverage runs. Declared here so gating
+# `coverage_attribute` behind it does not trigger unexpected_cfgs warnings.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(coverage_nightly)'] }

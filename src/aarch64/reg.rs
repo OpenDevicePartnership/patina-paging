@@ -287,7 +287,7 @@ pub(crate) unsafe fn zero_page(page: u64) {
 ///
 /// The caller is responsible for ensuring that the provided TTBR0 is a valid address and the memory backing
 /// the page tables has the appropriate lifetime to be installed in system registers.
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 pub(crate) unsafe fn swap_page_tables(_ttbr0: u64, _tcr: u64, _mair: u64) {
     #[cfg(all(not(test), target_arch = "aarch64"))]
     {

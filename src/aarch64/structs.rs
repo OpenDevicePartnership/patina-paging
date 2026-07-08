@@ -352,7 +352,7 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
 }
 
 #[cfg(test)]
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use crate::arch::PageTableEntry;

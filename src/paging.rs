@@ -1084,7 +1084,7 @@ impl<'a, Arch: PageTableHal> PageTableRange<'a, Arch> {
 }
 
 #[cfg(test)]
-#[coverage(off)]
+#[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
     use std::{
