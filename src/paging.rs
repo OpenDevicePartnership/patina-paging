@@ -1089,11 +1089,13 @@ mod tests {
     use super::*;
     use std::{
         alloc::{Layout, alloc_zeroed},
-        sync::atomic::{AtomicBool, AtomicU64},
+        cell::Cell,
     };
 
-    static ACTIVE: AtomicBool = AtomicBool::new(false);
-    static BASE: AtomicU64 = AtomicU64::new(0);
+    thread_local! {
+        static ACTIVE: Cell<bool> = const { Cell::new(false) };
+        static BASE: Cell<u64> = const { Cell::new(0) };
+    }
 
     // Dummy Arch implementation for testing
     #[derive(PartialEq, Debug)]
@@ -1108,7 +1110,7 @@ mod tests {
         }
         fn get_self_mapped_base(_level: PageLevel, _va: VirtualAddress, _paging_type: PagingType) -> u64 {
             // for the test we can't use the real self map, so just return the PT base
-            BASE.load(std::sync::atomic::Ordering::Relaxed)
+            BASE.with(|base| base.get())
         }
         fn get_zero_va(_paging_type: PagingType) -> Result<VirtualAddress, PtError> {
             Ok(VirtualAddress::new(0x1000))
@@ -1117,7 +1119,7 @@ mod tests {
             Ok(VirtualAddress::new(0xFFFF_FFFF_FFFF_0000))
         }
         fn is_table_active(_base: u64) -> bool {
-            ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
+            ACTIVE.with(|active| active.get())
         }
         unsafe fn zero_page(_va: VirtualAddress) {}
         unsafe fn install_page_table(_base: u64, _paging_type: PagingType) -> Result<(), PtError> {
@@ -1219,7 +1221,7 @@ mod tests {
             self.allocated_pages.borrow_mut().push(addr);
 
             if is_root {
-                BASE.store(addr, std::sync::atomic::Ordering::Relaxed);
+                BASE.with(|base| base.set(addr));
             }
 
             Ok(addr)
@@ -1243,11 +1245,11 @@ mod tests {
         };
 
         // By default, the table is not active, so should be Inactive
-        ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        ACTIVE.with(|active| active.set(false));
         assert_eq!(pt.get_state(), PageTableState::Inactive);
 
         // Set table as active, but self-map entry is not present or doesn't match base
-        ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+        ACTIVE.with(|active| active.set(true));
 
         // Overwrite the self-map entry to not present
         let root_level = PageLevel::root_level(pt.paging_type);
