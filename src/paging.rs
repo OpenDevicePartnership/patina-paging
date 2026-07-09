@@ -1089,13 +1089,15 @@ mod tests {
     use super::*;
     use std::{
         alloc::{Layout, alloc_zeroed},
-        cell::Cell,
+        sync::{
+            Mutex, MutexGuard, PoisonError,
+            atomic::{AtomicBool, AtomicU64, Ordering},
+        },
     };
 
-    thread_local! {
-        static ACTIVE: Cell<bool> = const { Cell::new(false) };
-        static BASE: Cell<u64> = const { Cell::new(0) };
-    }
+    static ACTIVE: AtomicBool = AtomicBool::new(false);
+    static BASE: AtomicU64 = AtomicU64::new(0);
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     // Dummy Arch implementation for testing
     #[derive(PartialEq, Debug)]
@@ -1110,7 +1112,7 @@ mod tests {
         }
         fn get_self_mapped_base(_level: PageLevel, _va: VirtualAddress, _paging_type: PagingType) -> u64 {
             // for the test we can't use the real self map, so just return the PT base
-            BASE.with(|base| base.get())
+            BASE.load(Ordering::Relaxed)
         }
         fn get_zero_va(_paging_type: PagingType) -> Result<VirtualAddress, PtError> {
             Ok(VirtualAddress::new(0x1000))
@@ -1119,7 +1121,7 @@ mod tests {
             Ok(VirtualAddress::new(0xFFFF_FFFF_FFFF_0000))
         }
         fn is_table_active(_base: u64) -> bool {
-            ACTIVE.with(|active| active.get())
+            ACTIVE.load(Ordering::Relaxed)
         }
         unsafe fn zero_page(_va: VirtualAddress) {}
         unsafe fn install_page_table(_base: u64, _paging_type: PagingType) -> Result<(), PtError> {
@@ -1221,23 +1223,26 @@ mod tests {
             self.allocated_pages.borrow_mut().push(addr);
 
             if is_root {
-                BASE.with(|base| base.set(addr));
+                BASE.store(addr, Ordering::Relaxed);
             }
 
             Ok(addr)
         }
     }
 
-    fn make_table() -> (PageTableInternal<DummyAllocator, DummyArch>, DummyAllocator) {
+    fn make_table() -> (PageTableInternal<DummyAllocator, DummyArch>, DummyAllocator, MutexGuard<'static, ()>) {
+        // Hold the shared-state lock for as long as the returned table is alive so concurrent tests
+        // cannot mutate the global `BASE`/`ACTIVE` out from under it.
+        let guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let allocator = DummyAllocator::new();
         let allocator_clone = allocator.clone();
         let pt = PageTableInternal::new(allocator, PagingType::Paging4Level).unwrap();
-        (pt, allocator_clone)
+        (pt, allocator_clone, guard)
     }
 
     #[test]
     fn test_get_state_variants() {
-        let (pt, allocator) = make_table();
+        let (pt, allocator, _guard) = make_table();
 
         // Cleanup function to ensure memory is freed
         let cleanup = || {
@@ -1245,11 +1250,11 @@ mod tests {
         };
 
         // By default, the table is not active, so should be Inactive
-        ACTIVE.with(|active| active.set(false));
+        ACTIVE.store(false, Ordering::Relaxed);
         assert_eq!(pt.get_state(), PageTableState::Inactive);
 
         // Set table as active, but self-map entry is not present or doesn't match base
-        ACTIVE.with(|active| active.set(true));
+        ACTIVE.store(true, Ordering::Relaxed);
 
         // Overwrite the self-map entry to not present
         let root_level = PageLevel::root_level(pt.paging_type);
@@ -1275,7 +1280,7 @@ mod tests {
 
     #[test]
     fn test_validate_address_range() {
-        let (pt, allocator) = make_table();
+        let (pt, allocator, _guard) = make_table();
 
         assert!(pt.validate_address_range(VirtualAddress::new(0x1000), 0x2000).is_ok());
         assert_eq!(pt.validate_address_range(VirtualAddress::new(0x1001), 0x2000), Err(PtError::UnalignedAddress));
@@ -1287,7 +1292,7 @@ mod tests {
 
     #[test]
     fn test_allocate_page_alignment() {
-        let (mut pt, allocator) = make_table();
+        let (mut pt, allocator, _guard) = make_table();
         let pa: u64 = pt.allocate_page(PageTableState::Inactive).unwrap().into();
         assert_eq!(pa % PAGE_SIZE, 0);
 
@@ -1296,7 +1301,7 @@ mod tests {
 
     #[test]
     fn test_split_large_page_error() {
-        let (mut pt, allocator) = make_table();
+        let (mut pt, allocator, _guard) = make_table();
         let mut entry = DummyPTE::new();
         entry.set_present_bit(false, VirtualAddress::new(0x0));
         let res =
@@ -1331,7 +1336,7 @@ mod tests {
 
     #[test]
     fn test_dump_page_tables_invalid_range() {
-        let (pt, allocator) = make_table();
+        let (pt, allocator, _guard) = make_table();
         let res = pt.dump_page_tables(0x1001, 0x1000);
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
 
@@ -1355,7 +1360,7 @@ mod tests {
 
     #[test]
     fn test_map_memory_region_top_va_overflow() {
-        let (mut pt, allocator) = make_table();
+        let (mut pt, allocator, _guard) = make_table();
         // max_va is 0xFFFF_FFFF_FFFF_0000, so use an address near the top and a size that overflows
         let addr = 0xFFFF_FFFF_FFFF_0000;
         let size = 0x2000; // This will make top_va > max_va
@@ -1367,7 +1372,7 @@ mod tests {
 
     #[test]
     fn test_unmap_memory_region_top_va_overflow() {
-        let (mut pt, allocator) = make_table();
+        let (mut pt, allocator, _guard) = make_table();
         let addr = 0xFFFF_FFFF_FFFF_0000;
         let size = 0x2000;
         let res = pt.unmap_memory_region(addr, size);
@@ -1382,7 +1387,7 @@ mod tests {
         // level to the page table base, so the walk reads the root table for each level. A freshly
         // created table exposes no genuine leaf mappings, so the iterator yields nothing, but the
         // `ActiveSelfMapped` branch of the iterator's state handling is still executed.
-        let (pt, allocator) = make_table();
+        let (pt, allocator, _guard) = make_table();
 
         let count =
             PageTableIterator::<DummyArch>::new(pt.base, pt.paging_type, PageTableState::ActiveSelfMapped, None)
