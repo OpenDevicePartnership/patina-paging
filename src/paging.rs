@@ -1091,7 +1091,7 @@ mod tests {
         alloc::{Layout, alloc_zeroed},
         sync::{
             Mutex, MutexGuard, PoisonError,
-            atomic::{AtomicBool, AtomicU64, Ordering},
+            atomic::{AtomicBool, AtomicU64},
         },
     };
 
@@ -1112,7 +1112,7 @@ mod tests {
         }
         fn get_self_mapped_base(_level: PageLevel, _va: VirtualAddress, _paging_type: PagingType) -> u64 {
             // for the test we can't use the real self map, so just return the PT base
-            BASE.load(Ordering::Relaxed)
+            BASE.load(std::sync::atomic::Ordering::Relaxed)
         }
         fn get_zero_va(_paging_type: PagingType) -> Result<VirtualAddress, PtError> {
             Ok(VirtualAddress::new(0x1000))
@@ -1121,7 +1121,7 @@ mod tests {
             Ok(VirtualAddress::new(0xFFFF_FFFF_FFFF_0000))
         }
         fn is_table_active(_base: u64) -> bool {
-            ACTIVE.load(Ordering::Relaxed)
+            ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
         }
         unsafe fn zero_page(_va: VirtualAddress) {}
         unsafe fn install_page_table(_base: u64, _paging_type: PagingType) -> Result<(), PtError> {
@@ -1223,7 +1223,7 @@ mod tests {
             self.allocated_pages.borrow_mut().push(addr);
 
             if is_root {
-                BASE.store(addr, Ordering::Relaxed);
+                BASE.store(addr, std::sync::atomic::Ordering::Relaxed);
             }
 
             Ok(addr)
@@ -1250,11 +1250,11 @@ mod tests {
         };
 
         // By default, the table is not active, so should be Inactive
-        ACTIVE.store(false, Ordering::Relaxed);
+        ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
         assert_eq!(pt.get_state(), PageTableState::Inactive);
 
         // Set table as active, but self-map entry is not present or doesn't match base
-        ACTIVE.store(true, Ordering::Relaxed);
+        ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
 
         // Overwrite the self-map entry to not present
         let root_level = PageLevel::root_level(pt.paging_type);
