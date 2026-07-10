@@ -1093,10 +1093,6 @@ mod tests {
         sync::atomic::{AtomicBool, AtomicU64},
     };
 
-    // `DummyArch` emulates hardware state through these process-wide statics. Tests that build a
-    // `DummyArch` page table are marked `#[serial]` so the libtest harness never runs them
-    // concurrently; otherwise one test's `make_table()` could overwrite `BASE` while another walks
-    // its own table in self-mapped mode. See issue #215.
     static ACTIVE: AtomicBool = AtomicBool::new(false);
     static BASE: AtomicU64 = AtomicU64::new(0);
 
