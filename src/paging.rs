@@ -1087,17 +1087,18 @@ impl<'a, Arch: PageTableHal> PageTableRange<'a, Arch> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::{
         alloc::{Layout, alloc_zeroed},
-        sync::{
-            Mutex, MutexGuard, PoisonError,
-            atomic::{AtomicBool, AtomicU64},
-        },
+        sync::atomic::{AtomicBool, AtomicU64},
     };
 
+    // `DummyArch` emulates hardware state through these process-wide statics. Tests that build a
+    // `DummyArch` page table are marked `#[serial]` so the libtest harness never runs them
+    // concurrently; otherwise one test's `make_table()` could overwrite `BASE` while another walks
+    // its own table in self-mapped mode. See issue #215.
     static ACTIVE: AtomicBool = AtomicBool::new(false);
     static BASE: AtomicU64 = AtomicU64::new(0);
-    static TEST_LOCK: Mutex<()> = Mutex::new(());
 
     // Dummy Arch implementation for testing
     #[derive(PartialEq, Debug)]
@@ -1230,17 +1231,17 @@ mod tests {
         }
     }
 
-    fn make_table() -> (PageTableInternal<DummyAllocator, DummyArch>, DummyAllocator, MutexGuard<'static, ()>) {
-        let guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
+    fn make_table() -> (PageTableInternal<DummyAllocator, DummyArch>, DummyAllocator) {
         let allocator = DummyAllocator::new();
         let allocator_clone = allocator.clone();
         let pt = PageTableInternal::new(allocator, PagingType::Paging4Level).unwrap();
-        (pt, allocator_clone, guard)
+        (pt, allocator_clone)
     }
 
     #[test]
+    #[serial]
     fn test_get_state_variants() {
-        let (pt, allocator, _guard) = make_table();
+        let (pt, allocator) = make_table();
 
         // Cleanup function to ensure memory is freed
         let cleanup = || {
@@ -1277,8 +1278,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_validate_address_range() {
-        let (pt, allocator, _guard) = make_table();
+        let (pt, allocator) = make_table();
 
         assert!(pt.validate_address_range(VirtualAddress::new(0x1000), 0x2000).is_ok());
         assert_eq!(pt.validate_address_range(VirtualAddress::new(0x1001), 0x2000), Err(PtError::UnalignedAddress));
@@ -1289,8 +1291,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_allocate_page_alignment() {
-        let (mut pt, allocator, _guard) = make_table();
+        let (mut pt, allocator) = make_table();
         let pa: u64 = pt.allocate_page(PageTableState::Inactive).unwrap().into();
         assert_eq!(pa % PAGE_SIZE, 0);
 
@@ -1298,8 +1301,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_split_large_page_error() {
-        let (mut pt, allocator, _guard) = make_table();
+        let (mut pt, allocator) = make_table();
         let mut entry = DummyPTE::new();
         entry.set_present_bit(false, VirtualAddress::new(0x0));
         let res =
@@ -1333,8 +1337,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_dump_page_tables_invalid_range() {
-        let (pt, allocator, _guard) = make_table();
+        let (pt, allocator) = make_table();
         let res = pt.dump_page_tables(0x1001, 0x1000);
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
 
@@ -1357,8 +1362,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_map_memory_region_top_va_overflow() {
-        let (mut pt, allocator, _guard) = make_table();
+        let (mut pt, allocator) = make_table();
         // max_va is 0xFFFF_FFFF_FFFF_0000, so use an address near the top and a size that overflows
         let addr = 0xFFFF_FFFF_FFFF_0000;
         let size = 0x2000; // This will make top_va > max_va
@@ -1369,8 +1375,9 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_unmap_memory_region_top_va_overflow() {
-        let (mut pt, allocator, _guard) = make_table();
+        let (mut pt, allocator) = make_table();
         let addr = 0xFFFF_FFFF_FFFF_0000;
         let size = 0x2000;
         let res = pt.unmap_memory_region(addr, size);
@@ -1380,12 +1387,13 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_iter_mapped_regions_self_mapped_state() {
         // Exercise the iterator's self-mapped state handling. `DummyArch` resolves every self-mapped
         // level to the page table base, so the walk reads the root table for each level. A freshly
         // created table exposes no genuine leaf mappings, so the iterator yields nothing, but the
         // `ActiveSelfMapped` branch of the iterator's state handling is still executed.
-        let (pt, allocator, _guard) = make_table();
+        let (pt, allocator) = make_table();
 
         let count =
             PageTableIterator::<DummyArch>::new(pt.base, pt.paging_type, PageTableState::ActiveSelfMapped, None)
