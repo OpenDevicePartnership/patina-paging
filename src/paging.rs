@@ -1231,8 +1231,6 @@ mod tests {
     }
 
     fn make_table() -> (PageTableInternal<DummyAllocator, DummyArch>, DummyAllocator, MutexGuard<'static, ()>) {
-        // Hold the shared-state lock for as long as the returned table is alive so concurrent tests
-        // cannot mutate the global `BASE`/`ACTIVE` out from under it.
         let guard = TEST_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
         let allocator = DummyAllocator::new();
         let allocator_clone = allocator.clone();
