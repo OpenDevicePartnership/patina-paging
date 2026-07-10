@@ -1087,6 +1087,7 @@ impl<'a, Arch: PageTableHal> PageTableRange<'a, Arch> {
 #[cfg_attr(coverage_nightly, coverage(off))]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::{
         alloc::{Layout, alloc_zeroed},
         sync::atomic::{AtomicBool, AtomicU64},
@@ -1234,6 +1235,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_get_state_variants() {
         let (pt, allocator) = make_table();
 
@@ -1272,6 +1274,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_validate_address_range() {
         let (pt, allocator) = make_table();
 
@@ -1284,6 +1287,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_allocate_page_alignment() {
         let (mut pt, allocator) = make_table();
         let pa: u64 = pt.allocate_page(PageTableState::Inactive).unwrap().into();
@@ -1293,6 +1297,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_split_large_page_error() {
         let (mut pt, allocator) = make_table();
         let mut entry = DummyPTE::new();
@@ -1328,6 +1333,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_dump_page_tables_invalid_range() {
         let (pt, allocator) = make_table();
         let res = pt.dump_page_tables(0x1001, 0x1000);
@@ -1352,6 +1358,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_map_memory_region_top_va_overflow() {
         let (mut pt, allocator) = make_table();
         // max_va is 0xFFFF_FFFF_FFFF_0000, so use an address near the top and a size that overflows
@@ -1364,6 +1371,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_unmap_memory_region_top_va_overflow() {
         let (mut pt, allocator) = make_table();
         let addr = 0xFFFF_FFFF_FFFF_0000;
@@ -1375,6 +1383,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_iter_mapped_regions_self_mapped_state() {
         // Exercise the iterator's self-mapped state handling. `DummyArch` resolves every self-mapped
         // level to the page table base, so the walk reads the root table for each level. A freshly
