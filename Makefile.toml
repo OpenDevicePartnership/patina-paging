@@ -183,7 +183,7 @@ install_crate = false
 clear = true
 # `coverage_attribute` is deliberately excluded from the default allow-features in
 # .cargo/config.toml so ungated `#[coverage(off)]` fails to compile. Coverage runs set the
-# `coverage_nightly` cfg (set by cargo-llvm-cov), which needs the feature, so re-add it here.
+# `coverage` cfg (set by cargo-llvm-cov), which needs the feature, so re-add it here.
 # Note: RUSTFLAGS replaces build.rustflags.
 env = { RUSTFLAGS = "-Z allow-features=c_variadic,allocator_api,coverage_attribute" }
 command = "cargo"
