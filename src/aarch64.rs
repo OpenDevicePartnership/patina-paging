@@ -18,12 +18,12 @@ use crate::{
     structs::{VirtualAddress, *},
 };
 
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 // Reg implements hardware abstractions, which cannot be meaningfully tested in unit tests.
 mod reg;
 mod structs;
 #[cfg(test)]
-#[cfg_attr(coverage_nightly, coverage(off))]
+#[cfg_attr(coverage, coverage(off))]
 mod tests;
 
 const MAX_VA_BITS: u64 = 48;
@@ -141,7 +141,7 @@ impl<P: PageAllocator> AArch64PageTable<P> {
     /// Additionally, the caller is responsible for ensuring that paging is enabled
     /// and the page table is a completely valid structure.
     ///
-    #[cfg_attr(coverage_nightly, coverage(off))] // This requires hardware for meaningful testing.
+    #[cfg_attr(coverage, coverage(off))] // This requires hardware for meaningful testing.
     pub unsafe fn open_active(page_allocator: P) -> Result<Self, PtError> {
         let base = reg::get_ttbr0();
         let paging_type = detect_paging_type()?;
@@ -152,7 +152,7 @@ impl<P: PageAllocator> AArch64PageTable<P> {
 }
 
 /// Detect whether 4-level or 5-level paging is active by reading TCR.T0SZ.
-#[cfg_attr(coverage_nightly, coverage(off))] // This requires hardware for meaningful testing.
+#[cfg_attr(coverage, coverage(off))] // This requires hardware for meaningful testing.
 fn detect_paging_type() -> Result<PagingType, PtError> {
     let tcr = reg::get_tcr();
     let tg0 = (tcr >> 14) & 0b11; // TG0 is bits [15:14]
@@ -242,7 +242,7 @@ impl PageTableHal for PageTableArchAArch64 {
 
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
-    #[cfg_attr(coverage_nightly, coverage(off))] // This manipulates hardware registers that can't be meaningfully tested.
+    #[cfg_attr(coverage, coverage(off))] // This manipulates hardware registers that can't be meaningfully tested.
     unsafe fn install_page_table(base: u64, paging_type: PagingType) -> Result<(), PtError> {
         if paging_type != PagingType::Paging4Level {
             log::error!("Only 4-level page tables are supported on AArch64");
