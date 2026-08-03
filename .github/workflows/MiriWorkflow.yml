@@ -44,13 +44,11 @@ jobs:
       - name: Run Miri Tests
         env:
           MIRIFLAGS: "-Zmiri-disable-stacked-borrows"
-          NEXTEST_EXPERIMENTAL_LIBTEST_JSON: "1"
-          NEXTEST_TEST_THREADS: "8"
-          NEXTEST_MESSAGE_FORMAT: "libtest-json"
         run: |
           filters=$(printf "%s" "${{ inputs.test-filter }}")
           set +e  # Disable exit on error
-          cargo +nightly miri nextest run --lib --no-fail-fast $filters | tee results.log
+          cargo +nightly miri test --lib --no-fail-fast -- --format json -Z unstable-options $filters | tee results.log
+          test_status=${PIPESTATUS[0]}
           set -e  # Re-enable exit on error
 
           grep '^{' results.log | jq -r 'select(.type == "test" and .event == "failed")' > failed_tests.json
@@ -58,7 +56,7 @@ jobs:
           if [ -s failed_tests.json ]; then
             exit 1  # Fail the job if there are test failures
           fi
-          exit 0
+          exit $test_status
 
       - name: Report Miri Test Failures
         if: failure() && inputs.create-issue

@@ -21,7 +21,6 @@ mdbook = "0.4.52"
 mdbook-admonish = "1.20.0"
 mdbook-linkcheck = "0.7.7"
 mdbook-mermaid = "0.16.2"
-cargo-nextest = "0.9.140"
 
 [msrv]
 channel = "1.89.0"
