@@ -1145,18 +1145,34 @@ impl<'a, Arch: PageTableHal> PageTableRange<'a, Arch> {
 #[cfg_attr(coverage, coverage(off))]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::{
         alloc::{Layout, alloc_zeroed},
-        sync::atomic::{AtomicBool, AtomicU64},
+        cell::RefCell,
+        rc::Rc,
+        sync::atomic::{AtomicBool, AtomicU64, Ordering},
     };
 
-    static ACTIVE: AtomicBool = AtomicBool::new(false);
-    static BASE: AtomicU64 = AtomicU64::new(0);
-
     // Dummy Arch implementation for testing
-    #[derive(PartialEq, Debug)]
-    struct DummyArch;
+    #[derive(Debug)]
+    struct DummyArch {
+        is_table_active: AtomicBool,
+        base: AtomicU64,
+    }
+
+    impl DummyArch {
+        fn new() -> Self {
+            Self { is_table_active: AtomicBool::new(false), base: AtomicU64::new(0) }
+        }
+
+        fn set_active(&self, active: bool) {
+            self.is_table_active.store(active, Ordering::Relaxed);
+        }
+
+        fn set_base(&self, base: u64) {
+            self.base.store(base, Ordering::Relaxed);
+        }
+    }
+
     impl PageTableHal for DummyArch {
         type PTE = DummyPTE;
         const MAX_ENTRIES: usize = 512;
@@ -1167,7 +1183,7 @@ mod tests {
         }
         fn get_self_mapped_base(&self, _level: PageLevel, _va: VirtualAddress, _paging_type: PagingType) -> u64 {
             // for the test we can't use the real self map, so just return the PT base
-            BASE.load(std::sync::atomic::Ordering::Relaxed)
+            self.base.load(Ordering::Relaxed)
         }
         fn get_zero_va(&self, _paging_type: PagingType) -> Result<VirtualAddress, PtError> {
             Ok(VirtualAddress::new(0x1000))
@@ -1176,7 +1192,7 @@ mod tests {
             Ok(VirtualAddress::new(0xFFFF_FFFF_FFFF_0000))
         }
         fn is_table_active(&self, _base: u64) -> bool {
-            ACTIVE.load(std::sync::atomic::Ordering::Relaxed)
+            self.is_table_active.load(Ordering::Relaxed)
         }
         unsafe fn zero_page(&self, _va: VirtualAddress) {}
         unsafe fn install_page_table(&self, _base: u64, _paging_type: PagingType) -> Result<(), PtError> {
@@ -1249,11 +1265,12 @@ mod tests {
     // Dummy PageAllocator for testing
     #[derive(Clone, Debug)]
     struct DummyAllocator {
-        allocated_pages: std::rc::Rc<std::cell::RefCell<Vec<u64>>>,
+        allocated_pages: Rc<RefCell<Vec<u64>>>,
+        arch: Rc<DummyArch>,
     }
     impl DummyAllocator {
-        fn new() -> Self {
-            Self { allocated_pages: std::rc::Rc::new(std::cell::RefCell::new(Vec::new())) }
+        fn new(arch: Rc<DummyArch>) -> Self {
+            Self { allocated_pages: Rc::new(RefCell::new(Vec::new())), arch }
         }
 
         fn cleanup(&self) {
@@ -1278,23 +1295,22 @@ mod tests {
             self.allocated_pages.borrow_mut().push(addr);
 
             if is_root {
-                BASE.store(addr, std::sync::atomic::Ordering::Relaxed);
+                self.arch.set_base(addr);
             }
 
             Ok(addr)
         }
     }
 
-    fn make_table() -> (PageTableInternal<DummyAllocator, DummyArch>, DummyAllocator, DummyArch) {
-        let allocator = DummyAllocator::new();
+    fn make_table() -> (PageTableInternal<DummyAllocator, DummyArch>, DummyAllocator, Rc<DummyArch>) {
+        let arch = Rc::new(DummyArch::new());
+        let allocator = DummyAllocator::new(arch.clone());
         let allocator_clone = allocator.clone();
-        let arch = DummyArch;
-        let pt = PageTableInternal::new(allocator, &arch, PagingType::Paging4Level).unwrap();
+        let pt = PageTableInternal::new(allocator, &*arch, PagingType::Paging4Level).unwrap();
         (pt, allocator_clone, arch)
     }
 
     #[test]
-    #[serial]
     fn test_get_state_variants() {
         let (pt, allocator, arch) = make_table();
 
@@ -1304,11 +1320,11 @@ mod tests {
         };
 
         // By default, the table is not active, so should be Inactive
-        ACTIVE.store(false, std::sync::atomic::Ordering::Relaxed);
+        arch.set_active(false);
         assert_eq!(pt.get_state(&arch), PageTableState::Inactive);
 
         // Set table as active, but self-map entry is not present or doesn't match base
-        ACTIVE.store(true, std::sync::atomic::Ordering::Relaxed);
+        arch.set_active(true);
 
         // Overwrite the self-map entry to not present
         let root_level = PageLevel::root_level(pt.paging_type);
@@ -1334,7 +1350,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_validate_address_range() {
         let (pt, allocator, _) = make_table();
 
@@ -1347,7 +1362,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_allocate_page_alignment() {
         let (mut pt, allocator, arch) = make_table();
         let pa: u64 = pt.allocate_page(&arch, PageTableState::Inactive).unwrap().into();
@@ -1357,7 +1371,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_split_large_page_error() {
         let (mut pt, allocator, arch) = make_table();
         let mut entry = DummyPTE::new();
@@ -1382,7 +1395,7 @@ mod tests {
         assert!(!ptr.is_null());
         let base_pa = PhysicalAddress::new(ptr as u64);
 
-        let arch = DummyArch;
+        let arch = DummyArch::new();
         let res = PageTableRange::<DummyArch>::new(
             &arch,
             PageLevel::Level1,
@@ -1391,7 +1404,8 @@ mod tests {
             PagingType::Paging4Level,
             PageTableStateWithAddress::NotSelfMapped(base_pa),
         );
-        assert_eq!(res, Err(PtError::InvalidMemoryRange));
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err(), PtError::InvalidMemoryRange);
 
         // Clean up the manually allocated memory
         unsafe {
@@ -1400,7 +1414,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_dump_page_tables_invalid_range() {
         let (pt, allocator, arch) = make_table();
         let res = pt.dump_page_tables(&arch, 0x1001, 0x1000);
@@ -1411,8 +1424,8 @@ mod tests {
 
     #[test]
     fn test_from_existing_unaligned() {
-        let allocator = DummyAllocator::new();
-        let arch = DummyArch;
+        let arch = Rc::new(DummyArch::new());
+        let allocator = DummyAllocator::new(arch.clone());
         let res = unsafe {
             PageTableInternal::<DummyAllocator, DummyArch>::from_existing(
                 allocator.clone(),
@@ -1427,7 +1440,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_map_memory_region_top_va_overflow() {
         let (mut pt, allocator, arch) = make_table();
         // max_va is 0xFFFF_FFFF_FFFF_0000, so use an address near the top and a size that overflows
@@ -1440,7 +1452,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_unmap_memory_region_top_va_overflow() {
         let (mut pt, allocator, arch) = make_table();
         let addr = 0xFFFF_FFFF_FFFF_0000;
@@ -1452,7 +1463,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_iter_mapped_regions_self_mapped_state() {
         // Exercise the iterator's self-mapped state handling. `DummyArch` resolves every self-mapped
         // level to the page table base, so the walk reads the root table for each level. A freshly
