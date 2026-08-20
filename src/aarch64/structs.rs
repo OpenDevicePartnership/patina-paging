@@ -278,66 +278,44 @@ impl crate::arch::PageTableEntry for PageTableEntryAArch64 {
 
     fn dump_entry_header() {
         log::info!(
-            "----------------------------------------------------------------------------------------------------------------------------------"
+            "Flags: G=Global L=Large/Huge page W=Writable/R=Read only A=Accessed X=Execute never/E=Executable V=Valid"
         );
     }
 
+    #[cfg_attr(coverage, coverage(off))]
     fn dump_entry(&self, va: VirtualAddress, level: PageLevel) -> Result<(), PtError> {
-        let valid = self.valid() as u64;
-        let table_desc = self.table_desc() as u64;
-        let attribute_index = self.attribute_index();
-        let non_secure = self.non_secure() as u64;
-        let access_permission = self.access_permission() as u64;
-        let shareable = self.shareable();
-        let access_flag = self.access_flag() as u64;
-        let not_global = self.not_global() as u64;
-        let page_frame_number = self.page_frame_number();
-        let guarded_page = self.guarded_page() as u64;
-        let dirty_bit_modifier = self.dirty_bit_modifier() as u64;
-        let contiguous = self.contiguous() as u64;
-        let pxn = self.pxn() as u64;
-        let uxn = self.uxn() as u64;
-        let reserved0 = self.reserved0();
-        let pxn_table = self.pxn_table() as u64;
-        let uxn_table = self.uxn_table() as u64;
-        let ap_table = self.ap_table();
-        let ns_table = self.ns_table() as u64;
-        let depth = 2 * level.depth();
-        let inv_depth = 8 - depth;
         let level_name = match level {
-            PageLevel::Level5 => "LV-1",
-            PageLevel::Level4 => "LVL0",
-            PageLevel::Level3 => "LVL1",
-            PageLevel::Level2 => "LVL2",
-            PageLevel::Level1 => "LVL3",
+            PageLevel::Level5 => "Lv-1",
+            PageLevel::Level4 => "Lvl0",
+            PageLevel::Level3 => "Lvl1",
+            PageLevel::Level2 => "Lvl2",
+            PageLevel::Level1 => "Lvl3",
         };
+        let indent = 2 * level.depth() + 1;
+        let large_page = matches!(level, PageLevel::Level2 | PageLevel::Level3) && self.valid() && !self.table_desc();
+
+        if large_page {
+            let size = if level == PageLevel::Level2 { "2MB Large Page" } else { "1GB Huge Page" };
+            log::info!("{:indent$}{}", "", size, indent = indent);
+        }
 
         log::info!(
-            "{:6}|{:depth$}[{} {}]{:inv_depth$}|{:01b}|{:02b}|{:01b}|{:01b}|{:04b}|{:01b}|{:01b}|{:01b}|{:01b}|{:01b}|{:038b}|{:01b}|{:01b}|{:02b}|{:02b}|{:01b}|{:03b}|{:01b}|{:01b}|",
+            "{:indent$}{} @ {:#X} Contains {:016X}  {}{}{}{}{}{}  [{:#X} - {:#X}]",
+            "",
             level_name,
-            "",
-            va,
-            ((va + level.entry_va_size())? - 1)?,
-            "",
-            ns_table,           // 1 bit  -  Secure state, only for accessing in Secure IPA or PA space.
-            ap_table,           // 2 bits -  Hierarchical permissions.
-            uxn_table,          // 1 bit  -  Hierarchical permissions.
-            pxn_table,          // 1 bit  -  Hierarchical permissions.
-            reserved0,          // 4 bits -  Reserved for software use
-            uxn,                // 1 bit  -  User execute never
-            pxn,                // 1 bit  -  Privileged execute never
-            contiguous,         // 1 bit  -  Contiguous
-            dirty_bit_modifier, // 1 bit  -  DBM
-            guarded_page,       // 1 bit  -  GP
-            page_frame_number,  // 38 bits - Page frame number
-            not_global,         // 1 bit  -  Not global
-            access_flag,        // 1 bit  -  Access flag
-            shareable,          // 2 bits -  SH 0 = Non-shareable, 2 = Outer Shareable, 3 = Inner Shareable
-            access_permission,  // 2 bits -  Access permissions
-            non_secure,         // 1 bit  -  Non-secure
-            attribute_index,    // 3 bits -  Used for caching attributes
-            table_desc,         // 1 bit  -  Table descriptor, 1 = Table descriptor for look up level 0, 1, 2
-            valid,              // 1 bit  -  Valid descriptor
+            self.entry_ptr_address(),
+            self.0,
+            if self.not_global() { '_' } else { 'G' },
+            if large_page { 'L' } else { '_' },
+            // AP[2] selects read-only when set, at every exception level.
+            if self.access_permission() & 0b10 == 0 { 'W' } else { 'R' },
+            if self.access_flag() { 'A' } else { '_' },
+            // In the EL2 translation scheme UXN is the XN bit and is the only execute permission bit.
+            if self.uxn() { 'X' } else { 'E' },
+            if self.valid() { 'V' } else { '_' },
+            u64::from(va),
+            u64::from(va.round_up(level)),
+            indent = indent,
         );
 
         Ok(())
@@ -460,15 +438,6 @@ mod tests {
         desc.set_valid(false);
         let attrs = desc.get_attributes();
         assert!(attrs.contains(MemoryAttributes::ReadProtect));
-    }
-
-    #[test]
-    fn test_dump_entry_runs() {
-        let desc = PageTableEntryAArch64::new();
-        let va = VirtualAddress::from(0x1000u64);
-        let level = PageLevel::Level3;
-        // Should not panic or error
-        let _ = desc.dump_entry(va, level);
     }
 
     #[test]

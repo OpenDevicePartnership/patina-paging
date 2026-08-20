@@ -610,6 +610,15 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             let entry = &table.slice[i];
 
             entry.dump_entry(va, level)?;
+            if entry.get_present_bit() && entry.points_to_pa(level) {
+                let pa: u64 = entry.get_next_address().into();
+                let indent = 2 * level.depth() + 1;
+                if pa == va.into() {
+                    log::info!("{:indent$}PA   @ {:#X} - IdentityMapping", "", pa, indent = indent);
+                } else {
+                    log::info!("{:indent$}PA   @ {:#X}", "", pa, indent = indent);
+                }
+            }
             if !entry.get_present_bit() && !level.is_lowest_level() {
                 va = va.get_next_va(level)?;
                 continue;
@@ -809,6 +818,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
         log::info!("Page Table Range: {start_va} - {end_va}");
         Arch::PTE::dump_entry_header();
+        log::info!("Root @ {:#X}", u64::from(self.base));
         self.dump_page_tables_internal(
             start_va,
             end_va,
