@@ -12,7 +12,7 @@ use crate::{
 };
 use bitfield_struct::bitfield;
 
-#[cfg(all(not(test), target_arch = "aarch64"))]
+#[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
 use crate::arch::PageTableEntry;
 
 // This is the maximum virtual address that can be used in the system because of our artificial restriction to use
@@ -88,7 +88,7 @@ impl PageTableEntryAArch64 {
     }
 
     cfg_if::cfg_if! {
-        if #[cfg(all(not(test), target_arch = "aarch64"))] {
+        if #[cfg(all(target_os = "uefi", target_arch = "aarch64"))] {
             fn swap_entry(&mut self, new_entry: u64, va: u64) {
                 // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
                 // In this case we are replacing a live translation entry, which is a safe operation as long as the

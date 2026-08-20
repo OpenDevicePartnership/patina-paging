@@ -137,7 +137,7 @@ pub(crate) fn invalidate_tlb(va: VirtualAddress) {
     let _va: u64 = va.into();
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are invalidating
     // the TLB, which is a safe operation.
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "x86_64"))]
     unsafe {
         core::arch::asm!("mfence", "invlpg [{0}]", in(reg) _va)
     };
@@ -162,7 +162,7 @@ pub unsafe fn disable_write_protection() -> u64 {
     let mut _cr0 = 0u64;
     // SAFETY: This crate assumes privileged execution and interrupt masking while mutating page tables.
     // Reading CR0 relies on those table-stakes conditions.
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "x86_64"))]
     unsafe {
         asm!("mov {}, cr0", out(reg) _cr0);
     }
@@ -170,7 +170,7 @@ pub unsafe fn disable_write_protection() -> u64 {
     // Clear the Write Protect bit (bit 16)
     let _new_cr0 = _cr0 & !(1 << 16);
     // SAFETY: Writing CR0 to disable WP relies on the same crate-level table-stakes assumptions above.
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "x86_64"))]
     unsafe {
         if _new_cr0 != _cr0 {
             asm!("mov cr0, {}", in(reg) _new_cr0);
@@ -195,7 +195,7 @@ pub unsafe fn enable_write_protection(cr0: u64) {
     let mut _current_cr0 = 0u64;
     // SAFETY: This crate assumes privileged execution and interrupt masking while mutating page tables.
     // Reading CR0 relies on those table-stakes conditions.
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "x86_64"))]
     unsafe {
         asm!("mov {}, cr0", out(reg) _current_cr0);
     }
@@ -204,7 +204,7 @@ pub unsafe fn enable_write_protection(cr0: u64) {
     let _new_cr0 = _current_cr0 | (cr0 & (1 << 16));
 
     // SAFETY: Writing CR0 to restore WP relies on the same crate-level table-stakes assumptions above.
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "x86_64"))]
     unsafe {
         if _new_cr0 != _current_cr0 {
             asm!("mov cr0, {}", in(reg) _new_cr0);
@@ -264,7 +264,7 @@ impl PageTableHal for PageTableArchX64 {
     unsafe fn install_page_table(base: u64, _paging_type: PagingType) -> Result<(), PtError> {
         // The implementation doesn't currently support switching page table types at runtime.
         // Skip this check in test builds since CR4 always reads as 0 (no hardware).
-        #[cfg(not(test))]
+        #[cfg(target_os = "uefi")]
         if _paging_type != detect_paging_type()? {
             log::error!(
                 "Cannot install page table with paging type {:?} because it does not match the currently active paging type",
@@ -339,7 +339,7 @@ impl PageTableHal for PageTableArchX64 {
 /// This function is unsafe because it updates the HW page table registers to install a new page table. The
 /// caller must ensure that the base address is valid and points to a properly constructed page table.
 unsafe fn write_cr3(_value: u64) {
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "x86_64"))]
     {
         unsafe {
             asm!("mov cr3, {}", in(reg) _value, options(nostack, preserves_flags));
@@ -351,7 +351,7 @@ unsafe fn write_cr3(_value: u64) {
 fn read_cr3() -> u64 {
     let mut _value = 0u64;
 
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "x86_64"))]
     {
         // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
         // In this case we are reading the CR3 register, which is a safe operation.
@@ -371,7 +371,7 @@ const CR4_LA57: u64 = 1 << 12;
 fn read_cr4() -> u64 {
     let mut _value = 0u64;
 
-    #[cfg(all(not(test), target_arch = "x86_64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "x86_64"))]
     {
         // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
         // In this case we are reading the CR4 register, which is a safe operation.

@@ -24,7 +24,7 @@ pub(crate) enum ExceptionLevel {
 }
 
 cfg_if::cfg_if! {
-    if #[cfg(all(not(test), target_arch = "aarch64"))] {
+    if #[cfg(all(target_os = "uefi", target_arch = "aarch64"))] {
         use core::arch::{asm, global_asm};
         global_asm!(include_str!("replace_table_entry.asm"));
         global_asm!(include_str!("install_page_tables.asm"));
@@ -43,7 +43,7 @@ macro_rules! read_sysreg {
   ($reg:expr, $default:expr) => {{
     let mut _value: u64 = $default;
     let _ = $reg; // Helps prevent identical code being generated in tests.
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are reading a
     // system register, which is a safe operation.
     unsafe {
@@ -115,7 +115,7 @@ pub(crate) fn is_mmu_enabled() -> bool {
 }
 
 pub(crate) fn invalidate_tlb() {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
     // In this case we are invalidating the TLB, which is a safe operation.
     unsafe {
@@ -131,7 +131,7 @@ pub(crate) fn invalidate_tlb() {
 }
 
 pub(crate) fn update_translation_table_entry(_translation_table_entry: u64, _mva: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are updating a
     // translation table entry, which is a safe operation as long as the caller ensures that the entry being updated
     // is valid.
@@ -202,7 +202,7 @@ pub(crate) fn cache_range_operation(start: u64, length: u64, op: CpuFlushType) {
     // we have a data barrier after all cache lines have had the operation performed on them as an optimization
     // add the compiler fence to ensure that the compiler does not reorder memory accesses around this point
     compiler_fence(Ordering::SeqCst);
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it.
     // In this case we are issuing a data barrier, which is a safe operation.
     unsafe {
@@ -217,7 +217,7 @@ fn data_cache_line_len() -> u64 {
 }
 
 fn clean_data_entry_by_mva(_mva: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are cleaning a
     // data cache entry, which is a safe operation as long as the caller ensures that the entry being cleaned is valid.
     unsafe {
@@ -226,7 +226,7 @@ fn clean_data_entry_by_mva(_mva: u64) {
 }
 
 fn invalidate_data_cache_entry_by_mva(_mva: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are invalidating a
     // data cache entry, which is a safe operation as long as the caller ensures that the entry being invalidated is
     // valid.
@@ -236,7 +236,7 @@ fn invalidate_data_cache_entry_by_mva(_mva: u64) {
 }
 
 fn clean_and_invalidate_data_entry_by_mva(_mva: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
     // SAFETY: inline asm is inherently unsafe because Rust can't reason about it. In this case we are cleaning and
     // invalidating a data cache entry, which is a safe operation as long as the caller ensures that the entry being
     // cleaned and invalidated is valid.
@@ -289,7 +289,7 @@ pub(crate) unsafe fn zero_page(page: u64) {
 /// the page tables has the appropriate lifetime to be installed in system registers.
 #[cfg_attr(coverage, coverage(off))]
 pub(crate) unsafe fn swap_page_tables(_ttbr0: u64, _tcr: u64, _mair: u64) {
-    #[cfg(all(not(test), target_arch = "aarch64"))]
+    #[cfg(all(target_os = "uefi", target_arch = "aarch64"))]
     {
         // The assembly only supports EL1 & EL2. This compile-time check ensures
         // that addition of a new exception level causes a compilation failure here.
