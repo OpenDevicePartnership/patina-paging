@@ -37,13 +37,15 @@ pub const PT: PageLevel = PageLevel::Level1;
 pub const MAX_ENTRIES: usize = (PAGE_SIZE / 8) as usize;
 
 pub struct X64PageTable<P: PageAllocator> {
+    arch: PageTableArchX64,
     internal: PageTableInternal<P, PageTableArchX64>,
 }
 
 impl<P: PageAllocator> X64PageTable<P> {
     pub fn new(page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
-        let internal = PageTableInternal::new(page_allocator, paging_type)?;
-        Ok(Self { internal })
+        let arch = PageTableArchX64;
+        let internal = PageTableInternal::new(page_allocator, &arch, paging_type)?;
+        Ok(Self { arch, internal })
     }
 
     /// Create a page table from existing page table base. This can be used to
@@ -56,8 +58,9 @@ impl<P: PageAllocator> X64PageTable<P> {
     /// safety of that base.
     ///
     pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
-        let internal = unsafe { PageTableInternal::from_existing(base, page_allocator, paging_type)? };
-        Ok(Self { internal })
+        let arch = PageTableArchX64;
+        let internal = unsafe { PageTableInternal::from_existing(page_allocator, &arch, base, paging_type)? };
+        Ok(Self { arch, internal })
     }
 
     /// Consumes the page table structure and returns the page table root.
@@ -79,7 +82,7 @@ impl<P: PageAllocator> X64PageTable<P> {
     /// The crate's reserved self-map and zero-VA root entries are skipped so the
     /// iterator only reports genuine mappings.
     pub fn iter_mapped_regions(&self, start_address: Option<u64>) -> impl Iterator<Item = MappedRegion> + '_ {
-        self.internal.iter_mapped_regions(start_address)
+        self.internal.iter_mapped_regions(&self.arch, start_address)
     }
 
     /// Opens a page table manager for the currently active page tables.
@@ -111,25 +114,25 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
         attributes: crate::MemoryAttributes,
     ) -> Result<(), PtError> {
         check_canonical_range(address, size, self.internal.paging_type)?;
-        self.internal.map_memory_region(address, size, attributes)
+        self.internal.map_memory_region(&self.arch, address, size, attributes)
     }
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError> {
         check_canonical_range(address, size, self.internal.paging_type)?;
-        self.internal.unmap_memory_region(address, size)
+        self.internal.unmap_memory_region(&self.arch, address, size)
     }
 
     fn install_page_table(&mut self) -> Result<(), PtError> {
-        self.internal.install_page_table()
+        self.internal.install_page_table(&self.arch)
     }
 
     fn query_memory_region(&self, address: u64, size: u64) -> Result<crate::MemoryAttributes, PtError> {
         check_canonical_range(address, size, self.internal.paging_type)?;
-        self.internal.query_memory_region(address, size)
+        self.internal.query_memory_region(&self.arch, address, size)
     }
 
     fn dump_page_tables(&self, address: u64, size: u64) -> Result<(), PtError> {
-        self.internal.dump_page_tables(address, size)
+        self.internal.dump_page_tables(&self.arch, address, size)
     }
 }
 
@@ -224,44 +227,44 @@ impl PageTableHal for PageTableArchX64 {
     /// # Safety
     /// This function is unsafe because it operates on raw pointers. It requires the caller to ensure the VA passed in
     /// is mapped.
-    unsafe fn zero_page(page: VirtualAddress) {
+    unsafe fn zero_page(&self, page: VirtualAddress) {
         // This cast must occur as a mutable pointer to a u8, as otherwise the compiler can optimize out the write,
         // which must not happen as that would violate break before make and have garbage in the page table.
         unsafe { ptr::write_bytes(Into::<u64>::into(page) as *mut u8, 0, PAGE_SIZE as usize) };
     }
 
-    fn paging_type_supported(paging_type: PagingType) -> Result<(), PtError> {
+    fn paging_type_supported(&self, paging_type: PagingType) -> Result<(), PtError> {
         match paging_type {
             PagingType::Paging5Level => Ok(()),
             PagingType::Paging4Level => Ok(()),
         }
     }
 
-    fn get_zero_va(paging_type: PagingType) -> Result<VirtualAddress, PtError> {
+    fn get_zero_va(&self, paging_type: PagingType) -> Result<VirtualAddress, PtError> {
         match paging_type {
             PagingType::Paging5Level => Ok(ZERO_VA_5_LEVEL.into()),
             PagingType::Paging4Level => Ok(ZERO_VA_4_LEVEL.into()),
         }
     }
 
-    fn invalidate_tlb(va: VirtualAddress) {
+    fn invalidate_tlb(&self, va: VirtualAddress) {
         invalidate_tlb(va);
     }
 
-    fn get_max_va(paging_type: PagingType) -> Result<VirtualAddress, PtError> {
+    fn get_max_va(&self, paging_type: PagingType) -> Result<VirtualAddress, PtError> {
         match paging_type {
             PagingType::Paging5Level => Ok(MAX_VA_5_LEVEL.into()),
             PagingType::Paging4Level => Ok(MAX_VA_4_LEVEL.into()),
         }
     }
 
-    fn is_table_active(base: u64) -> bool {
+    fn is_table_active(&self, base: u64) -> bool {
         read_cr3() == (base & CR3_PAGE_BASE_ADDRESS_MASK)
     }
 
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
-    unsafe fn install_page_table(base: u64, _paging_type: PagingType) -> Result<(), PtError> {
+    unsafe fn install_page_table(&self, base: u64, _paging_type: PagingType) -> Result<(), PtError> {
         // The implementation doesn't currently support switching page table types at runtime.
         // Skip this check in test builds since CR4 always reads as 0 (no hardware).
         #[cfg(target_os = "uefi")]
@@ -279,7 +282,7 @@ impl PageTableHal for PageTableArchX64 {
         Ok(())
     }
 
-    fn level_supports_pa_entry(level: crate::structs::PageLevel) -> bool {
+    fn level_supports_pa_entry(&self, level: crate::structs::PageLevel) -> bool {
         matches!(level, PageLevel::Level3 | PageLevel::Level2 | PageLevel::Level1)
     }
 
@@ -291,7 +294,7 @@ impl PageTableHal for PageTableArchX64 {
     /// covers 512GB of memory, each PDP entry covers 1GB of memory, each PD entry covers 2MB of memory, and
     /// each PT entry covers 4KB of memory, but when we recurse in the self map to a given level, we shift what
     /// each entry covers to be the size of the next level down for each recursion into the self map we did.
-    fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
+    fn get_self_mapped_base(&self, level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
         match paging_type {
             PagingType::Paging4Level => match level {
                 // PML5 is not used in 4-level paging, so we return an unimplemented error.
@@ -327,7 +330,7 @@ impl PageTableHal for PageTableArchX64 {
         }
     }
 
-    fn invalidate_tlb_all() {
+    fn invalidate_tlb_all(&self) {
         // SAFETY: The CR3 is not being changed, but re-written to flush the TLB.
         unsafe { write_cr3(read_cr3()) };
     }
@@ -423,7 +426,8 @@ mod unittests {
 
         // SAFETY: We have exclusive access to the page buffer
         unsafe {
-            PageTableArchX64::zero_page(va);
+            let arch = PageTableArchX64;
+            arch.zero_page(va);
         }
 
         // Assert all bytes are zero

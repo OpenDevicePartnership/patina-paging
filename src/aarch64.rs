@@ -78,6 +78,7 @@ const TCR_EL1_DEFAULTS: u64 =
     TCR_ORGN0_WB_WA | TCR_IRGN0_WB_WA | TCR_SH0_INNER_SHAREABLE | TCR_T0SZ_48_BIT_VA | TCR_EL1_TG1_16KB | TCR_EL1_ED1;
 
 pub struct AArch64PageTable<P: PageAllocator> {
+    arch: PageTableArchAArch64,
     internal: PageTableInternal<P, PageTableArchAArch64>,
 }
 
@@ -86,8 +87,9 @@ impl<P: PageAllocator> AArch64PageTable<P> {
         if paging_type == PagingType::Paging5Level {
             return Err(PtError::UnsupportedPagingType);
         }
-        let internal = PageTableInternal::new(page_allocator, paging_type)?;
-        Ok(Self { internal })
+        let arch = PageTableArchAArch64;
+        let internal = PageTableInternal::new(page_allocator, &arch, paging_type)?;
+        Ok(Self { arch, internal })
     }
 
     /// Create a page table from existing page table base. This can be used to
@@ -100,8 +102,9 @@ impl<P: PageAllocator> AArch64PageTable<P> {
     /// safety of that base.
     ///
     pub unsafe fn from_existing(base: u64, page_allocator: P, paging_type: PagingType) -> Result<Self, PtError> {
-        let internal = unsafe { PageTableInternal::from_existing(base, page_allocator, paging_type)? };
-        Ok(Self { internal })
+        let arch = PageTableArchAArch64;
+        let internal = unsafe { PageTableInternal::from_existing(page_allocator, &arch, base, paging_type)? };
+        Ok(Self { arch, internal })
     }
 
     /// Consumes the page table structure and returns the page table root.
@@ -123,7 +126,7 @@ impl<P: PageAllocator> AArch64PageTable<P> {
     /// The crate's reserved self-map and zero-VA root entries are skipped so the
     /// iterator only reports genuine mappings.
     pub fn iter_mapped_regions(&self, start_address: Option<u64>) -> impl Iterator<Item = MappedRegion> + '_ {
-        self.internal.iter_mapped_regions(start_address)
+        self.internal.iter_mapped_regions(&self.arch, start_address)
     }
 
     /// Opens a page table manager for the currently active page tables.
@@ -178,23 +181,23 @@ impl<P: PageAllocator> PageTable for AArch64PageTable<P> {
         size: u64,
         attributes: crate::MemoryAttributes,
     ) -> Result<(), PtError> {
-        self.internal.map_memory_region(address, size, attributes)
+        self.internal.map_memory_region(&self.arch, address, size, attributes)
     }
 
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError> {
-        self.internal.unmap_memory_region(address, size)
+        self.internal.unmap_memory_region(&self.arch, address, size)
     }
 
     fn install_page_table(&mut self) -> Result<(), PtError> {
-        self.internal.install_page_table()
+        self.internal.install_page_table(&self.arch)
     }
 
     fn query_memory_region(&self, address: u64, size: u64) -> Result<crate::MemoryAttributes, PtError> {
-        self.internal.query_memory_region(address, size)
+        self.internal.query_memory_region(&self.arch, address, size)
     }
 
     fn dump_page_tables(&self, address: u64, size: u64) -> Result<(), PtError> {
-        self.internal.dump_page_tables(address, size)
+        self.internal.dump_page_tables(&self.arch, address, size)
     }
 }
 
@@ -208,42 +211,42 @@ impl PageTableHal for PageTableArchAArch64 {
     /// SAFETY: This function is unsafe because it directly manipulates the page table memory at the given base address
     /// to zero it. The caller must ensure that the base address is valid and points to a page table that can be
     /// safely zeroed.
-    unsafe fn zero_page(base: VirtualAddress) {
+    unsafe fn zero_page(&self, base: VirtualAddress) {
         unsafe { reg::zero_page(base.into()) };
     }
 
-    fn paging_type_supported(paging_type: crate::PagingType) -> Result<(), PtError> {
+    fn paging_type_supported(&self, paging_type: crate::PagingType) -> Result<(), PtError> {
         match paging_type {
             crate::PagingType::Paging4Level | crate::PagingType::Paging5Level => Ok(()),
         }
     }
 
-    fn get_zero_va(paging_type: crate::PagingType) -> Result<VirtualAddress, PtError> {
+    fn get_zero_va(&self, paging_type: crate::PagingType) -> Result<VirtualAddress, PtError> {
         match paging_type {
             crate::PagingType::Paging4Level => Ok(ZERO_VA_4_LEVEL.into()),
             crate::PagingType::Paging5Level => Err(PtError::UnsupportedPagingType),
         }
     }
 
-    fn invalidate_tlb(va: VirtualAddress) {
+    fn invalidate_tlb(&self, va: VirtualAddress) {
         reg::update_translation_table_entry(0, va.into());
     }
 
-    fn get_max_va(page_type: crate::PagingType) -> Result<VirtualAddress, PtError> {
+    fn get_max_va(&self, page_type: crate::PagingType) -> Result<VirtualAddress, PtError> {
         match page_type {
             crate::PagingType::Paging4Level => Ok(MAX_VA_4_LEVEL.into()),
             crate::PagingType::Paging5Level => Ok(MAX_VA_5_LEVEL.into()),
         }
     }
 
-    fn is_table_active(base: u64) -> bool {
+    fn is_table_active(&self, base: u64) -> bool {
         reg::is_this_page_table_active(base.into())
     }
 
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
     #[cfg_attr(coverage, coverage(off))] // This manipulates hardware registers that can't be meaningfully tested.
-    unsafe fn install_page_table(base: u64, paging_type: PagingType) -> Result<(), PtError> {
+    unsafe fn install_page_table(&self, base: u64, paging_type: PagingType) -> Result<(), PtError> {
         if paging_type != PagingType::Paging4Level {
             log::error!("Only 4-level page tables are supported on AArch64");
             return Err(PtError::UnsupportedPagingType);
@@ -300,7 +303,7 @@ impl PageTableHal for PageTableArchAArch64 {
         Ok(())
     }
 
-    fn level_supports_pa_entry(level: PageLevel) -> bool {
+    fn level_supports_pa_entry(&self, level: PageLevel) -> bool {
         matches!(level, PageLevel::Level3 | PageLevel::Level2 | PageLevel::Level1)
     }
 
@@ -312,7 +315,7 @@ impl PageTableHal for PageTableArchAArch64 {
     /// covers 512GB of memory, each PDP entry covers 1GB of memory, each PD entry covers 2MB of memory, and
     /// each PT entry covers 4KB of memory, but when we recurse in the self map to a given level, we shift what
     /// each entry covers to be the size of the next level down for each recursion into the self map we did.
-    fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
+    fn get_self_mapped_base(&self, level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64 {
         match paging_type {
             PagingType::Paging4Level => match level {
                 PageLevel::Level5 => unimplemented!(),
@@ -334,7 +337,7 @@ impl PageTableHal for PageTableArchAArch64 {
         }
     }
 
-    fn invalidate_tlb_all() {
+    fn invalidate_tlb_all(&self) {
         reg::invalidate_tlb();
     }
 }
@@ -345,29 +348,33 @@ mod hal_tests {
 
     #[test]
     fn test_paging_type_supported() {
-        assert!(PageTableArchAArch64::paging_type_supported(PagingType::Paging4Level).is_ok());
-        assert!(PageTableArchAArch64::paging_type_supported(PagingType::Paging5Level).is_ok());
+        let arch = PageTableArchAArch64;
+        assert!(arch.paging_type_supported(PagingType::Paging4Level).is_ok());
+        assert!(arch.paging_type_supported(PagingType::Paging5Level).is_ok());
     }
 
     #[test]
     fn test_get_zero_va() {
-        assert_eq!(PageTableArchAArch64::get_zero_va(PagingType::Paging4Level).unwrap(), ZERO_VA_4_LEVEL.into());
-        assert!(PageTableArchAArch64::get_zero_va(PagingType::Paging5Level).is_err());
+        let arch = PageTableArchAArch64;
+        assert_eq!(arch.get_zero_va(PagingType::Paging4Level).unwrap(), ZERO_VA_4_LEVEL.into());
+        assert!(arch.get_zero_va(PagingType::Paging5Level).is_err());
     }
 
     #[test]
     fn test_get_max_va() {
-        assert_eq!(PageTableArchAArch64::get_max_va(PagingType::Paging4Level).unwrap(), MAX_VA_4_LEVEL.into());
-        assert_eq!(PageTableArchAArch64::get_max_va(PagingType::Paging5Level).unwrap(), MAX_VA_5_LEVEL.into());
+        let arch = PageTableArchAArch64;
+        assert_eq!(arch.get_max_va(PagingType::Paging4Level).unwrap(), MAX_VA_4_LEVEL.into());
+        assert_eq!(arch.get_max_va(PagingType::Paging5Level).unwrap(), MAX_VA_5_LEVEL.into());
     }
 
     #[test]
     fn test_level_supports_pa_entry() {
-        assert!(!PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level5));
-        assert!(!PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level4));
-        assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level3));
-        assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level2));
-        assert!(PageTableArchAArch64::level_supports_pa_entry(PageLevel::Level1));
+        let arch = PageTableArchAArch64;
+        assert!(!arch.level_supports_pa_entry(PageLevel::Level5));
+        assert!(!arch.level_supports_pa_entry(PageLevel::Level4));
+        assert!(arch.level_supports_pa_entry(PageLevel::Level3));
+        assert!(arch.level_supports_pa_entry(PageLevel::Level2));
+        assert!(arch.level_supports_pa_entry(PageLevel::Level1));
     }
 
     #[test]
@@ -380,20 +387,22 @@ mod hal_tests {
     #[test]
     fn test_get_self_mapped_base_4_level() {
         let va: VirtualAddress = 0u64.into();
+        let arch = PageTableArchAArch64;
+
         assert_eq!(
-            PageTableArchAArch64::get_self_mapped_base(PageLevel::Level4, va, PagingType::Paging4Level),
+            arch.get_self_mapped_base(PageLevel::Level4, va, PagingType::Paging4Level),
             FOUR_LEVEL_LEVEL4_SELF_MAP_BASE
         );
         assert_eq!(
-            PageTableArchAArch64::get_self_mapped_base(PageLevel::Level3, va, PagingType::Paging4Level),
+            arch.get_self_mapped_base(PageLevel::Level3, va, PagingType::Paging4Level),
             FOUR_LEVEL_LEVEL3_SELF_MAP_BASE
         );
         assert_eq!(
-            PageTableArchAArch64::get_self_mapped_base(PageLevel::Level2, va, PagingType::Paging4Level),
+            arch.get_self_mapped_base(PageLevel::Level2, va, PagingType::Paging4Level),
             FOUR_LEVEL_LEVEL2_SELF_MAP_BASE
         );
         assert_eq!(
-            PageTableArchAArch64::get_self_mapped_base(PageLevel::Level1, va, PagingType::Paging4Level),
+            arch.get_self_mapped_base(PageLevel::Level1, va, PagingType::Paging4Level),
             FOUR_LEVEL_LEVEL1_SELF_MAP_BASE
         );
     }
