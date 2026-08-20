@@ -86,7 +86,7 @@ impl PageTableEntryX64 {
         #[cfg(feature = "supervisor")]
         let user_supervisor = !attributes.contains(MemoryAttributes::Supervisor);
         #[cfg(not(feature = "supervisor"))]
-        let user_supervisor = true;
+        let user_supervisor = false;
 
         self.set_user_supervisor(user_supervisor);
 
