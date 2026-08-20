@@ -23,22 +23,24 @@ use crate::{
 use std::slice;
 
 macro_rules! all_archs {
-    ($body:expr) => {{
+    (|$arch:ident| $body:expr) => {{
         // Test on x64
         {
             type Arch = PageTableArchX64;
+            let $arch = PageTableArchX64;
             $body
         }
         // Test on aarch64
         {
             type Arch = PageTableArchAArch64;
+            let $arch = PageTableArchAArch64;
             $body
         }
     }};
 }
 
 macro_rules! all_configs {
-    ($body:expr) => {{
+    (|$arch:ident, $pt:ident| $body:expr) => {{
         // Test on x64 - 5 level
         {
             #[allow(unused)]
@@ -46,8 +48,10 @@ macro_rules! all_configs {
             type PageTableType = X64PageTable<TestPageAllocator>;
             #[allow(unused)]
             type PageTableTypeStub = X64PageTable<PageAllocatorStub>;
-            let paging_type = PagingType::Paging5Level;
-            $body(paging_type)
+            let $pt = PagingType::Paging5Level;
+            #[allow(unused)]
+            let $arch = PageTableArchX64;
+            $body
         }
         // Test on x64 - 4 level
         {
@@ -56,8 +60,10 @@ macro_rules! all_configs {
             type PageTableType = X64PageTable<TestPageAllocator>;
             #[allow(unused)]
             type PageTableTypeStub = X64PageTable<PageAllocatorStub>;
-            let paging_type = PagingType::Paging4Level;
-            $body(paging_type)
+            let $pt = PagingType::Paging4Level;
+            #[allow(unused)]
+            let $arch = PageTableArchX64;
+            $body
         }
         // Test on aarch64 - 4 level
         {
@@ -66,8 +72,10 @@ macro_rules! all_configs {
             type PageTableType = AArch64PageTable<TestPageAllocator>;
             #[allow(unused)]
             type PageTableTypeStub = AArch64PageTable<PageAllocatorStub>;
-            let paging_type = PagingType::Paging4Level;
-            $body(paging_type)
+            let $pt = PagingType::Paging4Level;
+            #[allow(unused)]
+            let $arch = PageTableArchAArch64;
+            $body
         }
     }};
 }
@@ -95,6 +103,7 @@ fn set_logger() {
 }
 
 fn subtree_num_pages<Arch: PageTableHal>(
+    arch: &Arch,
     mut address: VirtualAddress,
     mut size: u64,
     level: PageLevel,
@@ -118,7 +127,7 @@ fn subtree_num_pages<Arch: PageTableHal>(
     if !address.is_level_aligned(level) {
         let prefix_size: u64 = size.min(entry_size - (u64::from(address) & size_mask));
         pages += 1;
-        pages += subtree_num_pages::<Arch>(address, prefix_size, next_level)?;
+        pages += subtree_num_pages::<Arch>(arch, address, prefix_size, next_level)?;
         address = (address + prefix_size)?;
         size -= prefix_size;
     };
@@ -128,9 +137,9 @@ fn subtree_num_pages<Arch: PageTableHal>(
 
         // If this level supports large pages, then no pages are needed for the
         // aligned middle.
-        if !Arch::level_supports_pa_entry(level) {
+        if !arch.level_supports_pa_entry(level) {
             pages += mid_size / entry_size;
-            pages += subtree_num_pages::<Arch>(address, mid_size, next_level)?;
+            pages += subtree_num_pages::<Arch>(arch, address, mid_size, next_level)?;
         }
 
         address = (address + mid_size)?;
@@ -139,13 +148,14 @@ fn subtree_num_pages<Arch: PageTableHal>(
 
     if size > 0 {
         pages += 1;
-        pages += subtree_num_pages::<Arch>(address, size, next_level)?;
+        pages += subtree_num_pages::<Arch>(arch, address, size, next_level)?;
     }
 
     Ok(pages)
 }
 
 fn num_page_tables_required<Arch: PageTableHal>(
+    arch: &Arch,
     address: u64,
     size: u64,
     paging_type: PagingType,
@@ -165,22 +175,22 @@ fn num_page_tables_required<Arch: PageTableHal>(
     // zero VA pages
     pages += PageLevel::root_level(paging_type).height() as u64;
     // The the tree structure before the root.
-    pages += subtree_num_pages::<Arch>(address, size, PageLevel::root_level(paging_type))?;
+    pages += subtree_num_pages::<Arch>(arch, address, size, PageLevel::root_level(paging_type))?;
 
     Ok(pages)
 }
 
-fn get_self_mapped_base<Arch: PageTableHal>(paging_type: PagingType) -> u64 {
-    Arch::get_self_mapped_base(PageLevel::root_level(paging_type), VirtualAddress::new(0), paging_type)
+fn get_self_mapped_base<Arch: PageTableHal>(arch: &Arch, paging_type: PagingType) -> u64 {
+    arch.get_self_mapped_base(PageLevel::root_level(paging_type), VirtualAddress::new(0), paging_type)
 }
 
 #[test]
 fn test_find_num_page_tables() {
-    all_archs!({
+    all_archs!(|arch| {
         // Mapping one page of physical address require 4 page tables(PML4/PDP/PD/PT)
         let address = 0x0;
         let size = PAGE_SIZE; // 4k
-        let res = num_page_tables_required::<Arch>(address, size, PagingType::Paging4Level);
+        let res = num_page_tables_required::<Arch>(&arch, address, size, PagingType::Paging4Level);
         assert!(res.is_ok());
         let table_count = res.unwrap();
         assert_eq!(table_count, 4 + 3);
@@ -188,7 +198,7 @@ fn test_find_num_page_tables() {
         // Mapping 511 pages of physical address require 4 page tables(PML4/PDP/PD/PT)
         let address = PAGE_SIZE;
         let size = 511 * PAGE_SIZE;
-        let res = num_page_tables_required::<Arch>(address, size, PagingType::Paging4Level);
+        let res = num_page_tables_required::<Arch>(&arch, address, size, PagingType::Paging4Level);
         assert!(res.is_ok());
         let table_count = res.unwrap();
         assert_eq!(table_count, 4 + 3);
@@ -196,7 +206,7 @@ fn test_find_num_page_tables() {
         // Mapping 512 pages of physical address require 3 page tables because of 2mb pages.(PML4/PDP/PD)
         let address = 0x0;
         let size = 512 * PAGE_SIZE;
-        let res = num_page_tables_required::<Arch>(address, size, PagingType::Paging4Level);
+        let res = num_page_tables_required::<Arch>(&arch, address, size, PagingType::Paging4Level);
         assert!(res.is_ok());
         let table_count = res.unwrap();
         assert_eq!(table_count, 3 + 3);
@@ -205,7 +215,7 @@ fn test_find_num_page_tables() {
         // (PML5(1)/PML4(1)/PDPE(1)/PDP(1)/PT(1))
         let address = 0x0;
         let size = 513 * PAGE_SIZE;
-        let res = num_page_tables_required::<Arch>(address, size, PagingType::Paging4Level);
+        let res = num_page_tables_required::<Arch>(&arch, address, size, PagingType::Paging4Level);
         assert!(res.is_ok());
         let table_count = res.unwrap();
         assert_eq!(table_count, 4 + 3);
@@ -213,7 +223,7 @@ fn test_find_num_page_tables() {
         // Mapping 1gb of physical address require 2 page tables because of 1Gb pages.(PML4/PDP)
         let address = 0x0;
         let size = 512 * 512 * PAGE_SIZE;
-        let res = num_page_tables_required::<Arch>(address, size, PagingType::Paging4Level);
+        let res = num_page_tables_required::<Arch>(&arch, address, size, PagingType::Paging4Level);
         assert!(res.is_ok());
         let table_count = res.unwrap();
         assert_eq!(table_count, 2 + 3);
@@ -221,7 +231,7 @@ fn test_find_num_page_tables() {
         // Mapping 1 1GbPage + 1 2mb page + 1 4kb page require 4 page tables.(PML4/PDP/PD/PT)
         let address = 0x0;
         let size = (512 * 512 * PAGE_SIZE) + (512 * PAGE_SIZE) + PAGE_SIZE;
-        let res = num_page_tables_required::<Arch>(address, size, PagingType::Paging4Level);
+        let res = num_page_tables_required::<Arch>(&arch, address, size, PagingType::Paging4Level);
         assert!(res.is_ok());
         let table_count = res.unwrap();
         assert_eq!(table_count, 4 + 3);
@@ -229,7 +239,7 @@ fn test_find_num_page_tables() {
         // Mapping 2mb starting at 2mb/2 should take 5 pages. (PML4/PDP/PD(1)/PT(2))
         let address = 256 * PAGE_SIZE;
         let size = 512 * PAGE_SIZE;
-        let res = num_page_tables_required::<Arch>(address, size, PagingType::Paging4Level);
+        let res = num_page_tables_required::<Arch>(&arch, address, size, PagingType::Paging4Level);
         assert!(res.is_ok());
         let table_count = res.unwrap();
         assert_eq!(table_count, 5 + 3);
@@ -237,7 +247,7 @@ fn test_find_num_page_tables() {
         // Mapping 10Gb starting at 4kb should take 6 pages. (PML4/PDP/PD(2)/PT(2))
         let address = PAGE_SIZE;
         let size = 10 * 512 * 512 * PAGE_SIZE;
-        let res = num_page_tables_required::<Arch>(address, size, PagingType::Paging4Level);
+        let res = num_page_tables_required::<Arch>(&arch, address, size, PagingType::Paging4Level);
         assert!(res.is_ok());
         let table_count = res.unwrap();
         assert_eq!(table_count, 6 + 3);
@@ -251,8 +261,8 @@ fn test_map_memory_address_simple() {
     let address = 0;
     let size = 0x400000;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -267,7 +277,7 @@ fn test_map_memory_address_simple() {
 
         assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-        page_allocator.validate_pages::<Arch>(address, size, attributes);
+        page_allocator.validate_pages::<Arch>(&arch, address, size, attributes);
     });
 }
 
@@ -275,11 +285,11 @@ fn test_map_memory_address_simple() {
 fn test_map_memory_address_0_to_ffff_ffff() {
     let address = 0;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut size = PAGE_SIZE;
 
         while size < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -295,7 +305,7 @@ fn test_map_memory_address_0_to_ffff_ffff() {
             pt.dump_page_tables(address, size).unwrap();
             assert_eq!(page_allocator.pages_allocated(), num_pages);
 
-            page_allocator.validate_pages::<Arch>(address, size, attributes);
+            page_allocator.validate_pages::<Arch>(&arch, address, size, attributes);
 
             size <<= 1;
         }
@@ -308,10 +318,10 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
     let address_increment = PAGE_SIZE << 3;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut address = 0;
         while address < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -324,7 +334,7 @@ fn test_map_memory_address_single_page_from_0_to_ffff_ffff() {
             assert!(res.is_ok());
 
             assert_eq!(page_allocator.pages_allocated(), num_pages);
-            page_allocator.validate_pages::<Arch>(address, size, attributes);
+            page_allocator.validate_pages::<Arch>(&arch, address, size, attributes);
 
             address += address_increment;
         }
@@ -337,11 +347,11 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE << 1;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut address = 0;
 
         while address < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -354,7 +364,7 @@ fn test_map_memory_address_multiple_page_from_0_to_ffff_ffff() {
             assert!(res.is_ok());
 
             assert_eq!(page_allocator.pages_allocated(), num_pages);
-            page_allocator.validate_pages::<Arch>(address, size, attributes);
+            page_allocator.validate_pages::<Arch>(&arch, address, size, attributes);
 
             address += address_increment;
         }
@@ -366,7 +376,7 @@ fn test_map_memory_address_unaligned() {
     let address = 0x1;
     let size = 200;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let max_pages: u64 = 10;
 
         let page_allocator = TestPageAllocator::new(max_pages, paging_type);
@@ -387,7 +397,7 @@ fn test_map_memory_address_zero_size() {
     let address = 0x1000;
     let size = 0;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let max_pages: u64 = 10;
 
         let page_allocator = TestPageAllocator::new(max_pages, paging_type);
@@ -410,8 +420,8 @@ fn test_unmap_memory_address_simple() {
     let address = 0x1000;
     let size = PAGE_SIZE * 512 * 512 * 10;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -433,10 +443,10 @@ fn test_unmap_memory_address_simple() {
 fn test_unmap_memory_address_0_to_ffff_ffff() {
     let address = 0;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut size = PAGE_SIZE;
         while size < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -462,10 +472,10 @@ fn test_unmap_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
     let address_increment = PAGE_SIZE << 3;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut address = 0;
         while address < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -490,10 +500,10 @@ fn test_unmap_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE << 1;
     let address_increment = PAGE_SIZE << 3;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut address = 0;
         while address < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -518,7 +528,7 @@ fn test_unmap_memory_address_unaligned() {
     let address = 0x1;
     let size = 200;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let max_pages: u64 = 10;
 
         let page_allocator = TestPageAllocator::new(max_pages, paging_type);
@@ -538,7 +548,7 @@ fn test_unmap_memory_address_zero_size() {
     let address = 0x1000;
     let size = 0;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let max_pages: u64 = 10;
 
         let page_allocator = TestPageAllocator::new(max_pages, paging_type);
@@ -558,8 +568,8 @@ fn test_unmap_memory_address_with_different_attributes() {
     let address = 0x8000;
     let size = PAGE_SIZE * 4; // 4 pages
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -593,8 +603,8 @@ fn test_unmap_memory_address_partially_unmapped() {
     let address = 0x4000;
     let size = PAGE_SIZE * 4; // 4 pages
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -629,8 +639,8 @@ fn test_query_memory_address_simple() {
     let address = 0x1000;
     let size = PAGE_SIZE * 512 * 512 * 10;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -651,8 +661,8 @@ fn test_query_memory_address_simple() {
 
 #[test]
 fn test_query_self_map() {
-    all_configs!(|paging_type| {
-        let address = get_self_mapped_base::<Arch>(paging_type);
+    all_configs!(|arch, paging_type| {
+        let address = get_self_mapped_base(&arch, paging_type);
         let size = PAGE_SIZE;
 
         let page_allocator = TestPageAllocator::new(10, paging_type);
@@ -671,10 +681,10 @@ fn test_query_self_map() {
 fn test_query_memory_address_0_to_ffff_ffff() {
     let address = 0x1000;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut size = PAGE_SIZE;
         while size < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -701,10 +711,10 @@ fn test_query_memory_address_single_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE;
     let step = PAGE_SIZE << 3;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut address = 0;
         while address < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -730,10 +740,10 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let size = PAGE_SIZE << 1;
     let step = PAGE_SIZE << 3;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut address = 0;
         while address < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -758,7 +768,7 @@ fn test_query_memory_address_multiple_page_from_0_to_ffff_ffff() {
 fn test_query_memory_address_unaligned() {
     let max_pages: u64 = 10;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let page_allocator = TestPageAllocator::new(max_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
 
@@ -777,7 +787,7 @@ fn test_query_memory_address_unaligned() {
 fn test_query_memory_address_zero_size() {
     let max_pages: u64 = 10;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let page_allocator = TestPageAllocator::new(max_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
 
@@ -797,8 +807,8 @@ fn test_query_memory_address_inconsistent_mappings() {
     let address = 0x1000;
     let size = 0x3000;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -827,7 +837,7 @@ fn test_query_memory_address_inconsistent_mappings_across_2mb_boundary() {
     let address = 0;
     let size = 0x400000;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let page_allocator = TestPageAllocator::new(0x1000, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
 
@@ -877,8 +887,8 @@ fn test_remap_memory_address_simple() {
     let address = 0x1000;
     let size = PAGE_SIZE * 512 * 512 * 10;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -901,11 +911,11 @@ fn test_remap_memory_address_simple() {
 fn test_remap_memory_address_0_to_ffff_ffff() {
     let address = 0;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut size = PAGE_SIZE;
 
         while size < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -932,11 +942,11 @@ fn test_remap_memory_address_single_page_from_0_to_ffff_ffff() {
     let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut address = 0;
 
         while address < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -962,11 +972,11 @@ fn test_remap_memory_address_multiple_page_from_0_to_ffff_ffff() {
     let address_increment = PAGE_SIZE << 3;
     let size = PAGE_SIZE << 1;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let mut address = 0;
 
         while address < 0xffff_ffff {
-            let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+            let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
             let page_allocator = TestPageAllocator::new(num_pages, paging_type);
             let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -992,7 +1002,7 @@ fn test_remap_memory_address_unaligned() {
     let address = 0x1;
     let size = 200;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let max_pages: u64 = 10;
 
         let page_allocator = TestPageAllocator::new(max_pages, paging_type);
@@ -1014,7 +1024,7 @@ fn test_remap_memory_address_zero_size() {
     let address = 0x1000;
     let size = 0;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let max_pages: u64 = 10;
 
         let page_allocator = TestPageAllocator::new(max_pages, paging_type);
@@ -1037,8 +1047,8 @@ fn test_remap_memory_address_mixed_attributes() {
     let base_address = 0x3000;
     let total_size = PAGE_SIZE * 4; // 4 pages
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(base_address, total_size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, base_address, total_size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -1091,8 +1101,8 @@ fn test_remap_memory_address_partially_mapped_range() {
     let total_size = PAGE_SIZE * 4; // 4 pages
     let half_size = PAGE_SIZE * 2;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(base_address, total_size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, base_address, total_size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -1138,8 +1148,8 @@ fn test_from_existing_page_table() {
     let address = 0x1000;
     let size = PAGE_SIZE * 512 * 512 * 10;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone().clone(), paging_type);
@@ -1173,8 +1183,8 @@ fn test_dump_page_tables() {
 
     set_logger();
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -1245,7 +1255,7 @@ fn test_large_page_splitting() {
         Remap,
     }
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let orig_attributes = MemoryAttributes::empty() | Arch::DEFAULT_ATTRIBUTES;
         let remap_attributes = MemoryAttributes::ExecuteProtect | Arch::DEFAULT_ATTRIBUTES;
 
@@ -1253,7 +1263,8 @@ fn test_large_page_splitting() {
             let TestConfig { mapped_range, split_range, page_increase } = test_config;
             for action in [TestAction::Unmap, TestAction::Remap] {
                 let num_pages =
-                    num_page_tables_required::<Arch>(mapped_range.address, mapped_range.size, paging_type).unwrap();
+                    num_page_tables_required::<Arch>(&arch, mapped_range.address, mapped_range.size, paging_type)
+                        .unwrap();
 
                 let page_allocator = TestPageAllocator::new(num_pages + page_increase, paging_type);
                 let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -1304,8 +1315,8 @@ fn test_map_unmap_remap_large_page_subregion() {
     let subregion_address = base_address + subregion_offset;
     let subregion_size = PAGE_SIZE;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(base_address, large_page_size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, base_address, large_page_size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages + 1, paging_type); // +1 for possible PT split
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -1359,7 +1370,7 @@ fn test_map_unmap_remap_large_page_subregion() {
 fn test_install_page_table() {
     let address = 0x1000;
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let page_allocator = TestPageAllocator::new(0x1000, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
 
@@ -1466,8 +1477,8 @@ fn test_map_large_page_remap_subset_with_same_attributes() {
     let base_address = 0x400000; // Purposefully choose a 2MB aligned address
     let subregion_size = SIZE_2MB - PAGE_SIZE;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(base_address, large_page_size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, base_address, large_page_size, paging_type).unwrap();
 
         let page_allocator = TestPageAllocator::new(num_pages + 1, paging_type); // +1 for possible PT split
         let pt = PageTableType::new(page_allocator.clone(), paging_type);
@@ -1523,8 +1534,8 @@ fn test_iter_mapped_regions_covers_simple_mapping() {
     let address = 0;
     let size = 0x400000; // 4MB
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1556,7 +1567,7 @@ fn test_iter_mapped_regions_covers_simple_mapping() {
 fn test_iter_mapped_regions_skips_reserved_entries() {
     // A freshly created table contains only the crate's reserved self-map and
     // zero-VA entries, which must never be reported as genuine mappings.
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         let page_allocator = TestPageAllocator::new(16, paging_type);
         let pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1573,11 +1584,11 @@ fn test_iter_mapped_regions_multiple_disjoint() {
     let region_a = (0x40000000u64, SIZE_2MB); // 1GB base, read-only
     let region_b = (0x80000000u64, SIZE_2MB); // 2GB base, execute-protected
 
-    all_configs!(|paging_type| {
+    all_configs!(|arch, paging_type| {
         // Sum of the per-region requirements is a safe over-estimate of the
         // pages needed when both are mapped into the same table.
-        let pages_a = num_page_tables_required::<Arch>(region_a.0, region_a.1, paging_type).unwrap();
-        let pages_b = num_page_tables_required::<Arch>(region_b.0, region_b.1, paging_type).unwrap();
+        let pages_a = num_page_tables_required::<Arch>(&arch, region_a.0, region_a.1, paging_type).unwrap();
+        let pages_b = num_page_tables_required::<Arch>(&arch, region_b.0, region_b.1, paging_type).unwrap();
         let page_allocator = TestPageAllocator::new(pages_a + pages_b, paging_type);
         let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1614,8 +1625,8 @@ fn test_iter_mapped_regions_canonicalizes_high_half() {
     let paging_type = PagingType::Paging5Level;
     let address = 0xFF00_0000_0000_0000u64;
     let size = SIZE_2MB;
-
-    let num_pages = num_page_tables_required::<PageTableArchX64>(address, size, paging_type).unwrap();
+    let arch = PageTableArchX64;
+    let num_pages = num_page_tables_required::<PageTableArchX64>(&arch, address, size, paging_type).unwrap();
     let page_allocator = TestPageAllocator::new(num_pages, paging_type);
     let mut pt = X64PageTable::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1649,7 +1660,8 @@ fn test_iter_mapped_regions_reports_reserved_indices_for_foreign_table() {
     let address = 0u64;
     let size = SIZE_2MB;
 
-    let num_pages = num_page_tables_required::<PageTableArchX64>(address, size, paging_type).unwrap();
+    let arch = PageTableArchX64;
+    let num_pages = num_page_tables_required::<PageTableArchX64>(&arch, address, size, paging_type).unwrap();
     let page_allocator = TestPageAllocator::new(num_pages, paging_type);
     let mut pt = X64PageTable::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1699,9 +1711,9 @@ fn test_iter_mapped_regions_start_address_skips_earlier() {
     let region_a = (0x40000000u64, SIZE_2MB); // 1GB, read-only
     let region_b = (0x80000000u64, SIZE_2MB); // 2GB, execute-protected
 
-    all_configs!(|paging_type| {
-        let pages_a = num_page_tables_required::<Arch>(region_a.0, region_a.1, paging_type).unwrap();
-        let pages_b = num_page_tables_required::<Arch>(region_b.0, region_b.1, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let pages_a = num_page_tables_required::<Arch>(&arch, region_a.0, region_a.1, paging_type).unwrap();
+        let pages_b = num_page_tables_required::<Arch>(&arch, region_b.0, region_b.1, paging_type).unwrap();
         let page_allocator = TestPageAllocator::new(pages_a + pages_b, paging_type);
         let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1731,8 +1743,8 @@ fn test_iter_mapped_regions_start_within_region() {
     let address = 0x40000000u64; // 1GB
     let size = 0x400000u64; // 4MB
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1755,8 +1767,8 @@ fn test_iter_mapped_regions_start_zero_matches_none() {
     let address = 0u64;
     let size = 0x400000u64; // 4MB
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1776,8 +1788,8 @@ fn test_iter_mapped_regions_start_after_all_mappings_is_empty() {
     let address = 0x40000000u64; // 1GB
     let size = SIZE_2MB;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(address, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, address, size, paging_type).unwrap();
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1802,7 +1814,8 @@ fn test_iter_mapped_regions_start_address_high_half() {
     let address = 0xFF00_0000_0000_0000u64;
     let size = SIZE_2MB;
 
-    let num_pages = num_page_tables_required::<PageTableArchX64>(address, size, paging_type).unwrap();
+    let arch = PageTableArchX64;
+    let num_pages = num_page_tables_required::<PageTableArchX64>(&arch, address, size, paging_type).unwrap();
     let page_allocator = TestPageAllocator::new(num_pages, paging_type);
     let mut pt = X64PageTable::new(page_allocator.clone(), paging_type).unwrap();
 
@@ -1833,8 +1846,8 @@ fn test_iter_mapped_regions_start_seeks_deep_non_root_index() {
     let base = 0x40000000u64; // 1GB-aligned: the eight 2MB pages share one L2 table.
     let size = 8 * SIZE_2MB;
 
-    all_configs!(|paging_type| {
-        let num_pages = num_page_tables_required::<Arch>(base, size, paging_type).unwrap();
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required::<Arch>(&arch, base, size, paging_type).unwrap();
         let page_allocator = TestPageAllocator::new(num_pages, paging_type);
         let mut pt = PageTableType::new(page_allocator.clone(), paging_type).unwrap();
 

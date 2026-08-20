@@ -19,18 +19,18 @@ pub(crate) trait PageTableHal {
     /// SAFETY: This function is unsafe because it directly manipulates the page table memory at the given base address
     /// to zero it. The caller must ensure that the base address is valid and points to a page table that can be
     /// safely zeroed.
-    unsafe fn zero_page(base: VirtualAddress);
-    fn paging_type_supported(paging_type: PagingType) -> Result<(), PtError>;
-    fn get_zero_va(paging_type: PagingType) -> Result<VirtualAddress, PtError>;
-    fn invalidate_tlb(va: VirtualAddress);
-    fn invalidate_tlb_all();
-    fn get_max_va(page_type: PagingType) -> Result<VirtualAddress, PtError>;
-    fn is_table_active(base: u64) -> bool;
+    unsafe fn zero_page(&self, base: VirtualAddress);
+    fn paging_type_supported(&self, paging_type: PagingType) -> Result<(), PtError>;
+    fn get_zero_va(&self, paging_type: PagingType) -> Result<VirtualAddress, PtError>;
+    fn invalidate_tlb(&self, va: VirtualAddress);
+    fn invalidate_tlb_all(&self);
+    fn get_max_va(&self, page_type: PagingType) -> Result<VirtualAddress, PtError>;
+    fn is_table_active(&self, base: u64) -> bool;
     /// SAFETY: This function is unsafe because it updates the HW page table registers to install a new page table.
     /// The caller must ensure that the base address is valid and points to a properly constructed page table.
-    unsafe fn install_page_table(base: u64, paging_type: PagingType) -> Result<(), PtError>;
-    fn level_supports_pa_entry(level: PageLevel) -> bool;
-    fn get_self_mapped_base(level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64;
+    unsafe fn install_page_table(&self, base: u64, paging_type: PagingType) -> Result<(), PtError>;
+    fn level_supports_pa_entry(&self, level: PageLevel) -> bool;
+    fn get_self_mapped_base(&self, level: PageLevel, va: VirtualAddress, paging_type: PagingType) -> u64;
 }
 
 pub(crate) trait PageTableEntry {
