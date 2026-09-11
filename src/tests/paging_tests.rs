@@ -15,7 +15,7 @@ use crate::{
     aarch64::{AArch64PageTable, PageTableArchAArch64},
     arch::{PageTableEntry, PageTableHal},
     page_allocator::PageAllocatorStub,
-    structs::{PAGE_SIZE, PageLevel, SIZE_2MB, VirtualAddress},
+    structs::{PAGE_SIZE, PageLevel, PhysicalAddress, SIZE_2MB, VirtualAddress},
     tests::test_page_allocator::TestPageAllocator,
     x64::{PageTableArchX64, X64PageTable},
 };
@@ -105,6 +105,7 @@ fn set_logger() {
 fn subtree_num_pages<Arch: PageTableHal>(
     arch: &Arch,
     mut address: VirtualAddress,
+    mut pa: PhysicalAddress,
     mut size: u64,
     level: PageLevel,
 ) -> Result<u64, PtError> {
@@ -127,8 +128,9 @@ fn subtree_num_pages<Arch: PageTableHal>(
     if !address.is_level_aligned(level) {
         let prefix_size: u64 = size.min(entry_size - (u64::from(address) & size_mask));
         pages += 1;
-        pages += subtree_num_pages::<Arch>(arch, address, prefix_size, next_level)?;
+        pages += subtree_num_pages::<Arch>(arch, address, pa, prefix_size, next_level)?;
         address = (address + prefix_size)?;
+        pa = (pa + prefix_size)?;
         size -= prefix_size;
     };
 
@@ -137,18 +139,19 @@ fn subtree_num_pages<Arch: PageTableHal>(
 
         // If this level supports large pages, then no pages are needed for the
         // aligned middle.
-        if !arch.level_supports_pa_entry(level) {
+        if !arch.level_supports_pa_entry(level) || u64::from(pa) & size_mask != 0 {
             pages += mid_size / entry_size;
-            pages += subtree_num_pages::<Arch>(arch, address, mid_size, next_level)?;
+            pages += subtree_num_pages::<Arch>(arch, address, pa, mid_size, next_level)?;
         }
 
         address = (address + mid_size)?;
+        pa = (pa + mid_size)?;
         size -= mid_size;
     }
 
     if size > 0 {
         pages += 1;
-        pages += subtree_num_pages::<Arch>(arch, address, size, next_level)?;
+        pages += subtree_num_pages::<Arch>(arch, address, pa, size, next_level)?;
     }
 
     Ok(pages)
@@ -157,6 +160,16 @@ fn subtree_num_pages<Arch: PageTableHal>(
 fn num_page_tables_required<Arch: PageTableHal>(
     arch: &Arch,
     address: u64,
+    size: u64,
+    paging_type: PagingType,
+) -> Result<u64, PtError> {
+    num_page_tables_required_for_mapping::<Arch>(arch, address, address, size, paging_type)
+}
+
+fn num_page_tables_required_for_mapping<Arch: PageTableHal>(
+    arch: &Arch,
+    address: u64,
+    pa: u64,
     size: u64,
     paging_type: PagingType,
 ) -> Result<u64, PtError> {
@@ -175,7 +188,8 @@ fn num_page_tables_required<Arch: PageTableHal>(
     // zero VA pages
     pages += PageLevel::root_level(paging_type).height() as u64;
     // The the tree structure before the root.
-    pages += subtree_num_pages::<Arch>(arch, address, size, PageLevel::root_level(paging_type))?;
+    pages +=
+        subtree_num_pages::<Arch>(arch, address, PhysicalAddress::new(pa), size, PageLevel::root_level(paging_type))?;
 
     Ok(pages)
 }
@@ -409,6 +423,177 @@ fn test_map_memory_address_zero_size() {
         let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
         let res = pt.map_memory_region(address, size, attributes);
         assert!(res.is_err());
+        assert_eq!(res, Err(PtError::InvalidMemoryRange));
+    });
+}
+
+// Aliased Memory Mapping Tests
+#[test]
+fn test_map_aliased_memory_address_simple() {
+    let address = 0;
+    let my_favorite_va = 0x0000_0F88_888A_A000;
+    let size = 0x400000;
+
+    all_configs!(|arch, paging_type| {
+        let num_pages =
+            num_page_tables_required_for_mapping::<Arch>(&arch, my_favorite_va, address, size, paging_type).unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = Arch::DEFAULT_ATTRIBUTES | MemoryAttributes::ReadOnly;
+        let res = pt.map_aliased_memory_region(my_favorite_va, address, size, attributes);
+
+        assert!(res.is_ok(), "{res:?}");
+
+        assert_eq!(page_allocator.pages_allocated(), num_pages);
+
+        page_allocator.validate_aliased_mapped_pages::<Arch>(&arch, my_favorite_va, address, size, attributes);
+    });
+}
+
+#[test]
+fn test_map_aliased_memory_address_0_to_ffff_ffff() {
+    let address = 0;
+    let virtual_address = 0x0000_0F88_888A_A000;
+
+    all_configs!(|arch, paging_type| {
+        let mut size = PAGE_SIZE;
+
+        while size < 0xffff_ffff {
+            let num_pages =
+                num_page_tables_required_for_mapping::<Arch>(&arch, virtual_address, address, size, paging_type)
+                    .unwrap();
+
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+            assert!(pt.is_ok());
+            let mut pt = pt.unwrap();
+
+            let attributes = Arch::DEFAULT_ATTRIBUTES | MemoryAttributes::ReadOnly;
+            let res = pt.map_aliased_memory_region(virtual_address, address, size, attributes);
+            assert!(res.is_ok(), "{res:?}");
+
+            log::info!("allocated: {} expected: {}", page_allocator.pages_allocated(), num_pages);
+            pt.dump_page_tables(virtual_address, size).unwrap();
+            assert_eq!(page_allocator.pages_allocated(), num_pages);
+
+            page_allocator.validate_aliased_mapped_pages::<Arch>(&arch, virtual_address, address, size, attributes);
+
+            size <<= 1;
+        }
+    });
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
+fn test_map_aliased_memory_address_single_page_from_0_to_ffff_ffff() {
+    let virtual_address_base = 0x0000_0F88_888A_A000;
+    let size = PAGE_SIZE;
+    let address_increment = PAGE_SIZE << 3;
+
+    all_configs!(|arch, paging_type| {
+        let mut address = 0;
+        while address < 0xffff_ffff {
+            let virtual_address = virtual_address_base + address;
+            let num_pages =
+                num_page_tables_required_for_mapping::<Arch>(&arch, virtual_address, address, size, paging_type)
+                    .unwrap();
+
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+            assert!(pt.is_ok());
+            let mut pt = pt.unwrap();
+
+            let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+            let res = pt.map_aliased_memory_region(virtual_address, address, size, attributes);
+            assert!(res.is_ok(), "{res:?}");
+
+            assert_eq!(page_allocator.pages_allocated(), num_pages);
+            page_allocator.validate_aliased_mapped_pages::<Arch>(&arch, virtual_address, address, size, attributes);
+
+            address += address_increment;
+        }
+    });
+}
+
+#[test]
+#[cfg_attr(miri, ignore = "Skipped in miri due to performance issues")]
+fn test_map_aliased_memory_address_multiple_page_from_0_to_ffff_ffff() {
+    let virtual_address_base = 0x0000_0F88_888A_A000;
+    let address_increment = PAGE_SIZE << 3;
+    let size = PAGE_SIZE << 1;
+
+    all_configs!(|arch, paging_type| {
+        let mut address = 0;
+
+        while address < 0xffff_ffff {
+            let virtual_address = virtual_address_base + address;
+            let num_pages =
+                num_page_tables_required_for_mapping::<Arch>(&arch, virtual_address, address, size, paging_type)
+                    .unwrap();
+
+            let page_allocator = TestPageAllocator::new(num_pages, paging_type);
+            let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+            assert!(pt.is_ok());
+            let mut pt = pt.unwrap();
+
+            let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+            let res = pt.map_aliased_memory_region(virtual_address, address, size, attributes);
+            assert!(res.is_ok(), "{res:?}");
+
+            assert_eq!(page_allocator.pages_allocated(), num_pages);
+            page_allocator.validate_aliased_mapped_pages::<Arch>(&arch, virtual_address, address, size, attributes);
+
+            address += address_increment;
+        }
+    });
+}
+
+#[test]
+fn test_map_aliased_memory_address_unaligned() {
+    let virtual_address = 0x1;
+    let address = 0;
+    let size = 200;
+
+    all_configs!(|_arch, paging_type| {
+        let max_pages: u64 = 10;
+
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        let res = pt.map_aliased_memory_region(virtual_address, address, size, attributes);
+        assert_eq!(res, Err(PtError::UnalignedAddress));
+    });
+}
+
+#[test]
+fn test_map_aliased_memory_address_zero_size() {
+    let virtual_address = 0x2000;
+    let address = 0x1000;
+    let size = 0;
+
+    all_configs!(|_arch, paging_type| {
+        let max_pages: u64 = 10;
+
+        let page_allocator = TestPageAllocator::new(max_pages, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let attributes = MemoryAttributes::ReadOnly | Arch::DEFAULT_ATTRIBUTES;
+        let res = pt.map_aliased_memory_region(virtual_address, address, size, attributes);
         assert_eq!(res, Err(PtError::InvalidMemoryRange));
     });
 }
@@ -1303,6 +1488,66 @@ fn test_large_page_splitting() {
                 }
             }
         }
+    });
+}
+
+#[test]
+fn test_aliased_mapped_large_page_splitting() {
+    let virtual_address = 0x0000_0F88_8880_0000;
+    let physical_address = 0x400000;
+    let large_page_size = SIZE_2MB;
+    let split_offset = 0x10000;
+    let split_virtual_address = virtual_address + split_offset;
+    let split_physical_address = 0x10000000;
+
+    all_configs!(|arch, paging_type| {
+        let num_pages = num_page_tables_required_for_mapping::<Arch>(
+            &arch,
+            virtual_address,
+            physical_address,
+            large_page_size,
+            paging_type,
+        )
+        .unwrap();
+
+        let page_allocator = TestPageAllocator::new(num_pages + 1, paging_type);
+        let pt = PageTableType::new(page_allocator.clone(), paging_type);
+
+        assert!(pt.is_ok());
+        let mut pt = pt.unwrap();
+
+        let original_attributes = Arch::DEFAULT_ATTRIBUTES;
+        let remap_attributes = Arch::DEFAULT_ATTRIBUTES | MemoryAttributes::ExecuteProtect;
+        let res = pt.map_aliased_memory_region(virtual_address, physical_address, large_page_size, original_attributes);
+        assert!(res.is_ok(), "{res:?}");
+        assert_eq!(page_allocator.pages_allocated(), num_pages);
+
+        let res =
+            pt.map_aliased_memory_region(split_virtual_address, split_physical_address, PAGE_SIZE, remap_attributes);
+        assert!(res.is_ok(), "{res:?}");
+        assert_eq!(page_allocator.pages_allocated(), num_pages + 1);
+
+        page_allocator.validate_aliased_mapped_pages::<Arch>(
+            &arch,
+            virtual_address,
+            physical_address,
+            split_offset,
+            original_attributes,
+        );
+        page_allocator.validate_aliased_mapped_pages::<Arch>(
+            &arch,
+            split_virtual_address,
+            split_physical_address,
+            PAGE_SIZE,
+            remap_attributes,
+        );
+        page_allocator.validate_aliased_mapped_pages::<Arch>(
+            &arch,
+            split_virtual_address + PAGE_SIZE,
+            physical_address + split_offset + PAGE_SIZE,
+            large_page_size - split_offset - PAGE_SIZE,
+            original_attributes,
+        );
     });
 }
 

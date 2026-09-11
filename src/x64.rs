@@ -117,6 +117,17 @@ impl<P: PageAllocator> PageTable for X64PageTable<P> {
         self.internal.map_memory_region(&self.arch, address, size, attributes)
     }
 
+    fn map_aliased_memory_region(
+        &mut self,
+        va: u64,
+        pa: u64,
+        size: u64,
+        attributes: crate::MemoryAttributes,
+    ) -> Result<(), PtError> {
+        check_canonical_range(va, size, self.internal.paging_type)?;
+        self.internal.map_aliased_memory_region(&self.arch, va, pa, size, attributes)
+    }
+
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError> {
         check_canonical_range(address, size, self.internal.paging_type)?;
         self.internal.unmap_memory_region(&self.arch, address, size)
