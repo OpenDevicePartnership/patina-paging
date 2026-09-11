@@ -253,6 +253,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         base: PhysicalAddress,
         attributes: MemoryAttributes,
         state: PageTableState,
+        mut pa: PhysicalAddress,
     ) -> Result<(), PtError> {
         let mut va = start_va;
 
@@ -287,11 +288,12 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
 
             if arch.level_supports_pa_entry(level)
                 && va.is_level_aligned(level)
+                && u64::from(pa) & (level.entry_va_size() - 1) == 0
                 && va.length_through(end_va)? >= level.entry_va_size()
             {
                 // This entry is large enough to be a whole entry for this supporting level,
                 // so we can map the whole range in one go.
-                entry.update_fields(attributes, va.into(), true, level, va)?;
+                entry.update_fields(attributes, pa, true, level, va)?;
             } else {
                 let next_level = level.next_level().ok_or_else(|| {
                     log::error!("Failed to map memory region at VA {va:#x?} as the level is the lowest level and cannot be split");
@@ -333,10 +335,13 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
                     next_base,
                     attributes,
                     state,
+                    pa,
                 )?;
             }
 
-            va = va.get_next_va(level)?;
+            let new_va = va.get_next_va(level)?;
+            pa = (pa + u64::from((new_va - u64::from(va))?))?;
+            va = new_va;
         }
 
         Ok(())
@@ -555,6 +560,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         let large_page_end: u64 = large_page_start + level.entry_va_size() - 1;
 
         let attributes = entry.get_attributes();
+        let large_page_pa = entry.get_next_address();
         let pa = self.allocate_page(arch, state)?;
 
         // in order to use the self map, we have to add the PA to the page table, otherwise it is not part of
@@ -579,6 +585,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             pa,
             attributes,
             state,
+            large_page_pa,
         )
     }
 
@@ -782,6 +789,7 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
             self.base,
             attributes,
             self.get_state(arch),
+            start_va.into(),
         )
     }
 

@@ -247,6 +247,17 @@ impl From<VirtualAddress> for PhysicalAddress {
     }
 }
 
+impl Add<u64> for PhysicalAddress {
+    type Output = Result<Self, PtError>;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        match self.0.checked_add(rhs) {
+            Some(result) => Ok(PhysicalAddress(result)),
+            None => Err(PtError::AdditionOverflow),
+        }
+    }
+}
+
 #[cfg(test)]
 #[cfg_attr(coverage, coverage(off))]
 mod tests {

@@ -15,7 +15,7 @@ use crate::{
     aarch64::{AArch64PageTable, PageTableArchAArch64},
     arch::{PageTableEntry, PageTableHal},
     page_allocator::PageAllocatorStub,
-    structs::{PAGE_SIZE, PageLevel, SIZE_2MB, VirtualAddress},
+    structs::{PAGE_SIZE, PageLevel, PhysicalAddress, SIZE_2MB, VirtualAddress},
     tests::test_page_allocator::TestPageAllocator,
     x64::{PageTableArchX64, X64PageTable},
 };
@@ -105,6 +105,7 @@ fn set_logger() {
 fn subtree_num_pages<Arch: PageTableHal>(
     arch: &Arch,
     mut address: VirtualAddress,
+    mut pa: PhysicalAddress,
     mut size: u64,
     level: PageLevel,
 ) -> Result<u64, PtError> {
@@ -127,8 +128,9 @@ fn subtree_num_pages<Arch: PageTableHal>(
     if !address.is_level_aligned(level) {
         let prefix_size: u64 = size.min(entry_size - (u64::from(address) & size_mask));
         pages += 1;
-        pages += subtree_num_pages::<Arch>(arch, address, prefix_size, next_level)?;
+        pages += subtree_num_pages::<Arch>(arch, address, pa, prefix_size, next_level)?;
         address = (address + prefix_size)?;
+        pa = (pa + prefix_size)?;
         size -= prefix_size;
     };
 
@@ -137,18 +139,19 @@ fn subtree_num_pages<Arch: PageTableHal>(
 
         // If this level supports large pages, then no pages are needed for the
         // aligned middle.
-        if !arch.level_supports_pa_entry(level) {
+        if !arch.level_supports_pa_entry(level) || u64::from(pa) & size_mask != 0 {
             pages += mid_size / entry_size;
-            pages += subtree_num_pages::<Arch>(arch, address, mid_size, next_level)?;
+            pages += subtree_num_pages::<Arch>(arch, address, pa, mid_size, next_level)?;
         }
 
         address = (address + mid_size)?;
+        pa = (pa + mid_size)?;
         size -= mid_size;
     }
 
     if size > 0 {
         pages += 1;
-        pages += subtree_num_pages::<Arch>(arch, address, size, next_level)?;
+        pages += subtree_num_pages::<Arch>(arch, address, pa, size, next_level)?;
     }
 
     Ok(pages)
@@ -157,6 +160,15 @@ fn subtree_num_pages<Arch: PageTableHal>(
 fn num_page_tables_required<Arch: PageTableHal>(
     arch: &Arch,
     address: u64,
+    size: u64,
+    paging_type: PagingType,
+) -> Result<u64, PtError> {
+    num_page_tables_required_for_mapping::<Arch>(address, address, size, paging_type)
+}
+
+fn num_page_tables_required_for_mapping<Arch: PageTableHal>(
+    address: u64,
+    pa: u64,
     size: u64,
     paging_type: PagingType,
 ) -> Result<u64, PtError> {
@@ -175,7 +187,8 @@ fn num_page_tables_required<Arch: PageTableHal>(
     // zero VA pages
     pages += PageLevel::root_level(paging_type).height() as u64;
     // The the tree structure before the root.
-    pages += subtree_num_pages::<Arch>(arch, address, size, PageLevel::root_level(paging_type))?;
+    pages +=
+        subtree_num_pages::<Arch>(arch, address, PhysicalAddress::new(pa), size, PageLevel::root_level(paging_type))?;
 
     Ok(pages)
 }
