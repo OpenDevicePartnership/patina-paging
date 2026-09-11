@@ -207,12 +207,12 @@ pub struct MappedRegion {
 /// PageTable trait is implemented by all concrete page table implementations
 /// and provides the interface for managing page tables.
 pub trait PageTable {
-    /// Function to map the designated memory region to with provided
+    /// Function to identity map the designated memory region with the provided
     /// attributes. The requested memory region will be mapped with the specified
     /// attributes, regardless of the current mapping state of the region.
     ///
     /// ## Arguments
-    /// * `address` - The memory address to map.
+    /// * `address` - The memory address to map. VA == PA
     /// * `size` - The memory size to map.
     /// * `attributes` - The memory attributes to map. The acceptable
     ///   input will be ExecuteProtect, ReadOnly, as well as Uncached,
@@ -223,13 +223,36 @@ pub trait PageTable {
     /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
     fn map_memory_region(&mut self, address: u64, size: u64, attributes: MemoryAttributes) -> Result<(), PtError>;
 
+    /// Function to map the designated VA to the specified PA with the provided
+    /// attributes. The requested memory region will be mapped with the specified
+    /// attributes, regardless of the current mapping state of the region.
+    ///
+    /// ## Arguments
+    /// * `va` - The virtual address to map.
+    /// * `pa` - The physical address to map.
+    /// * `size` - The memory size to map.
+    /// * `attributes` - The memory attributes to map. The acceptable
+    ///   input will be ExecuteProtect, ReadOnly, as well as Uncached,
+    ///   WriteCombining, WriteThrough, Writeback, UncachedExport
+    ///   Compatible attributes can be "Ored"
+    ///
+    /// ## Errors
+    /// * Returns `Ok(())` if successful else `Err(PtError)` if failed
+    fn map_aliased_memory_region(
+        &mut self,
+        va: u64,
+        pa: u64,
+        size: u64,
+        attributes: MemoryAttributes,
+    ) -> Result<(), PtError>;
+
     /// Function to unmap the memory region provided by the caller. The
     /// requested memory region must be fully mapped prior to this call. The
     /// entire region does not need to have the same mapping state in order
-    /// to unmap it.
+    /// to unmap it. This API works for either identity mapped or aliased mappings.
     ///
     /// ## Arguments
-    /// * `address` - The memory address to map.
+    /// * `address` - The memory address to unmap.
     /// * `size` - The memory size to map.
     ///
     /// ## Errors
@@ -246,8 +269,8 @@ pub trait PageTable {
     /// memory region if it is properly and consistently mapped.
     ///
     /// ## Arguments
-    /// * `address` - The memory address to map.
-    /// * `size` - The memory size to map.
+    /// * `address` - The memory address to query.
+    /// * `size` - The memory size to query.
     ///
     /// ## Returns
     /// Returns memory attributes

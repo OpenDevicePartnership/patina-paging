@@ -184,6 +184,16 @@ impl<P: PageAllocator> PageTable for AArch64PageTable<P> {
         self.internal.map_memory_region(&self.arch, address, size, attributes)
     }
 
+    fn map_aliased_memory_region(
+        &mut self,
+        va: u64,
+        pa: u64,
+        size: u64,
+        attributes: MemoryAttributes,
+    ) -> Result<(), PtError> {
+        self.internal.map_aliased_memory_region(&self.arch, va, pa, size, attributes)
+    }
+
     fn unmap_memory_region(&mut self, address: u64, size: u64) -> Result<(), PtError> {
         self.internal.unmap_memory_region(&self.arch, address, size)
     }
