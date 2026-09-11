@@ -113,6 +113,34 @@ impl TestPageAllocator {
         );
     }
 
+    pub fn validate_aliased_mapped_pages<Arch: PageTableHal>(
+        &self,
+        arch: &Arch,
+        va: u64,
+        pa: u64,
+        size: u64,
+        attributes: MemoryAttributes,
+    ) {
+        log::info!("Validating pages from {:#x} to {:#x}", va, va + size);
+        let address = VirtualAddress::new(va);
+        let start_va = address;
+        let end_va = ((address + size).unwrap() - 1).unwrap();
+
+        // page index keep track of the global page being used from the memory.
+        // This needed for the recursive page walk logic
+        let mut page_index = 0;
+
+        self.validate_pages_internal::<Arch>(
+            arch,
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            &mut page_index,
+            attributes,
+            PhysicalAddress::new(pa),
+        );
+    }
+
     fn validate_pages_internal<Arch: PageTableHal>(
         &self,
         arch: &Arch,

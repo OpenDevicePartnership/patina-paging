@@ -793,6 +793,42 @@ impl<P: PageAllocator, Arch: PageTableHal> PageTableInternal<P, Arch> {
         )
     }
 
+    pub fn map_aliased_memory_region(
+        &mut self,
+        arch: &Arch,
+        va: u64,
+        pa: u64,
+        size: u64,
+        attributes: MemoryAttributes,
+    ) -> Result<(), PtError> {
+        let va = VirtualAddress::new(va);
+
+        self.validate_address_range(va, size)?;
+
+        let max_va = arch.get_max_va(self.paging_type)?;
+
+        // Overflow check, size is 0-based
+        let top_va = (va + (size - 1))?;
+        if top_va > max_va {
+            return Err(PtError::InvalidMemoryRange);
+        }
+
+        // We map until next alignment
+        let start_va = va;
+        let end_va = (va + (size - 1))?;
+
+        self.map_memory_region_internal(
+            arch,
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            self.base,
+            attributes,
+            self.get_state(arch),
+            PhysicalAddress::new(pa),
+        )
+    }
+
     pub fn unmap_memory_region(&mut self, arch: &Arch, address: u64, size: u64) -> Result<(), PtError> {
         let address = VirtualAddress::new(address);
 
