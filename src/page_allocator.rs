@@ -2,6 +2,7 @@ use crate::PtError;
 
 /// PageAllocator trait facilitates `allocate_page()` method for allocating new
 /// pages. This trait must be implemented by the consumer of this library.
+#[cfg_attr(feature = "mockall", mockall::automock)]
 pub trait PageAllocator {
     /// Allocate aligned pages from physical memory.
     ///

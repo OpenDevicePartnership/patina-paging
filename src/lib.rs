@@ -29,6 +29,8 @@
 //!   mutating a page table entry and re-enables it immediately afterward, so the entry can be updated
 //!   if the page tables are mapped read-only. This feature is only supported on X64. Enabling it for a
 //!   non-X64 target (e.g. aarch64) has no effect.
+//! - `mockall`: Exposes automocks for consumers writing
+//!   tests on targets with the Rust standard library.
 //!
 //! ## Examples
 //!
@@ -80,6 +82,9 @@
 
 #![cfg_attr(not(test), no_std)]
 #![cfg_attr(coverage, feature(coverage_attribute))]
+
+#[cfg(feature = "mockall")]
+extern crate std;
 
 pub mod aarch64;
 pub(crate) mod arch;
@@ -206,6 +211,7 @@ pub struct MappedRegion {
 
 /// PageTable trait is implemented by all concrete page table implementations
 /// and provides the interface for managing page tables.
+#[cfg_attr(feature = "mockall", mockall::automock)]
 pub trait PageTable {
     /// Function to identity map the designated memory region with the provided
     /// attributes. The requested memory region will be mapped with the specified
