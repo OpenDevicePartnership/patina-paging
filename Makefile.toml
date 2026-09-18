@@ -335,12 +335,15 @@ clear = true
 command = "cargo"
 args = ["deny", "check"]
 
+[tasks.all-preflight]
+private = true
+run_task = [{ name = ["fmt-check", "deny", "cspell"], parallel = true }]
+
 [tasks.all]
 description = "Run all tasks for PR readiness."
 env = { CARGO_INCREMENTAL = "0" }
-run_task = [
-    { name = ["fmt-check", "deny", "cspell"], parallel = true },
-    { name = [
+run_task = { name = [
+        "all-preflight",
         "clippy",
         "check-no-default-features",
         "build-x64",
@@ -348,5 +351,4 @@ run_task = [
         "coverage",
         "doc-test",
         "doc",
-    ] },
-]
+    ] }
