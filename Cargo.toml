@@ -1,6 +1,6 @@
 [package]
 name = "patina_paging"
-version = "11.0.6"
+version = "11.1.1"
 edition = "2024"
 license = "Apache-2.0"
 description = "Paging library for AArch64 & X64 architectures"
@@ -12,12 +12,13 @@ bitfield-struct = "0.13"
 bitflags = "2.6.0"
 log = { version = "^0.4", default-features = false }
 cfg-if = "1.0.0"
+mockall = { version = "0.15.0", optional = true }
 
 [dev-dependencies]
-serial_test = "3.5"
 
 [features]
 supervisor = []
+mockall = ["dep:mockall"]
 # All no_std features to test in CI
 ci_features = ["supervisor"]
 

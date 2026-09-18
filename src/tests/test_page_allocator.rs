@@ -6,6 +6,8 @@
 //!
 //! SPDX-License-Identifier: Apache-2.0
 //!
+
+#![allow(clippy::too_many_arguments)]
 use crate::{
     MemoryAttributes, PagingType, PtError,
     arch::{PageTableEntry, PageTableHal},
@@ -84,7 +86,13 @@ impl TestPageAllocator {
     //  TestPageAllocator                         Page Tables
     //       Memory
     //
-    pub fn validate_pages<Arch: PageTableHal>(&self, address: u64, size: u64, attributes: MemoryAttributes) {
+    pub fn validate_pages<Arch: PageTableHal>(
+        &self,
+        arch: &Arch,
+        address: u64,
+        size: u64,
+        attributes: MemoryAttributes,
+    ) {
         log::info!("Validating pages from {:#x} to {:#x}", address, address + size);
         let address = VirtualAddress::new(address);
         let start_va = address;
@@ -95,21 +103,53 @@ impl TestPageAllocator {
         let mut page_index = 0;
 
         self.validate_pages_internal::<Arch>(
+            arch,
             start_va,
             end_va,
             PageLevel::root_level(self.paging_type),
             &mut page_index,
             attributes,
+            start_va.into(),
+        );
+    }
+
+    pub fn validate_aliased_mapped_pages<Arch: PageTableHal>(
+        &self,
+        arch: &Arch,
+        va: u64,
+        pa: u64,
+        size: u64,
+        attributes: MemoryAttributes,
+    ) {
+        log::info!("Validating pages from {:#x} to {:#x}", va, va + size);
+        let address = VirtualAddress::new(va);
+        let start_va = address;
+        let end_va = ((address + size).unwrap() - 1).unwrap();
+
+        // page index keep track of the global page being used from the memory.
+        // This needed for the recursive page walk logic
+        let mut page_index = 0;
+
+        self.validate_pages_internal::<Arch>(
+            arch,
+            start_va,
+            end_va,
+            PageLevel::root_level(self.paging_type),
+            &mut page_index,
+            attributes,
+            PhysicalAddress::new(pa),
         );
     }
 
     fn validate_pages_internal<Arch: PageTableHal>(
         &self,
+        arch: &Arch,
         start_va: VirtualAddress,
         end_va: VirtualAddress,
         level: PageLevel,
         page_index: &mut u64,
         attributes: MemoryAttributes,
+        mut pa: PhysicalAddress,
     ) {
         log::info!("Validating pages from {start_va} to {end_va} level: {level:?} page_index: {page_index}");
         let start_index = start_va.get_index(level);
@@ -130,7 +170,7 @@ impl TestPageAllocator {
                 }
             };
             let leaf =
-                unsafe { self.validate_page_entry::<Arch>(page, index, va.into(), page_base, level, attributes) };
+                unsafe { self.validate_page_entry::<Arch>(arch, page, index, pa.into(), page_base, level, attributes) };
 
             // We only consume further pages from PageAllocator memory
             // for page tables higher than PT type
@@ -149,28 +189,34 @@ impl TestPageAllocator {
             if !leaf {
                 let next_level = level.next_level().unwrap();
                 self.validate_pages_internal::<Arch>(
+                    arch,
                     next_level_start_va,
                     next_level_end_va,
                     next_level,
                     page_index,
                     attributes,
+                    pa,
                 );
             }
 
-            va = va.get_next_va(level).unwrap();
+            let new_va = va.get_next_va(level).unwrap();
+            pa = (pa + u64::from((new_va - u64::from(va)).unwrap())).unwrap();
+            va = new_va;
         }
     }
 
     unsafe fn validate_page_entry<Arch: PageTableHal>(
         &self,
+        arch: &Arch,
         page_table_ptr: *const u64,
         index: u64,
-        virtual_address: u64,
+        physical_address: u64,
         next_page_table_address: u64,
         level: PageLevel,
         expected_attributes: MemoryAttributes,
     ) -> bool {
         let pte = get_entry::<Arch>(
+            arch,
             level,
             self.paging_type,
             PageTableStateWithAddress::NotSelfMapped(PhysicalAddress::new(page_table_ptr as u64)),
@@ -183,11 +229,11 @@ impl TestPageAllocator {
         let leaf = pte.points_to_pa(level);
 
         log::info!(
-            "Level: {level:?} PageBase: {page_base:#x}, virtual_address: {virtual_address:#x} next_pt {next_page_table_address:x} leaf: {leaf}",
+            "Level: {level:?} PageBase: {page_base:#x}, physical_address: {physical_address:#x} next_pt {next_page_table_address:x} leaf: {leaf}",
         );
 
         if leaf {
-            assert_eq!(page_base, virtual_address);
+            assert_eq!(page_base, physical_address);
             assert_eq!(attributes, expected_attributes);
         } else {
             assert_eq!(page_base, next_page_table_address);
