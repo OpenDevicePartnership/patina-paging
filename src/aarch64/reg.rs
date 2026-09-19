@@ -124,7 +124,7 @@ pub(crate) fn invalidate_tlb() {
                 asm!("tlbi alle2", "dsb nsh", "isb sy", options(nostack));
             }
             ExceptionLevel::EL1 => {
-                asm!("tlbi alle1", "dsb nsh", "isb sy", options(nostack));
+                asm!("tlbi vmalle1", "dsb nsh", "isb sy", options(nostack));
             }
         }
     }
