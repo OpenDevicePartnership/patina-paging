@@ -38,6 +38,19 @@ This is achieved using appropriate conditional compilation guards(3rd column):
 - `cargo make build-aarch64` builds for UEFI AArch64.
 - `cargo test` builds for the host target and runs the tests.
 
+Any arguments given after the task name are forwarded unchanged to the
+underlying `cargo` command, so the usual cargo flags work as expected:
+
+```shell
+cargo make check --features supervisor
+cargo make test --no-capture
+cargo make fmt --check
+```
+
+Note that `-p` *before* the task name selects the `cargo-make` profile
+(`development` or `release`), while `-p` after the task name is passed to
+`cargo` as the usual package selector.
+
 ## PR Readiness
 
 - `cargo make all`
